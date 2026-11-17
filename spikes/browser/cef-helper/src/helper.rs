@@ -166,19 +166,42 @@ fn run_inner(sandbox_info: *mut u8) -> ExitCode {
     }
 }
 
+/// Switches the browser process refuses to start with: they turn Chromium's sandbox off or weaken
+/// it (design 5.8), or open a debugging port any local process could drive (P32). A narrow deny
+/// list; the evidence for the sandbox is the per-process check, and a real implementation builds
+/// Chromium's command line from an allow list instead.
+const REFUSED_SWITCHES: &[&str] = &[
+    "no-sandbox",
+    "disable-setuid-sandbox",
+    "disable-namespace-sandbox",
+    "disable-seccomp-filter-sandbox",
+    "disable-gpu-sandbox",
+    "single-process",
+    "in-process-gpu",
+    "remote-debugging-port",
+    "remote-debugging-pipe",
+    "remote-debugging-address",
+];
+
+/// The switch name in any spelling Chromium accepts (`--name`, `-name`, and `/name` on
+/// Windows), without its `=value`.
+fn switch_name(arg: &str) -> Option<&str> {
+    let rest = arg
+        .strip_prefix("--")
+        .or_else(|| arg.strip_prefix('-'))
+        .or_else(|| arg.strip_prefix('/').filter(|_| cfg!(windows)))?;
+    rest.split('=').next()
+}
+
 fn run_browser_process(raw: &[String], args: &Args, sandbox_info: *mut u8) -> anyhow::Result<()> {
-    // P32: a remote-debugging switch would open a port any local process could drive.
-    if raw.iter().any(|a| {
-        a.starts_with("--remote-debugging-port") || a.starts_with("--remote-debugging-pipe")
+    if let Some(refused) = raw.iter().skip(1).find(|a| {
+        switch_name(a).is_some_and(|name| {
+            REFUSED_SWITCHES
+                .iter()
+                .any(|r| r.eq_ignore_ascii_case(name))
+        })
     }) {
-        anyhow::bail!("refusing to start with a remote-debugging switch");
-    }
-    // The design keeps Chromium's sandbox on; refuse the switches that turn it off.
-    if raw
-        .iter()
-        .any(|a| a == "--no-sandbox" || a == "--disable-setuid-sandbox")
-    {
-        anyhow::bail!("refusing to start with a switch that turns Chromium's sandbox off");
+        anyhow::bail!("refusing to start with {refused}: it weakens the sandbox or opens a port");
     }
     let profile =
         arg(raw, "--profile-dir").ok_or_else(|| anyhow::anyhow!("missing --profile-dir"))?;
