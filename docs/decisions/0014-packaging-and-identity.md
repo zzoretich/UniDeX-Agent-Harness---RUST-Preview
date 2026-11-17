@@ -18,8 +18,9 @@ disk on macOS) and may be a separate download. So the tool must allow extra bina
 4755 and post-install steps. Nothing of that is packaged now: the program is the repository's cookbook window (the
 example target `hello_window` of `udx-cookbook`).
 
-Evidence: CI run 44131744609 (workflow `spike-packaging`, the comparison; deleted at the milestone gate) and run
-44131744691 (`nightly`), both on commit c69532c, plus a second round recorded in the Evidence section. Tool facts come
+Evidence: round 1, commit c69532c: runs 44131744609 (`spike-packaging`, the comparison; deleted at the milestone gate)
+and 44131744691 (`nightly`). Round 2, commit bf7f040: runs 44154813495 (`spike-packaging`) and 44154813579 (`nightly`).
+Job ids are in the Evidence section. Tool facts come
 from each project's repository, documentation and crates.io page, read on 2026-11-17; "unverified" is said where a claim
 rests on a document or source reading and no run exercised it.
 
@@ -27,10 +28,10 @@ rests on a document or source reading and no run exercised it.
 
 | Option | macOS | Linux | Windows | Updates | Verdict |
 |---|---|---|---|---|---|
-| A. cargo-packager 0.11.8 (Apache-2.0 OR MIT; released 2025-11-27) | `.app` and `.dmg`: produced (run 44131744609, macOS job). Nested apps (`embeddedApps`), frameworks, signing and notarization are in the config and source (unverified by a run). | `.deb`: produced and installed on the runner. No maintainer scripts; a setuid file is installed as 0755 (measured). AppImage: failed without an icon (round 2 retries with one). `.tar.gz` plus PKGBUILD for pacman: produced; no plain tarball format. | NSIS `.exe` and WiX `.msi`: both produced. | Separate crate `cargo-packager-updater` 0.2.3, optional: minisign-signed, HTTPS endpoints, formats app, appimage, nsis, wix (no deb), no deltas. | Chosen. |
+| A. cargo-packager 0.11.8 (Apache-2.0 OR MIT; released 2025-11-27) | `.app` and `.dmg`: produced (run 44131744609, macOS job). Nested apps (`embeddedApps`), frameworks, signing and notarization are in the config and source (unverified by a run). | `.deb`: produced and installed on the runner. No maintainer scripts; a setuid file is installed as 0755 (measured). AppImage: failed without an icon, produced with one (12,163,576 bytes). `.tar.gz` plus PKGBUILD for pacman: produced; no plain tarball format. | NSIS `.exe` and WiX `.msi`: both produced. | Separate crate `cargo-packager-updater` 0.2.3, optional: minisign-signed, HTTPS endpoints, formats app, appimage, nsis, wix (no deb), no deltas. | Chosen. |
 | B. cargo-deb 3.8.0 (MIT; 2026-09-01), Linux `.deb` only | none | `.deb` with explicit modes and maintainer scripts: produced, 4755 kept, postinst ran on install (measured). | none | none (apt is the update channel) | Kept as the fallback for the Linux `.deb` when the browser's setuid helper arrives. |
-| C. Velopack vpk 1.2.161 (MIT; 2026-09-29) | `.app`, `.pkg`, portable zip; first run failed (the macOS image has no .NET 10 runtime); round 2 retries with it installed | AppImage only, 17.1 MB (measured). No `.deb`, no tarball. | `Setup.exe` per user, with its own launcher stub and `Update.exe` (documented; run in round 2) | Own system with delta packages and its own feed files. | Rejected: cannot make the required Linux formats, and the browser cannot ship in an AppImage (design 5.8). |
-| D. cargo-dist 0.34.0 (MIT OR Apache-2.0; 2026-11-02) | archives and shell/npm/homebrew installers; `.dmg` and `.app` are listed in its docs as future work | archives only | archives and an MSI through cargo-wix | its own receipt-based updater for the shell installers | Rejected: no `.dmg`, `.app` or `.deb`; packages Cargo binary targets only (the first round found "nothing to release" until the probe crate was marked `dist = true`). Round 2 records what it makes. |
+| C. Velopack vpk 1.2.161 (MIT; 2026-09-29) | `.app` in a portable zip, a `.pkg` installer and an update `nupkg`: produced unsigned (6.19 MB `.pkg`); needs a .NET 10 runtime that the macOS image lacks | AppImage only, 17.1 MB (measured). No `.deb`, no tarball. | `Setup.exe` (13.7 MB), portable zip and `nupkg` produced; installing it was not run | Own system with delta packages and its own feed files. | Rejected: cannot make the required Linux formats, and the browser cannot ship in an AppImage (design 5.8). |
+| D. cargo-dist 0.34.0 (MIT OR Apache-2.0; 2026-11-02) | archives and shell/npm/homebrew installers; `.dmg` and `.app` are listed in its docs as future work | archives only | archives and an MSI through cargo-wix | its own receipt-based updater for the shell installers | Rejected on its documentation: no `.dmg`, `.app` or `.deb`; packages Cargo binary targets only. The trial never produced an archive or MSI: after the probe crate was marked `dist = true` it stopped on the MSI installer's missing `authors` field on all three OSes (my probe's fault, not a tool limit), so its output is unverified. |
 | E. cargo-bundle 0.12.0, cargo-wix 0.3.9, cargo-generate-rpm 0.21.1 | `.app` only | `.deb` only (cargo-bundle) | MSI only | none | Not trialled: each covers one platform, which cargo-packager and cargo-deb already cover. |
 
 ### What each candidate answers for the browser requirements (decision 0012)
@@ -58,49 +59,87 @@ the maintainer's to confirm.
 
 ## Evidence
 
-Sizes are bytes as printed by the runs (`diag.sh` and `ls -l`); MB here is 10^6 bytes. Every package is unsigned.
+Sizes are bytes as printed by the runs (`diag.sh`, `ls -l`); MB is 10^6 bytes. Every package is unsigned. Jobs: round 1
+spike macOS 134210392294, Linux 134210392783, Windows 134210393055 (cancelled at the two-hour limit by a hung installer
+step), nightly Linux 134210450945, Windows 134210450827, macOS 134210450914 (failed in my inspection step). Round 2
+spike Linux 134292574002, Windows 134292574199, macOS 134308615307 (re-run, attempt 2); nightly decide 134292574357,
+Linux 134292740520, Windows 134292740333, macOS 134304382864 (attempt 2).
 
-| Platform | What | Size | Run and job |
+| Platform | What | Size | Job |
 |---|---|---|---|
-| macOS arm64 | staged program (Mach-O) | 8,838,832 | 44131744609, `spike packaging (macos)` 134210392294 |
-| macOS arm64 | `UniDeX Rust Preview_0.0.1_aarch64.dmg` (cargo-packager) | 3,221,292 | same job |
-| macOS arm64 | the `.app` inside: `Info.plist` 1,145 and the program only | 8,839,977 (sum of the two files) | same job |
-| Linux x64 | staged program (ELF, unstripped, default release profile) | 38,614,040 | 44131744609, 134210392783 |
-| Linux x64 | `.deb` (cargo-packager, gzip) | 12,169,866 | same job; also 44131744691, 134210450945 |
-| Linux x64 | `.deb` (cargo-deb) | 8,183,212 | 134210392783 |
-| Linux x64 | `.tar.gz` of program and LICENSE | 12,208,783 | 44131744691, 134210450945 |
-| Linux x64 | pacman `.tar.gz` (cargo-packager) | 12,169,242 | 134210392783 |
-| Linux x64 | AppImage (Velopack) and its `nupkg` | 17,107,448 and 16,580,740 | 134210392783 |
-| Windows x64 | staged program (PE, console subsystem) | 10,398,208 | 44131744609, 134210393055 |
-| Windows x64 | NSIS `unidex-rust-preview_0.0.1_x64-setup.exe` | 4,292,397 | same job; nightly 4,291,144 (134210450827) |
-| Windows x64 | WiX `.msi` | 4,452,352 | 134210393055 |
+| macOS arm64 | staged program (Mach-O) | 8,838,832 | 134308615307 |
+| macOS arm64 | `.dmg` (cargo-packager), nightly build | 3,217,473 | 134304382864 |
+| macOS arm64 | the `.app` inside: program, `Info.plist` 1,145, LICENSE 1,076 | 8,841,053 (sum) | 134308615307 |
+| macOS arm64 | Velopack `.pkg`, portable zip, `nupkg` | 6,194,092; 6,186,848; 6,396,786 | 134308615307 |
+| Linux x64 | staged program (ELF, unstripped, default release profile) | 38,614,040 | 134292574002 |
+| Linux x64 | `.deb` (cargo-packager, gzip), nightly build | 12,170,818 | 134292740520 |
+| Linux x64 | `.tar.gz` of program and LICENSE, nightly build | 12,208,803 | 134292740520 |
+| Linux x64 | `.deb` (cargo-deb, round 1) | 8,183,212 | 134210392783 |
+| Linux x64 | AppImage (cargo-packager, with icon) | 12,163,576 | 134292574002 |
+| Linux x64 | AppImage (Velopack) and its `nupkg` (round 1) | 17,107,448; 16,580,740 | 134210392783 |
+| Windows x64 | staged program (PE, console subsystem) | 10,398,208 | 134292574199 |
+| Windows x64 | NSIS `-setup.exe`, nightly build | 4,290,350 | 134292740333 |
+| Windows x64 | WiX `.msi` | 4,452,352 | 134292574199 |
+| Windows x64 | Velopack `Setup.exe`, portable zip, `nupkg` | 13,707,366; 6,192,234; 6,193,254 | 134292574199 |
 
-Run artifacts: `nightly` uploaded `unidex-rust-preview-nightly-unsigned-linux` (24,264,247 bytes, deb and tarball
-zipped) and `...-windows` (4,273,295 bytes); the macOS job failed after packaging (see "What went wrong").
+The three artifacts the nightly run 44154813579 attached (each kept 7 days, to 2026-11-24; zip sizes as GitHub reports
+them): `unidex-rust-preview-nightly-unsigned-macos`, 3,195,296 bytes, holding
+`unidex-rust-preview-0.0.1-nightly-unsigned-macos-arm64.dmg` (SHA-256 `3b6445698c07...bb57a`);
+`unidex-rust-preview-nightly-unsigned-linux`, 24,265,559 bytes, holding `...-linux-x86_64.deb` (SHA-256
+`fc4179f3a54f...ceb72b`) and `...-linux-x86_64.tar.gz` (SHA-256 `c56b3703c64e...a3cd`); and
+`unidex-rust-preview-nightly-unsigned-windows`, 4,272,957 bytes, holding `...-windows-x86_64-setup.exe` (SHA-256
+`ce76af09e53f...121e`). The `decide` job ran only because the event was a pull request; the schedule rule (skip when no
+commit in 25 hours) was not exercised.
+
+What each trial showed, read from the tool's own output:
+
+- cargo-packager, macOS: `.app` and `.dmg` built (the Finder-layout script ran on the runner). The mounted `.dmg`
+  holds the app and an `Applications` link. `codesign -dvvv` of the app: `Signature=adhoc`, flags
+  `adhoc,linker-signed`, `Info.plist=not bound`, `Sealed Resources=none`; `codesign --verify` and `spctl --assess`
+  both answer "code has no resources but signature indicates they must be present". So the unsigned app carries only
+  the linker's signature on its executable and its bundle fails strict verification; real signing replaces this.
+  `Info.plist` has the identifier, name, version 0.0.1 and `LSMinimumSystemVersion` 13.0; no icon.
+- cargo-packager, Linux: `.deb` installed with `apt-get install ./x.deb` and removed; `ldd` showed no missing
+  libraries; the LICENSE resource lands in `/usr/lib/unidex-rust-preview/`. The `deb.files` setuid probe: the 4755
+  source became `-rwxr-xr-x` in the `.deb`. No maintainer scripts exist in the format.
+- cargo-deb 3.8.0: `.deb` with `-rwsr-xr-x` kept, a `postinst` member, installed as `-rwsr-xr-x root:root`, and the
+  postinst printed its marker on install.
+- cargo-packager, Windows: NSIS and WiX built. The silent NSIS install (started with PowerShell `Start-Process`, with a
+  120-second limit) returned, installed `unidex-rust-preview.exe`, `LICENSE` and `uninstall.exe` under
+  `%LOCALAPPDATA%\UniDeX Rust Preview` (per user, no elevation), wrote an uninstall registry entry (name, version, publisher
+  "UniDeX contributors", install location) and the silent uninstall removed the folder. The same installer started
+  from a bash step in round 1 hung for two hours. The cause is not established (the PowerShell step in round 2 did not hang);
+  the step printed a failing exit only because my script mixed output into its return value, not because the
+  installer failed. The MSI lists the program and LICENSE in `app.cab`; it was not installed.
+- Velopack: macOS (after installing .NET 10 with `actions/setup-dotnet`) produced the `.app`, `.pkg`, portable zip and
+  `nupkg`, unsigned, with the warning "Package will not be signed or notarized"; the `.app` also carries its
+  `UpdateMac` binary (7.7 MB) and a version file. Windows produced `Setup.exe`, portable zip, `nupkg`, unsigned. Linux:
+  an AppImage only. Its `--version` flag does not exist (the "install" steps reported failure only because of that).
+  None of its installers was run.
+- cargo-dist: see the options table. It never reached its archives.
+
+The nightly Windows installer's listing shows the same files. The Windows program is built as a console-subsystem
+executable (the cookbook example), so a double-click would also open a console window; that is the example's property,
+not the packaging's.
 
 What the sizes show and do not show: every package is far under 40 MB, but the program is a one-window example with no
-application code, no assets and no icons, built with the default release profile (no stripping or link-time
-optimization), so the numbers measure the packaging format's overhead and a baseline, not the product against the
-target. The download target is to be re-measured with the real app and a tuned profile. The browser component is not
-included in any of them.
+application code, assets or icons, built with the default release profile (no stripping or link-time optimization), so
+the numbers measure the packaging formats' overhead and a baseline, not the product against the target (design section
+9 says under 40 MB, without the browser). Re-measure with the real app and a tuned profile. The browser component is
+included in none of them.
 
-### What went wrong in round 1 and what was learnt
+### What went wrong along the way
 
-- The macOS nightly package built (3.2 MB `.dmg`) but the inspection step failed: the `.dmg` carried a click-through
-  licence agreement (cargo-packager adds one when `licenseFile` is set, "Adding EULA resources"), and
-  `hdiutil attach` answered "attach canceled". The licence is now shipped as a resource instead and the step answers
-  the prompt.
-- The Windows trial hung for two hours: after packaging, the silent NSIS install (`setup.exe /S`, started from bash)
-  never returned; the log's last line names the orphaned installer process. Cause not yet established. Every
-  third-party tool and installer step now has its own `timeout-minutes`, and the install step waits with a limit and
-  reports the process list.
-- cargo-dist found nothing to release (the probe crate is `publish = false`); Velopack's `vpk` needs a .NET 10 runtime
-  that the macOS image lacks (it was present on Linux). Both are retried in round 2.
-- cargo-packager's AppImage failed ("Could not find a square icon"); retried with an icon.
+- Round 1 macOS nightly: my inspection step failed because the `.dmg` carried a click-through licence agreement
+  (cargo-packager adds one when `licenseFile` is set). Now the licence is a resource and the attach step answers a
+  prompt; round 2 is green.
+- Round 1 Windows: the hang described above; every installer and tool step now has its own `timeout-minutes`.
+- cargo-packager's AppImage needed an icon; its tooling (linuxdeploy, a "continuous" plugin release) is downloaded
+  with no hash check.
 - `ldd` of the Linux program lists only libxcb, libxkbcommon and libxkbcommon-x11 beyond libc and libgcc; fontconfig,
-  freetype, Wayland and Vulkan are not linked at load time. The `.deb`'s `Depends` line (libfontconfig1,
-  libfreetype6, libwayland-client0, libvulkan1 besides those) installed and ran `ldd` with no missing library on the
-  runner, which shows the list is sufficient for loading, not that it is minimal or that the window opens.
+  freetype, Wayland and Vulkan are not linked at load time. The `.deb`'s `Depends` line (those plus libfontconfig1,
+  libfreetype6, libwayland-client0, libvulkan1) installed with no missing library, which shows it sufficient for loading,
+  not minimal and not that the window opens.
 
 ## Consequences
 
@@ -119,7 +158,7 @@ included in any of them.
   (`windows.signCommand`), for example for a cloud signing service; for updates a minisign key pair
   (`CARGO_PACKAGER_SIGN_PRIVATE_KEY` and `..._PASSWORD`). The names are from cargo-packager's source and have not been
   exercised. Without them every build stays unsigned and is named so.
-- Linux formats: `.deb` and a tarball now; the `.deb` moves to cargo-deb when the setuid helper arrives (measured to
+- Linux formats: `.deb` and a plain tarball now; the `.deb` moves to cargo-deb when the setuid helper arrives (measured to
   work). cargo-packager's AppImage is unnecessary for the browser-less build until needed.
 - Future browser component: the macOS nested bundles and the Windows bootstrap arrangement are not exercised by any
   run here; cargo-packager's `embeddedApps` and replaceable NSIS template make them plausible, and Velopack's
@@ -173,24 +212,40 @@ paths). Debian package and program file name: `unidex-rust-preview`.
 
 ## What was not verified
 
-Round 2 fills or corrects this list.
+- Opening any package on real hardware, including the macOS package by hand (the maintainer's step, below) and
+  Gatekeeper's verdict on a downloaded copy. The app bundle is not validly signed (see Evidence), so macOS may call a
+  downloaded copy "damaged" rather than "unidentified"; this was not tried.
+- Whether the Linux or Windows program opens a window at all (the runners have no display for it); installs were
+  checked by file and library presence only.
+- Signing, notarization and the updater, and the secret names (read from cargo-packager's source, never exercised).
+- Nested macOS helper bundles, the Windows bootstrap arrangement, the setuid helper inside cargo-packager's `.deb`
+  (shown impossible) and the browser component's size in a package.
+- cargo-dist's output (its probe never got past the MSI configuration); installing Velopack's packages; installing
+  the WiX `.msi`.
+- The nightly schedule rule (skip when no commit in 25 hours): only the pull-request path ran.
+- The Linux program's performance, size after stripping, or any size against the 40 MB target.
 
-- Opening any package on real hardware; the macOS package opened by hand (the maintainer's step, below); Gatekeeper
-  behaviour of a downloaded copy.
-- Signing, notarization and the secret names above; the updater.
-- Nested macOS helper bundles, a Windows bootstrap arrangement, and the browser component's size in a package.
-- Velopack on macOS and Windows and cargo-dist's output, until round 2.
-- The silent NSIS install (the round-1 hang) and the WiX install.
+## What the maintainer must confirm or supply
+
+- Confirm or replace the bundle identifier and display name (proposed identity, above), and the publisher and Debian
+  `Maintainer` string "UniDeX contributors" (whether to add a project address), and the copyright line.
+- Nothing needs supplying today: no secret exists and no workflow references one. For signed builds later: a Developer
+  ID certificate and notarization credentials (macOS), a code-signing certificate or cloud signing service (Windows), an
+  update signing key if the cargo-packager updater is used (see Consequences).
+- Decide when to register a domain or create a project organization (identity options 2 and 3).
+- Do the macOS hand check below once.
 
 ## Maintainer's step: the macOS package by hand
 
-After a green `nightly` run: on the run's page download the artifact `unidex-rust-preview-nightly-unsigned-macos`,
-unzip it, and open the `.dmg`; drag the app to a scratch folder (not Applications). The package is unsigned, and a
-browser download is quarantined, so macOS will say the app cannot be opened because Apple cannot check it for malicious
-software; on current macOS, open System Settings, Privacy & Security, and choose "Open Anyway" for it (a right-click Open
-no longer works), or clear the flag with `xattr -dr com.apple.quarantine <the app>` in Terminal. A window titled
-"UniDeX cookbook" with a Count button should open. Afterwards drag the app to the Trash, eject the disk image, and delete
-the download. The app writes nothing outside its own window.
+After a green `nightly` run, open the run page, download the artifact `unidex-rust-preview-nightly-unsigned-macos`
+(about 3.2 MB), unzip it and open the `.dmg` inside; drag the app to a scratch folder, not Applications. The package is
+unsigned, and a browser download is quarantined, so macOS will refuse to open it, saying it cannot verify the app is free
+of malware or (because the bundle's signature is only the linker's) that it is damaged. If it offers a choice, open
+System Settings, Privacy & Security and choose "Open Anyway" (on current macOS a right-click Open no longer works). If
+it only says "damaged", run in Terminal on the copy: `xattr -dr com.apple.quarantine "<the app>"`, and if it still
+refuses, `codesign --force --deep --sign - "<the app>"` (a local ad hoc signature on your own copy). A window titled
+"UniDeX cookbook" with a Count button should open. Afterwards quit it, drag the app to the Trash, eject the disk image,
+delete the download, and tell me what macOS said: that is the one result the runners cannot give.
 
 ## Revisit when
 
