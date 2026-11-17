@@ -1,0 +1,34 @@
+[package]
+name = "spike-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The GPUI side: a window with a browser pane that draws frames arriving from a helper process
+# as an element, forwards pointer, wheel, key, text and input-method events to it, shows its
+# cursor and popups, and draws a GPUI overlay above the page.
+
+[[bin]]
+name = "spike-app"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+# `test-support` only for `Window::render_to_image`, which the --selfcheck run uses to read
+# back its own window and confirm the overlay is drawn above the frames. It does not change the
+# platform the app runs on.
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform = { workspace = true, features = ["test-support"] }
+image.workspace = true
+serde_json.workspace = true
+spike-protocol.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The process tree measurements (proc_pid_rusage, proc_listchildpids).
+libc.workspace = true
+# The input-method path: GPUI's own NSView, driven as an input method drives it.
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSString", "NSRange", "NSGeometry"] }
+raw-window-handle.workspace = true
