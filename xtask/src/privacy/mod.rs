@@ -124,9 +124,10 @@ impl Allow {
         f.path == ALLOW_FILE
             && !matches!(f.rule, RuleId::LocalTerm | RuleId::LocalFileTracked)
             && self.0.iter().any(|a| {
-                a.values
-                    .iter()
-                    .any(|v| value_matches(v, f) || value_matches(&toml_escaped(v), f))
+                a.rule == f.rule
+                    && a.values
+                        .iter()
+                        .any(|v| value_matches(v, f) || value_matches(&toml_escaped(v), f))
             })
     }
 }

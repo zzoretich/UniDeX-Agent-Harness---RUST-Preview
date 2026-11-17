@@ -845,3 +845,21 @@ fn a_local_term_in_the_allow_file_is_never_exempt() {
     git(repo.path(), &["commit", "-q", "--no-verify", "-m", "add"]);
     assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 1);
 }
+
+#[test]
+fn an_allow_file_value_exempts_only_its_own_rule_inside_the_allow_file() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("other.md", "Email", "\"/Users/jroe\""),
+    );
+    commit_all(repo.path(), "add files");
+    let (code, text) = run(repo.path(), &["privacy", "--all"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(
+        text.contains("privacy-allow.toml") && text.contains("HomePath"),
+        "{text}"
+    );
+}
