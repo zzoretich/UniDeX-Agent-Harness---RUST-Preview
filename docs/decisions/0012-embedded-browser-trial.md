@@ -1,13 +1,13 @@
 # 0012: Embedded browser trial
 
-Status: proposed (trial in progress)
+Status: accepted with open questions
 Date: 2026-11-17
 
 This is the record of M0 Task 12, the trial of the riskiest unknown in the project: whether Chromium can be embedded
 inside a GPUI window on macOS, Linux and Windows by rendering it off-screen in a helper process and drawing its frames as
-an element. Phase A (research, the trial code that needs no Chromium, and measurements with a stand-in frame source) is
-recorded here. Phase B (the CEF helper running, the hands-on measurements, CI on Linux and Windows) finishes it, and only
-then does the "Decision" section become a decision.
+an element. Phase A did the research and the trial code that needs no Chromium; phase B ran real Chromium on the
+development Mac, measured it, and built the helper on Linux and Windows in CI. The open questions are the CI results on
+Linux and Windows (the workflow had not run when this was written) and the items listed under "What does not work".
 
 ## Context
 
@@ -15,341 +15,315 @@ Decision 0004 embeds Chromium off-screen in a helper process, drawn as an elemen
 command palette) can sit above a page. Design section 5.8 adds a `BrowserView` trait, CEF as the first engine, pointer,
 keyboard, text entry, cursor and popup forwarding, pages driven over the Chrome DevTools Protocol, Chromium's own sandbox
 on everywhere, the component fetched on first use as a version-pinned, hash-checked download, and an external-window
-fallback per platform. Section 8 allows the OS web view on Windows. The threat model (4.9) requires a portless DevTools
-channel (P32) and a helper channel that is an inherited anonymous pipe plus shared memory, never a named socket (P53).
-GPUI is pinned to the `gpui-pre 0.3.12` snapshot (decision 0007), whose `surface()` element, the only way it draws
-external pixel buffers, is macOS-only.
+fallback per platform. Section 8 allows the OS web view on Windows and sets the platform tiers (macOS hands-on, Linux and
+Windows CI-verified). The threat model (4.9) requires a portless DevTools channel (P32) and a helper channel that is an
+inherited anonymous pipe plus shared memory, never a named socket (P53). GPUI is pinned to the `gpui-pre 0.3.12`
+snapshot (decision 0007), whose `surface()` element, the only way it draws external pixel buffers, is macOS-only and
+takes only NV12 buffers.
 
-The closest precedent, a crate by the widget kit's own maintainers that wraps CEF off-screen rendering for GPUI, is
-described by its authors as experimental and not good enough; they ship the system web view instead.
+The closest precedent, a crate by the widget kit's own maintainers that wraps CEF off-screen rendering for GPUI (`wef`,
+Apache-2.0), is described by its authors as experimental and not good enough; they ship the system web view instead. Its
+open issues: special keys did nothing on macOS, its init re-ran the program's `main` in a loop, video sites failed. No
+code was copied from it.
 
-Every fact below was checked on 2026-11-17 against the sources named, unless marked unverified.
+Facts below were checked on 2026-11-17 against the sources or runs named; "unverified" marks what only documentation or
+an unrun CI job supports.
 
 ## Options considered
 
 | Option | Trade-off |
 |---|---|
-| A. CEF off-screen in a helper process, CPU frames through shared memory, drawn as GPUI images (phase A's choice to try first) | Works with the pinned GPUI on all three platforms; every frame is copied and uploaded to the GPU on the app's UI thread. |
-| B. As A, but CEF's shared textures (IOSurface, DXGI handle, dmabuf) drawn directly | Fastest; needs GPUI changes on every platform (no external texture path on Linux or Windows; macOS surfaces take only NV12). |
+| A. CEF off-screen in a helper process, CPU frames through shared memory, drawn as GPUI images | Works with the pinned GPUI on all three platforms; each frame is copied twice on the CPU and uploaded to the GPU on the app's UI thread. Chosen. |
+| B. As A, but CEF's shared textures (IOSurface, DXGI handle, dmabuf) drawn directly | Removes the CPU copies and the upload; needs an external-texture element in GPUI on every platform (a fork of the pinned snapshot) and a handle channel between the processes. |
 | C. CEF as a native child view | Rejected in 0004: it sits above everything GPUI draws. |
-| D. Windows only: the OS web view (WebView2) behind the same trait | OS-patched Chromium that speaks DevTools without a port; can sit under app UI only through DirectComposition visual hosting, which needs a GPUI change. |
+| D. Windows only: the OS web view (WebView2) behind the same trait | OS-patched, nothing to download, DevTools without a port; under app-drawn UI only through DirectComposition visual hosting, which needs a GPUI change; as a windowed view it covers the overlays. |
 | E. An external browser window | The fallback per platform where embedding fails. |
 
-## Findings (phase A)
+## What was built
 
-### CEF bindings for Rust
+Everything is in `spikes/browser/`, a standalone cargo workspace outside the repository's (throwaway code; dependencies
+pinned exactly with their licences in `Cargo.toml`; CEF bindings `cef = "=156.6.0"`, Apache-2.0 OR MIT, for CEF 156.0.30,
+Chromium 156.0.8078.96).
 
-- **`cef` (the Tauri team's bindings)**, github.com/tauri-apps/cef-rs, crates `cef`, `cef-dll-sys`, `download-cef`,
-  `export-cef-dir`. Version 156.6.0+156.0.30, published 2026-11-16, which targets CEF 156.0.30 (Chromium 156.0.8078.96).
-  Licence Apache-2.0 OR MIT. Actively maintained: releases track CEF stable within days (156.0.0 on 2026-10-23 to
-  156.6.0), about 0.2 million downloads in 90 days, 18 open issues. Targets: x86_64 and ARM64 on Linux, macOS and
-  Windows. Bindings are pre-generated per target, so no bindgen at build time.
-- **How CEF is obtained (verified in the published `cef-dll-sys` build script).** Building `cef-dll-sys` without the
-  `dox` feature downloads `https://cef-builds.spotifycdn.com/index.json` (10.7 MB), then the "minimal" archive for the
-  target and version, checks its SHA-1 against that index, extracts it, and builds CEF's C++ wrapper
-  (`libcef_dll_wrapper`) with CMake and Ninja. Where: `OUT_DIR` (inside the build folder) by default; `CEF_PATH/<cef
-  version>/` if `CEF_PATH` is set to a folder that does not hold an extracted copy; nothing if it does. An archive already
-  present with the right SHA-1 is not downloaded again. `NIX_CEF_BINARY` and `FLATPAK` are other sources.
-  `CEF_DOWNLOAD_URL` changes the host. With the `dox` feature the build script does nothing, so code can be
-  type-checked without CEF: the trial's CEF helper type-checks this way (phase A ran it; it downloaded nothing).
-- **Off-screen rendering.** `OnPaint` (a BGRA buffer with dirty rectangles, any platform) and `OnAcceleratedPaint`
-  (a shared texture: a D3D11 shared `HANDLE` on Windows, an `IOSurface` on macOS, dmabuf planes on Linux) are both bound.
-  CEF's header says the shared texture is valid only during the callback and must be copied into a texture the client
-  owns. The header comment on `shared_texture_enabled` still says "only supported on Windows (D3D11)" while the
-  `OnAcceleratedPaint` text covers all three; the bindings' `accelerated_osr` feature imports all three into `wgpu`
-  textures. Shared textures on macOS and Linux are therefore claimed, not verified here. Windowless browsers always use
-  CEF's Alloy runtime style (header text).
-- **What an application ships** (bindings' bundling code and CEF documentation): macOS, an app bundle with
-  `Contents/Frameworks/Chromium Embedded Framework.framework` and five helper bundles named `<name> Helper.app`,
-  `<name> Helper (GPU).app`, `(Renderer)`, `(Plugin)`, `(Alerts)`, each `LSUIElement`; the sub-process sandbox comes from
-  `libcef_sandbox.dylib` inside the framework, loaded by each helper at the top of `main` (M138 and later). Linux,
-  `libcef.so` and its resources (`*.pak`, `icudtl.dat`, V8 snapshots, `locales/`, SwiftShader and ANGLE libraries) next
-  to the executable, plus `chrome-sandbox`, which must be owned by root with the setuid bit to be used. Windows,
-  `libcef.dll` and resources next to the executable; since M138 the sandbox needs the client built as a DLL and started
-  by CEF's `bootstrap.exe` (renamed to the client's name), which the bindings' bundler supports.
-- **Other bindings.** `tauri-runtime-cef` (Tauri's CEF runtime, alpha, built on `cef`); `bevy_cef` (off-screen CEF into
-  Bevy textures, CEF in the game's own process); `wef` (the precedent below). None runs CEF in a separate process the
-  way this design does.
+- `protocol/`: the `BrowserView` trait (`view.rs`); JSON-line messages on the helper's inherited stdin and stdout with a
+  16 MiB line limit (`wire.rs`); three shared-memory frame slots in one region the app creates and the helper inherits,
+  never named (`shm.rs`: a POSIX object unlinked on creation and passed as descriptor 3, or an inheritable unnamed
+  mapping on Windows), frame dimensions checked before any pixel is touched; `HelperBrowser` (`helper.rs`), which spawns
+  the helper and keeps the UI thread off the pipes with a reader and a writer thread; the process tree with each process's
+  sandbox state (`tree.rs`); `spike-smoke`, a headless check of any helper.
+- `cef-helper/`: CEF's browser process with its own `NSApplication` subclass on macOS (`mac.rs`) and CEF's own message
+  loop, one visible windowless browser plus optional hidden tabs, `OnPaint` into the slots, input mapped onto CEF's
+  off-screen calls with explicit key codes (`keys.rs`), DevTools relayed with `SendDevToolsMessage`, a re-launch guard
+  that runs before anything else (`guard.rs`), refusal and report of popups, downloads, file choosers, permission
+  prompts and page dialogs, and reload after a renderer crash (`helper.rs`). On macOS the sub-processes run from five
+  helper bundles (`bundle-macos.sh`) and enter Chromium's sandbox through `libcef_sandbox.dylib` first. On Windows the
+  same code is a DLL (`cef-helper-win/`, exporting `RunConsoleMain`) started by CEF's `bootstrapc.exe` renamed to
+  `spike-cef-helper.exe`, the arrangement Chromium's Windows sandbox needs since CEF M138.
+- `app/`: the GPUI window. A canvas element draws the newest frame with `paint_image` and drops the previous image; the
+  pane forwards pointer, wheel, key, text and input-method events; cursors and the `<select>` popup come from the helper;
+  a stand-in permission card is drawn above the page. Scripted scenarios (`script.rs`) drive input through GPUI's own
+  dispatch, and input-method compositions through GPUI's macOS `NSTextInputClient` view the way an input method calls it
+  (`mac_ime.rs`); results are read back from the page with DevTools.
+- `pages/`: local test pages (a form at fixed positions, a long page, an animation, a content-heavy page with 21,012 DOM
+  nodes and 300 generated images).
+- `unpack-cef.sh`, `build-cef-macos.sh`, `measure-macos.sh`, `ci-while-holding.sh`, and the temporary workflow
+  `.github/workflows/spike-browser.yml`.
 
-### The precedent: `wef`
+The CEF distribution for macOS (`cef_binary_156.0.30+g6028375+chromium-156.0.8078.96_macosarm64_minimal.tar.bz2`,
+134,874,408 bytes) was downloaded once to the development machine with the maintainer's agreement, its SHA-256 and SHA-1
+checked before unpacking, and unpacked by hand into the build folder in the layout the bindings expect, so the bindings'
+build script fetched nothing. CMake and Ninja were installed for the bindings' C++ wrapper. CI downloads each platform's
+archive on the runner, checks a pinned SHA-256 and unpacks it the same way.
 
-github.com/longbridge/wef (Apache-2.0), extracted from the widget kit in 2025-09, last pushed 2026-01-01. What its own
-repository says went wrong:
+## Results on macOS (hands-on, through the programs' own instrumentation)
 
-- Its README marks it experimental and not good enough, citing app size (the CEF framework added about 1 GB) and the
-  development experience; its authors ship the system web view (through Wry) in their desktop app.
-- CEF runs inside the app's process, pumped from GPUI's loop through a CEF external message pump written per platform
-  in C++, and the same executable serves as CEF's sub-process.
-- Open issues: special keys (Enter, Backspace, Shift) do nothing on macOS (#14); calling its init with default settings
-  restarts the program's `main` over and over until the machine falls over (#9, the classic single-executable sub-process
-  re-entry); video sites fail with "no supported streams" (#2: CEF's published builds carry no proprietary codecs).
-- Its frame path is the one option A uses: a new GPUI `RenderImage` per `OnPaint`, the previous one dropped from the
-  atlas.
+Machine: an Apple silicon desktop (10 cores) with 16 GB of memory, macOS 26.6, release builds, under ordinary desktop
+load. Most runs on a 4K panel at scale 2 and 60 Hz with a 1280 x 801 logical pane (2560 x 1602 device pixels); some on a
+2560 x 1440 panel at scale 1 and 100 Hz. Every run used a fresh profile in the build folder. Commands are in
+`spikes/browser/measure-macos.sh`; numbers are medians over 3 runs with the range in brackets unless stated.
 
-What this design does differently: CEF in its own process (no external pump, no app-object conflict, no sub-process
-re-entry in the app), explicit key-code mapping (`spikes/browser/cef-helper/src/keys.rs`), and the component fetched on
-first use, so the installer does not grow. The codec gap stays: a CEF build with H.264 and AAC means building Chromium
-with proprietary codecs, which brings patent licensing.
+### It works: real Chromium in the window, with input and an overlay
 
-### macOS: CEF's application object and GPUI's
+`spike-app --helper cef --page form --scenario input`: 34 of 34 checks passed at scale 2 and again at scale 1.
 
-- CEF requires `NSApp` to be an `NSApplication` subclass implementing `CefAppProtocol` (`isHandlingSendEvent` and
-  `setHandlingSendEvent:`, and `sendEvent:` setting the flag) before it initializes (bindings' `application_mac.rs`,
-  their `cefsimple` example).
-- GPUI registers its own `GPUIApplication` subclass at load time, with no such methods (`gpui-pre-macos 0.3.12`,
-  `platform.rs`). Running CEF in the app's process would mean adding methods to GPUI's class at run time and pumping
-  CEF from GPUI's loop.
-- A helper process that owns CEF entirely avoids both: it installs its own subclass (`cef-helper/src/mac.rs`, activation
-  policy "prohibited", so no Dock icon or menu bar) and runs CEF's own loop (`CefRunMessageLoop`). The thread reading the
-  app's messages posts each one to CEF's UI thread (`CefPostTask`). This compiles against the bindings; that it runs is
-  phase B.
+- Frames arrive in device pixels; the page reports `devicePixelRatio` 2; a 1-device-pixel checkerboard alternates in the
+  frame and in GPUI's readback of the window (sharp at scale 2).
+- The stand-in permission card reads back above the page; over the animation page, two readbacks half a second apart
+  showed the page changing under the card (3 of 3 runs).
+- Cursor shapes from the page (hand, I-beam, arrow); click focus; typing; Backspace; arrows; Tab; Enter; Command-A,
+  Command-C and Command-V within the page (performed by the helper on the focused frame, because Chromium leaves those
+  shortcuts to the application's menu on macOS).
+- Input methods: Japanese and Chinese compositions, committed, cancelled and kept with `unmarkText`, with the page seeing
+  `compositionstart`, `compositionupdate` and `compositionend`; the engine's character bounds reach GPUI's
+  `firstRectForCharacterRange`. Exercised from GPUI's view inward; not exercised: a real input source, the candidate
+  window, and keys passing through an active input method.
+- Wheel scrolling with the right sign; the `<select>` popup through CEF's off-screen popup path, painted by the app and
+  driven by keyboard; focus out and back in; pane resize; DevTools navigate and evaluate without a port; a renderer crash
+  recovered by reload with frames resuming.
+- Clean start and shutdown: Chromium's sub-processes were gone within 0.4 s of the app's exit in every run (about 45
+  runs), and when the app aborted the helper saw its pipe close and exited cleanly. The re-launch guard never had to act.
 
-### Frame transport, and what this GPUI snapshot can draw
+### Frames, CPU and latency
 
-Read from the pinned sources in the cargo registry:
+| Scenario | Painted fps | Frame interval p50 / p95 / p99 ms | `paint_image` mean ms | UI thread per window frame p50 / p95 ms | App CPU % | Chromium processes CPU % |
+|---|---|---|---|---|---|---|
+| Steady wheel scrolling of a long local page, scale 2, 60 Hz (page's own rAF 60.1) | 59.5 (54.6-59.8) | 16.7 / 17.5 (17.3-33.3) / 19.1 (18.8-33.7) | 2.21 (2.19-3.05) | 2.54 / 3.07 | 25.0 (23.1-33.2) | 29.4 (27.7-33.6) |
+| Animation page, scale 2, 60 Hz (page rAF 60.0) | 60.0 (59.9-60.0) | 16.7 / 17.1 / 17.7 | 2.48 (2.26-2.63) | 2.60 / 3.45 | 26.0 (24.8-26.8) | 30.2 (30.1-32.4) |
+| Scrolling a public documentation page, scale 2 | 59.5 (56.1-59.9) | 16.7 / 17.4 (17.4-33.4) / 17.9 | 2.81 | 3.15 / 3.75 | 29.0 | 41.1 |
+| Scrolling, scale 1, 100 Hz display, engine at 60 fps | 59.9 | 19.9 / 20.5 / 20.9 | 1.32 | 1.73 / 2.22 | 23.2 | 31.9 |
+| Animation, scale 1, 100 Hz, engine at 100 fps (page rAF 100.0) | 96.8 (95.8-99.8) | 10.0 / 10.8 / 20.4 | 1.23 | 1.57 / 2.22 | 30.6 | 50.9 |
+| Idle, a static page, 15 s | 0 frames, 0 to 2 window redraws | - | - | - | 0.1 | 1.0 |
 
-- **`surface()` is macOS-only, and NV12-only.** The element exists only on macOS and iOS; the Metal renderer accepts only
-  `CVPixelBuffer`s in `kCVPixelFormatType_420YpCbCr8BiPlanarFullRange` (it was built for screen-share video). CEF's
-  textures are BGRA, so drawing them this way needs a GPU conversion to 4:2:0, which blurs coloured text, or a GPUI
-  change. On Windows `draw_surfaces` is an empty function; on Linux the `wgpu` renderer skips surface batches.
-- **The path that works everywhere: a `RenderImage` per frame.** `window.paint_image` takes an `Arc<RenderImage>` (BGRA
-  bytes). The atlas caches by image id, so each new frame is a new image: one upload into the sprite atlas (Metal
-  `replaceRegion`, D3D11 `UpdateSubresource`, `wgpu` `write_texture` after one more copy). A frame wider or taller than
-  1024 pixels gets an atlas texture of its own, so each frame also allocates a texture, and the previous frame's image
-  must be dropped with `window.drop_image` or the atlas grows.
-- **Conclusion: without changing GPUI, Linux and Windows have exactly one frame path, the CPU one.** Option B needs an
-  external-texture element in GPUI's three renderers, a fork of the pinned snapshot (decision 0007).
-- Transport options for B, for later: macOS `IOSurface` (cross-process by mach port, which needs a mach channel, not a
-  pipe; global surface ids are deprecated and readable by any process); Windows DXGI NT handle (duplicated into the app,
-  opened with `OpenSharedResource1`); Linux dmabuf file descriptors (passed over a socket pair, imported with Vulkan
-  external memory).
+- Per process while scrolling at scale 2: CEF's browser process 15 %, the GPU process 10 %, renderers 3 %, network and
+  storage services 0.1 %. At idle: 0.4 %, 0.4 %, 0.01 % and 0.16 %. An idle page causes no periodic work in the app:
+  no frames arrive and the window is not redrawn.
+- Frames painted below 60 come from clock phase, not load: CEF paints on its own 60 Hz timer and the app on the
+  display's, so sometimes two frames land in one refresh and one is replaced unpainted (one scroll run: 601 received,
+  547 painted). On the scale-2 runs the painted rate never fell below 54 fps.
+- The engine can run faster than 60: at `windowless_frame_rate` 100 the animation reached 96 to 100 fps on the 100 Hz
+  display. Wheel scrolling stayed at 60 fps there (not explained).
+- Key to frame (20 keys a run into a caret-less field, 3 runs, no misses): to the frame reaching the app p50 8.3 ms
+  (7.2-14.2), p95 17.5 ms; to `paint_image` p50 22.0 ms (19.6-23.2), p95 38.0 ms (25.9-39.2), max 40.5 ms. Presentation
+  adds up to one display frame; the OS's own key delivery is not included.
+- Start-up, spawn to first frame (warm file cache): helper ready 175 to 220 ms, first frame 300 to 370 ms for a blank or
+  simple page, painted 10 to 20 ms later; 2.2 to 3.7 s for the heavy page. The first runs after a build took up to 2.6 s
+  to the browser and 2.8 s to the first frame (cold cache, observed, not controlled).
+- Frame transport per frame at 2560 x 1602 (16.4 MB): a GPU-to-CPU readback inside Chromium (not measured), the
+  helper's copy into shared memory 1.7 to 2.5 ms, the app's copy out on its reader thread 0.8 to 1.05 ms, and the upload
+  into GPUI's atlas inside `paint_image` 2.2 ms on the UI thread. At 1280 x 801: 0.6 to 0.9, 0.35 and 1.3 ms.
 
-### Input forwarding
+### Memory (footprint, after every tab loaded, 3 runs)
 
-| What | CEF (off-screen) | GPUI side |
-|---|---|---|
-| Pointer | `SendMouseMoveEvent` (with a leave flag), `SendMouseClickEvent` (button, up/down, click count) | `on_mouse_move`, `on_any_mouse_down`, `on_mouse_up`; positions made pane-relative |
-| Wheel | `SendMouseWheelEvent` in pixels | `on_scroll`: `ScrollDelta::Pixels` or `Lines` (a line is about 40 pixels); sign checked by hand in phase B |
-| Keys | `SendKeyEvent` `RAWKEYDOWN`, `KEYUP`, `CHAR`, with a Windows virtual-key code, the macOS native code and the modifiers | `on_key_down` and `on_key_up` give a key name and the character; names mapped explicitly |
-| Text | `CHAR` events, or `ImeCommitText` inside a composition | the input handler's `replace_text_in_range` (registered with `window.handle_input` in paint) |
-| Input methods | `ImeSetComposition`, `ImeFinishComposingText`, `ImeCancelComposition`; `OnImeCompositionRangeChanged` gives character bounds | `replace_and_mark_text_in_range`, `unmark_text`; `bounds_for_range` returns the engine's character bounds so the candidate window follows |
-| Cursor | `OnCursorChange` (display handler) | `window.set_cursor_style` on the pane's hitbox; GPUI has no custom-image cursors, so those fall back to an arrow |
-| Popups (`<select>`) | `OnPopupShow`, `OnPopupSize`, and `OnPaint` with `PET_POPUP` | painted as a second image at the popup's rectangle |
-| Focus | `SetFocus` | `on_focus` and `on_blur` subscriptions |
-| Scale | `GetScreenInfo` (`device_scale_factor`), `NotifyScreenInfoChanged`, `WasResized`, `GetViewRect` in logical pixels | `window.scale_factor()`, the pane's bounds in prepaint |
+| | Chromium processes total | Browser process | GPU process | Renderers | Network and storage | App |
+|---|---|---|---|---|---|---|
+| 1 blank tab | 265 MB (264-268) | 70 | 91 | 58 (the tab and a spare) | 46 | 177 |
+| 1 content-heavy local tab | 793 MB (653-810) | 84 | 174 | 509 (349-509) | 44 | 176 |
+| 3 content-heavy tabs (1 visible) | 1,473 MB (1,331-1,476) | 111 | 215 | 1,103 (4 processes) | 44 | 177 |
+| 1 public documentation page (1 run) | 362 MB | 69 | 151 | 93 | 49 | 240 |
+| While scrolling at scale 2 | 506 MB | 72 | 294 | 93 | 46 | 258 |
 
-Found with the stand-in (each fixed in the trial code):
+The app's footprint rises from about 124 MB idle to about 258 MB while frames stream at scale 2 (GPUI's atlas textures).
+A `ps` and `footprint` cross-check agreed with the app's own figures.
 
-- The pane's hitbox must be inserted in prepaint, like every element's. Inserted in paint, it lands above the overlay's
-  hitbox, so the page kept getting pointer moves under the overlay.
-- GPUI's hover state turns off while the user types, so it cannot stand for "the pointer left the page". The trial sends
-  `PointerLeave` when its hitbox stops being hovered after a pointer move.
-- `window.dispatch_keystroke` delivers a key-down to the element and then the character through the input handler: the
-  key-down plus character pair CEF's `RAWKEYDOWN` plus `CHAR` model expects.
-- The input handler cannot return the page's text (`text_for_range` is `None`); CEF reports only the selected text.
-  Input methods that need surrounding text (reconversion) may degrade. Unverified until phase B.
+### Size of the component (macOS arm64)
 
-### DevTools Protocol
+What the app would ship: the helper's bundle with the framework and the five helper bundles. 342.5 MB on disk as built
+(the framework binary alone 238 MB); 288.8 MB with only the English locale and stripped helper binaries. Compressed as
+built: xz 103.0 MB, zip 150.8 MB, zstd -19 116.9 MB; trimmed: xz 95.0 MB, zip 137.2 MB. The Linux and Windows archives
+are 333 MB and 175 MB compressed as published; their unpacked sizes are printed by CI (pending).
 
-CEF's `SendDevToolsMessage`, `ExecuteDevToolsMethod` and `AddDevToolsMessageObserver` work without a DevTools front-end
-or a remote-debugging session (CEF header text). The helper relays the app's calls through them over its own pipe, so no
-port is opened (P32); it also refuses to start with a remote-debugging switch. A remote-debugging port is a TCP listener
-any local process can reach; Chromium's `--remote-debugging-pipe` would also work without a port, but CEF's own entry
-point needs no extra channel at all. The bindings' generated documentation says "function" where the protocol says
-"method"; the helper sends `method` (to confirm in phase B).
+### The shared-texture path on macOS
 
-### Windows: the OS web view
+Partly tried. CEF 156 on macOS does deliver `OnAcceleratedPaint` frames (BGRA, an IOSurface, about 60 a second), although
+its macOS header still says Windows only. Drawing them is not reachable without changing GPUI: GPUI's surface element
+accepts only NV12 pixel buffers (a 4:2:0 conversion would blur coloured text), and the IOSurface lives in the helper
+process, so it would also need a Mach-port channel next to the pipe. What it would take: BGRA support in GPUI's Metal
+surface path (a format branch and a shader), an IOSurface hand-off by Mach port, and a fork of the pinned snapshot.
 
-WebView2 (Microsoft Learn, read 2026-11-17): it speaks the DevTools Protocol in-process through
-`ICoreWebView2::CallDevToolsProtocolMethod` and `ICoreWebView2DevToolsProtocolEventReceiver`, no port. It has three
-hosting modes: windowed (a child window, which sits above everything GPUI draws, like option C), window-to-visual (still
-hosted in a window), and visual hosting (`CoreWebView2CompositionController`: the web view renders into a DirectComposition
-or `Windows.UI.Composition` visual and the app forwards pointer input). GPUI's Windows renderer already draws through
-DirectComposition (a premultiplied-alpha swap chain in a composition visual, `gpui-pre-windows`, `directx_renderer.rs`),
-but keeps its device and visual private, so placing a web-view visual below GPUI's and leaving a transparent hole needs a
-GPUI change. WebView2 has no off-screen frame stream (its preview capture produces single PNG or JPEG images).
-Provisional: WebView2 cannot go under app-drawn UI in this snapshot without a GPUI change; as a windowed view it is a
-better fallback than an external window, keeping the browser in the app but without overlays.
+## Results on Linux and Windows (CI only; pending the first run)
 
-### Linux: Chromium's sandbox by package format
+The workflow builds the real helper on all three runners with CEF downloaded and checked on the runner, then runs a
+headless smoke check: the helper starts off-screen, loads a page, produces at least one frame into the shared-memory
+transport, answers a DevTools evaluate, reports each sub-process's sandbox state, and exits by itself with success; while
+it runs, listening TCP sockets are listed (P32).
 
-Chromium's first layer is a namespace sandbox (unprivileged user namespaces) or the setuid helper (`chrome-sandbox`,
-owned by root, mode 4755); the second is seccomp-bpf (Chromium `sandbox/linux/README.md`). Ubuntu restricts
-unprivileged user namespaces through AppArmor since 23.10, on by default from 24.04; an application gets them back
-through an AppArmor profile with a `userns` rule (Chrome's own package ships one for its install path) or uses the
-setuid helper (Chromium `docs/security/apparmor-userns-restrictions.md`).
+- Linux: under a virtual display, a tarball-style run (no setuid helper; on Ubuntu 24.04 and later it is expected to meet
+  the AppArmor restriction on user namespaces and fail, recorded as a finding) and an installed `.deb` with
+  `chrome-sandbox` owned by root with the setuid bit, which must show every renderer, GPU and utility process with a
+  seccomp filter. Unverified until the run.
+- Windows: the bootstrap arrangement (CEF's `bootstrapc.exe` loading the helper DLL). The helper logs whether the
+  bootstrap handed it sandbox information; the processes' sandbox state is not read on Windows, so a pass shows the
+  arrangement starts, not that every sub-process is sandboxed. Unverified until the run.
+- Not exercisable in CI on either: frame pacing, input, input methods and the overlay (shared runners have no GPU and no
+  person), which are the same code as on macOS and are judged from there.
 
-- `.deb`: can install `chrome-sandbox` owned by root with the setuid bit, and an AppArmor profile, so the sandbox works.
-  CI checks this in phase B (an installed `.deb`, then the renderer's seccomp mode and namespaces).
-- Tarball: unpacked as the user, so no setuid helper, and on Ubuntu 24.04 and later no user namespaces either: no usable
-  sandbox. The design forbids turning it off, so the tarball cannot carry the browser there unless the user runs a
-  privileged setup step. CI records the failure mode in phase B.
-- AppImage: mounted `nosuid` through FUSE and blocked from user namespaces on Ubuntu, the known trouble the design names.
-  Flatpak needs Flatpak's own sandbox through a shim (zypak); Snap gets a generated AppArmor profile that allows user
-  namespaces. Both community reports, unverified here.
+### Windows: the OS web view, from documentation
 
-## Stand-in measurements (phase A, macOS)
-
-The trial code in `spikes/browser` (a standalone workspace) is complete except for running CEF:
-
-- `protocol`: the `BrowserView` trait; JSON-line messages on the helper's inherited stdin and stdout; three
-  shared-memory frame slots in one region the app creates and the helper inherits (Unix: a POSIX object unlinked as soon
-  as it is open, passed as descriptor 3; Windows: an inheritable unnamed file mapping); `HelperBrowser`, which spawns a
-  helper, copies frames out and releases slots on a reader thread, and never touches the UI thread; `spike-smoke`, a
-  headless check of any helper.
-- `standin`: a helper with no CEF that paints a moving test pattern (scrolling stripes, a moving square, the pointer as
-  it saw it, the typed text, a green corner marker) into the slots at 60 frames a second, logs the input it receives,
-  reports cursor changes, composition bounds and a popup, and echoes the two DevTools calls, labelled as a stand-in.
-- `app`: the GPUI window. A canvas element draws each frame with `paint_image` and drops the previous one; input is
-  forwarded as in the table above; an occluding overlay card is drawn above the page. `--script` drives pointer, click,
-  typing, a composition, a wheel step and a click on the overlay through GPUI's own event dispatch; `--selfcheck` reads
-  the window back with GPUI's `render_to_image` and checks two pixels.
-- `cef-helper`: the CEF helper described above, behind an optional feature; type-checked with `--features dox`.
-
-Machine: Apple M4, 16 GB, macOS 26.6.2, displays at 60 Hz. Release build. Commands, from `spikes/browser`:
-`cargo build --release`, then `target/release/spike-app --seconds 15 --selfcheck --script --demo-popup` with
-`--display 1` (a scale-2 display) or `--display 0` (scale 1). Figures are the medians of the per-second lines after the
-first two seconds (13 seconds per run); CPU is each process's own user plus system time over wall time, in percent of
-one core, read with `getrusage` and cross-checked once with `ps` (34 % and 4.2 % against 33 % and 4 % logged).
-
-| | 1280 x 800 logical at scale 2 (2560 x 1602 device pixels) | 1280 x 800 at scale 1 |
-|---|---|---|
-| Frames painted per second (helper sends 60) | 61 (59 to 63), none superseded, none skipped | 63 (61 to 63), none superseded |
-| `paint_image` on the UI thread, average (worst second's maximum) | 3.9 ms (7.1 ms) | 1.5 ms (2.5 ms) |
-| Copy out of shared memory, reader thread | 1.1 ms | 0.35 ms |
-| Helper painted to app painted, average (maximum) | 17 ms (24 ms) | 7.4 ms (12.6 ms) |
-| App CPU | 37 % | 23 % |
-| Stand-in CPU (painting the pattern) | 6 % | 2.5 % |
-| App memory, footprint (resident) | 310 MB (233 MB) | 126 MB (104 MB) |
-
-At one frame a second (`--fps 1`, scale 2) the app used 1.4 % CPU, and a single cold frame's `paint_image` took 5 to
-7 ms. The "painted" counts slightly exceed 60 because each counting window is a little longer than one second.
-
-Overlay and input, from the program's own logs: the self-check read the overlay's swatch as magenta (255, 0, 255) and the
-page's corner marker as green (0, 255, 0) at both scales, so GPUI draws the overlay above the frames and the frames reach
-the window. The script's pointer moves came back as cursor changes from the helper; the click focused the pane and
-reached the page; typed keys arrived as key-down plus text; the composition's character bounds came back and placed the
-candidate rectangle; the click on the overlay did not reach the page, and moving onto it sent `PointerLeave`.
-`spike-smoke` against the stand-in: 30 frames of the right size with the marker intact, both DevTools answers.
-
-What this shows: with the pinned GPUI, externally produced frames reach the screen at the display's 60 Hz with headroom
-at a typical pane size, and app UI draws above them. The cost is real: about 4 ms of the UI thread per full 2560 x 1600
-frame. At 120 Hz (an 8.3 ms budget) or a full-screen pane on a large high-resolution display, a stream of full-frame
-updates would take half the budget or more. CEF repaints only on change and reports dirty rectangles, so splitting the
-frame into tiles that are uploaded only when dirty is the first optimisation to try; scrolling still dirties everything.
-
-## The CEF download (for the maintainer)
-
-For phase B on this Mac (macOS arm64):
-
-- File: `cef_binary_156.0.30+g6028375+chromium-156.0.8078.96_macosarm64_minimal.tar.bz2`, from
-  `https://cef-builds.spotifycdn.com` (CEF's build host, served by a CDN). 134,874,408 bytes (128.6 MiB) compressed.
-  On disk after extraction: not published; estimated 300 to 400 MB, so about 0.5 GB with the archive kept. Measured in
-  phase B.
-- Checksums: the host publishes `.sha1` and `.sha256` files beside each archive and SHA-1 in its index. SHA-256
-  `731b599e78c71bf33530d65bfa18963f7d1d59902c1f381f5452188e5116b855` (SHA-1
-  `6393d8a838d3b29f6b6939b970b5931dde2082aa`). Both come from the same host, so they catch corruption, not a compromised
-  host; CEF archives are not signed.
-- Licence: CEF is under a BSD-3-Clause-style licence; Chromium is BSD-3-Clause with many third-party components whose
-  notices are in the `CREDITS.html` the distribution carries and an app must ship.
-- Where it lands: inside the spike's build folder only. The proposed command pins the hash and keeps the build script
-  from downloading the archive itself:
-
-  ```sh
-  cd spikes/browser
-  mkdir -p target/cef/156.0.30
-  curl --proto '=https' --tlsv1.2 -fL -o \
-    "target/cef/156.0.30/cef_binary_156.0.30+g6028375+chromium-156.0.8078.96_macosarm64_minimal.tar.bz2" \
-    "https://cef-builds.spotifycdn.com/cef_binary_156.0.30%2Bg6028375%2Bchromium-156.0.8078.96_macosarm64_minimal.tar.bz2"
-  echo "731b599e78c71bf33530d65bfa18963f7d1d59902c1f381f5452188e5116b855  target/cef/156.0.30/cef_binary_156.0.30+g6028375+chromium-156.0.8078.96_macosarm64_minimal.tar.bz2" | shasum -a 256 -c -
-  CEF_PATH="$PWD/target/cef" cargo build --release -p spike-cef-helper --features cef
-  ```
-
-  The build step then fetches only `index.json` (10.7 MB) to compare the SHA-1, and extracts to
-  `target/cef/156.0.30/cef_macos_aarch64/`. Without `CEF_PATH`, the same build downloads the archive itself into
-  `target/release/build/cef-dll-sys-*/out/` (also inside the spike). No global cache is used either way.
-- **Also needed on this Mac: CMake and Ninja**, which the bindings' build script runs to build CEF's C++ wrapper. Neither
-  is installed, and installing them needs the maintainer's agreement.
-- CI downloads per run: macOS 134.9 MB, Linux 333.3 MB (`..._linux64_minimal.tar.bz2`, SHA-256
-  `356db99d653698aa9ba78b22965032b4fa5b23ba079ffdbaa5d28a8530f04011`), Windows 175.2 MB
-  (`..._windows64_minimal.tar.bz2`, SHA-256 `74fd321975e99703acd8fc7e3c1b0859292f61b388f4052a0cd7ef1fb3b29f6e`), plus
-  `index.json` each. The temporary workflow pins these hashes.
-
-## Phase B plan
-
-- **Process layout.** The app starts `spike-cef-helper` (inside `spike-cef-helper.app` on macOS, laid out by
-  `cef-helper/bundle-macos.sh`) with piped stdin and stdout and the inherited frame region. The helper is CEF's browser
-  process with its own application object and loop, a dedicated profile under the build folder, and descriptors 0 and 1
-  pointed away from the pipes before CEF starts, so Chromium's sub-processes cannot inherit the protocol channel. CEF
-  starts the renderer, GPU and utility sub-processes from the helper bundles, inside Chromium's sandbox.
-- **Transport first: option A**, exactly as measured with the stand-in. **Second, if A misses the targets:** dirty-tile
-  uploads (frames split into tiles, each its own image, re-uploaded only when a dirty rectangle touches it). Shared
-  textures (option B) only as a separate, labelled experiment, because they need a GPUI fork.
-- **Measured by hand on this Mac**, with the app's per-second log lines, `getrusage`, `ps` over the helper's process tree
-  and the self-check:
-  1. Frame rate while scrolling a long page (a generated long local page; trackpad scrolling for ten seconds): painted
-     frames per second, frames superseded, `paint_image` time, and the page's own `requestAnimationFrame` rate read with
-     a DevTools `Runtime.evaluate`.
-  2. Typing in a form: letters, Enter, Backspace, arrows, Tab; then Japanese and Chinese input methods, checking the
-     candidate window sits at the caret and the committed value read back with `Runtime.evaluate`.
-  3. A GPUI popover over the page: the overlay card, also over an open `<select>` popup; self-check readback.
-  4. Memory per tab: the sum over the helper and all its sub-processes (footprint and resident), for a blank page, a
-     simple page and a heavy page; plus idle and scrolling CPU of every process, and time from helper start to first frame.
-  5. Size of the component: the bundle on disk, the CEF archive, and the bundle compressed as it would be downloaded.
-- **CI** (the temporary workflow): Linux and Windows build the helper with CEF downloaded on the runner; macOS bundles
-  and smoke-checks it; Linux smoke-checks it headless (`--ozone-platform=headless`) as a tarball-style run without the
-  setuid helper (recording what happens) and as an installed `.deb` with `chrome-sandbox` setuid root, printing each
-  renderer's seccomp mode and namespaces; Windows runs an informational smoke check, labelled as lacking the bootstrap
-  sandbox; every platform reports the component's size. The stand-in job proves the pipes and shared memory on all three.
-- **Fall back to an external window on a platform if** any of these holds after phase B: CEF cannot run off-screen there
-  with Chromium's sandbox on (for Windows, if the bootstrap-DLL arrangement cannot host an off-screen helper); the painted
-  rate while scrolling a 1280 x 800 logical pane at the platform's usual scale stays under 30 frames a second, or the UI
-  thread's median `paint_image` time exceeds 8 ms; typing (letters, Enter, Backspace, arrows) or one CJK input method
-  cannot be made to work; the GPUI overlay cannot be drawn above the page; or the helper cannot be restarted reliably
-  after a renderer crash. On Linux and Windows, where nothing can be run by hand, CI's build and headless smoke check must
-  pass, the visual criteria are judged from macOS (the frame path is the same code), and the result is labelled
-  "CI-verified, not yet run on real hardware". On Windows, WebView2 as a windowed view is weighed against the external
-  window before falling back.
-
-## Open questions and what is unverified
-
-- Everything CEF does at run time: that the helper starts with its own application object and loop, that `OnPaint`
-  frames arrive and match the stand-in's numbers, that the key mapping and input methods work, that DevTools calls are
-  answered, and the true on-disk size. Phase B.
-- Shared textures on macOS and Linux (claimed by CEF's header text and the bindings, contradicted by one header
-  comment).
-- Windows: that the standard library's handle inheritance delivers the unnamed mapping to the helper (the stand-in CI
-  job will show it); that a CEF helper started by `bootstrap.exe` with the sandbox works for off-screen rendering; whether
-  inheritable standard handles reach Chromium's sub-processes.
-- Linux: the package names for CEF's libraries on Ubuntu 26.04 (taken from 24.04), whether the runner restricts user
-  namespaces, and whether a headless run is representative of a desktop session.
-- Clipboard interception for P52 and the P33 question (a confined helper with Chromium's sandbox still engaging) are not
-  covered by phase A.
-- The 60-day freshness rule means a new CEF component about every four weeks; how it is built, signed (macOS: the helper
-  bundles and framework signed and notarized by the project, since the component contains our helper) and published is a
-  packaging question (Task 14 and M4).
-- Video sites need proprietary codecs that CEF's published builds lack.
+WebView2 speaks the DevTools Protocol in-process (`CallDevToolsProtocolMethod`), so no port; it is patched by the OS, so
+nothing is downloaded and nothing has to be kept current; and its sandbox is the OS runtime's. But it can sit under
+GPUI-drawn UI only through visual hosting into a DirectComposition tree, and GPUI's Windows renderer keeps its
+composition device and visual private, so that needs a GPUI change; as a windowed control it covers the ask cards and
+popovers the design requires above the page. It also offers no frame stream (only single-image captures). Assessment:
+WebView2 is the better Windows engine only if GPUI exposes its composition tree; until then it is a fallback (embedded
+but without overlays), better than an external window. Not built.
 
 ## Decision
 
-Pending phase B. Working proposal, to be confirmed or replaced by the measurements: embed with CEF off-screen in a
-helper process using option A on all three platforms, with dirty-tile uploads if needed; keep option B as a later GPUI
-change only if the targets demand it; on Windows weigh WebView2 as a windowed fallback; ship the browser only in package
-formats that can run Chromium's sandbox (on Linux the `.deb`).
+Option A everywhere, with a fallback per platform:
+
+- **macOS: embed with CEF off-screen in a helper process.** Verified hands-on: Chromium's sandbox on in every
+  sub-process, every input check passing, the overlay above a live page, 60 frames a second at scale 2 with about 2.2 ms
+  of UI thread per frame, 22 ms key to frame.
+- **Linux: embed with CEF off-screen, shipped only in the `.deb`**, which installs `chrome-sandbox` setuid root; the
+  tarball (and AppImage) falls back to an external browser window. Unverified: CI only, and the CI run is pending.
+- **Windows: embed with CEF off-screen under CEF's bootstrap**, the same code as macOS as a DLL. Unverified: CI only, and
+  the CI run is pending. If the bootstrap arrangement cannot host the off-screen helper with the sandbox on, Windows uses
+  WebView2 as a windowed view (no overlays) before an external window.
+
+Proposed targets for the browser component (section 9 left them to this trial), measured on the reference machine at
+each gate:
+
+| Target | Value | Measured here |
+|---|---|---|
+| Painted frame rate while scrolling or animating a 1280 x 800 pane at scale 2 on a 60 Hz display | median of runs at least 57 fps, no run under 50 fps | 59.5 to 60.0 (lowest run 54.6) |
+| Frame interval p95 | at most 2 display refreshes now (34 ms at 60 Hz); 1 refresh (17.5 ms) once frame production follows the display | 17.1 to 33.4 |
+| UI thread per window frame with a streaming pane, p95 | at most 5 ms at 2560 x 1600 | 3.0 to 4.3 |
+| Key to frame painted | p50 at most 25 ms, p95 at most 40 ms | 22.0 and 38.0 |
+| Idle | no frames, no app redraws, Chromium processes at most 2 % CPU together | 0, 0 to 2 redraws in 15 s, 1.0 % |
+| Memory, Chromium processes | at most 300 MB with one blank tab; at most 450 MB with one typical documentation page; heavy pages measured, not capped | 265, 362 |
+| Memory, the app's frame path | at most 150 MB above the app's idle footprint while a scale-2 pane streams | about 134 |
+| Start-up, helper spawn to first frame of a simple page | at most 500 ms warm | 300 to 370 |
+| Download size (macOS arm64) | at most 100 MB compressed, at most 300 MB on disk | 95 and 289 trimmed |
 
 ## Who decided
 
-Not decided yet. The method is a design call within the maintainer's decision 0004; downloading CEF onto the development
-machine, and installing CMake and Ninja there, wait for the maintainer.
+Design call from the M0 trial, within the maintainer's decision 0004. Downloading the CEF distribution to the
+development machine and installing CMake and Ninja were the maintainer's approvals.
 
 ## Consequences
 
-To be written in phase B. Already clear from phase A: the frame path costs one copy and one GPU upload per frame on the
-app's UI thread; GPUI's atlas allocates a texture per full frame; any faster path is a change to the pinned GPUI; and the
-Linux tarball cannot carry the browser where user namespaces are restricted.
+### What the application must ship, per platform
+
+- **macOS:** a helper app bundle containing the CEF framework and five helper bundles (`<name> Helper.app`, `(GPU)`,
+  `(Renderer)`, `(Plugin)`, `(Alerts)`), each an `LSUIElement`; the bundle runs from anywhere (the trial ran it from the
+  build folder), so it can live in the app's support folder after a first-use download. It contains the project's own
+  helper code, so the project must build, sign (hardened runtime, with the entitlements Chromium's helpers need) and
+  notarize it; it cannot be a raw download from CEF's host.
+- **Linux:** `libcef.so`, its resources and locales, the helper executable (found beside `libcef.so` through an
+  `$ORIGIN` run path, because the setuid sandbox drops `LD_LIBRARY_PATH`), and `chrome-sandbox` owned by root with the
+  setuid bit. A component downloaded by the user after installation cannot carry a setuid-root file, so the `.deb` must
+  install `chrome-sandbox` itself (or the whole component) even if the rest is fetched on first use. Where unprivileged
+  user namespaces are allowed (not default Ubuntu 24.04 and later) Chromium uses them instead. The tarball cannot run the
+  sandbox on default Ubuntu and ships no embedded browser; AppImage likewise.
+- **Windows:** `libcef.dll` and resources, the helper as a DLL, and CEF's bootstrap executable renamed to the helper's
+  name, all signed by the project; the bootstrap sets up the sandbox and calls the DLL (unverified until CI runs).
+- Everywhere: CEF's `CREDITS.html` (Chromium's third-party notices) and CEF's licence.
+
+### Keeping the bundled Chromium current
+
+CEF follows Chromium stable about every four weeks, and the bindings followed within days (six releases of the 156 line
+in three and a half weeks). Each update means: bump the pinned `cef` version, pin three new SHA-256 values, rebuild the
+helper and CEF's C++ wrapper (CMake and Ninja in CI), sign and notarize the macOS bundle, rebuild the `.deb`, sign the
+Windows bootstrap and DLL, run the smoke check on three platforms and the input scenario on macOS, and publish a
+component of about 95 to 105 MB per platform (no delta updates without building them). With the design's 60-day warning
+this is a recurring release task, not a one-off.
+
+### Security against the threat model's browser boundary
+
+Achieved (macOS verified, others pending CI):
+- The helper is its own process; every renderer, GPU and utility process reported itself sandboxed (`sandbox_check`) in
+  every run; switches that turn the sandbox off or open a debugging port are refused by the helper.
+- P32: DevTools runs through CEF's `SendDevToolsMessage`; no listening TCP socket existed in the app or the helper tree
+  while it ran (lsof).
+- P53 in part: the channel is the helper's inherited stdin and stdout plus an unnamed shared-memory region; Chromium's
+  sub-processes inherit neither (their descriptors 0 and 1 are `/dev/null` and the log, and the region is closed on exec,
+  checked with lsof); frame dimensions and line lengths are checked before use.
+- P35 in part: popup windows, downloads, file choosers, permission prompts and page dialogs reach the helper and are
+  refused there, so the app can decide each one; a dedicated profile in the build folder.
+
+Not achieved or not tried:
+- CEF's browser process is not sandboxed (by Chromium's design); confining it (P33) was not tried.
+- P52: Chromium's network service contacted Google's servers on its own while showing a local page (the component
+  updater, network time and a search endpoint, named by Chromium's own net log), and `--disable-background-networking`,
+  `--disable-component-update` and `--no-pings` did not stop it. The profile hardening P52 asks for needs another means
+  (CEF settings or policies, or blocking at the network level), still to be found. Page clipboard writes: CEF has no
+  clipboard hook; Command-C and Command-V pass through the helper (interceptable), and a browser setting can deny
+  script access to the clipboard (`javascript_access_clipboard`, not tried).
+- P53: the messages are JSON with size limits but no schema, rate limits or fuzzing; a binary schema with a fuzzed
+  decoder is for the real implementation.
+
+### What does not work, or was not reached
+
+- Proprietary codecs: `canPlayType` says no for H.264, AAC and HEVC (VP9, AV1 and Opus play), as expected of CEF's
+  published builds; no H.264 file was played, since none could be made or downloaded here.
+- Camera: the request failed in the engine with `NotFoundError` before any permission was asked.
+- Printing: not reached (the print path needs a `CefPrintHandler`; with none, the helper could open a native dialog).
+- Drag and drop: not reached (needs `StartDragging` and the drag-target calls, with GPUI's drag events forwarded).
+- Accessibility of page content: not reached (CEF's off-screen accessibility handler would have to feed GPUI's, whose
+  screen-reader support is itself unconfirmed).
+- A click without a hold between press and release did not open a `<select>` popup; a person's click does.
+- Frame production is not aligned with the display, so a few frames are replaced unpainted; aligning them needs CEF's
+  external begin frames driven by the app (which wakes the app every refresh unless the page's need for frames can be
+  known) or a one-frame queue (adds up to a frame of latency).
+- 120 Hz displays were not tried; 100 Hz worked for an animation at the engine's raised frame rate.
+
+### What changing GPUI would buy and cost on Linux and Windows
+
+An external-texture element in GPUI's DirectX renderer (Windows: a DXGI shared handle duplicated into the app and opened
+as a D3D11 texture) and its `wgpu` renderer (Linux: dmabuf planes passed over an inherited socket pair and imported as
+Vulkan external memory) would remove both CPU copies and the atlas upload: about 2 to 3 ms of the UI thread and 3 to 4 ms
+of other threads per 2560 x 1600 frame at 60 Hz, and the memory GPUI's atlas holds for frames, and would make full-screen
+and high-refresh panes affordable. The cost is a fork of the pinned GPUI snapshot (decision 0007) carried across every
+upgrade, in renderers this project does not otherwise touch, plus CEF's shared textures on Linux, which are claimed but
+unverified. On Windows the same fork could expose GPUI's DirectComposition tree, which is what WebView2 visual hosting
+needs. Not worth it for M0's targets; worth revisiting if the targets tighten (high-refresh or full-screen panes).
+
+### Patterns worth keeping for the real implementation
+
+- `protocol/src/view.rs`: the `BrowserView` trait, with no GPUI types.
+- `protocol/src/shm.rs` and `wire.rs`: frames in an inherited, unnamed shared-memory region with slot ownership passed by
+  messages; frame dimensions checked before pixels are touched.
+- `protocol/src/helper.rs` and the frame sink in `app/src/main.rs`: pipes read and written off the UI thread; the newest
+  frame waits in a single slot so a slow UI drops frames instead of queueing them; the previous image is dropped from
+  GPUI's atlas.
+- `cef-helper/src/guard.rs`: the re-launch guard, before anything else runs.
+- `cef-helper/src/mac.rs`: the helper owns CEF's `NSApplication`, so GPUI's application object is never touched.
+- `cef-helper/src/helper.rs`: messages queued until the browser exists; the view size stored by the reader thread;
+  macOS edit shortcuts performed on the focused frame; input-method calls with an explicit invalid range (a null range
+  is silently ignored by libcef: the first IME runs failed on exactly this); refusals reported to the app; reload after a
+  renderer crash; descriptors 0 and 1 moved off the pipes and the region closed on exec before CEF starts.
+- `cef-helper/src/keys.rs`: explicit key codes (the precedent's special-key bug did not occur).
+- `app/src/main.rs`: the pane's hitbox inserted in prepaint so overlays occlude it; "pointer left" sent when the hitbox
+  stops being hovered after a move, not from GPUI's hover state.
+- `app/src/mac_ime.rs` and `app/src/script.rs`: testing input methods through GPUI's own text-input client and reading
+  results back with DevTools; `protocol/src/tree.rs`: verifying the sandbox per process instead of assuming it.
+- `unpack-cef.sh`, `cef-helper/bundle-macos.sh` and the `.deb` step in the workflow: pinned, hash-checked CEF with no
+  download by the build script; the macOS helper bundles; the setuid `chrome-sandbox` packaging.
 
 ## Revisit when
 
-Phase B completes; GPUI gains an external-texture element on Linux and Windows (or BGRA surfaces on macOS); the pinned
-`gpui-pre` snapshot changes how images reach the atlas; CEF's shared textures are confirmed on macOS and Linux; or a
-measurement shows the CPU path missing the targets set in phase B.
+The first CI run of `spike-browser.yml` reports on Linux and Windows (this record then gets a follow-up decision if
+either fails); a person runs the browser on real Linux or Windows hardware; GPUI gains an external-texture element on
+Linux and Windows, BGRA surfaces on macOS, or an exposed composition tree on Windows; a way is found to stop Chromium's
+background traffic to Google (P52); the targets above are missed at a gate; 120 Hz panes become a requirement; or CEF
+changes its off-screen rendering, its Windows sandbox arrangement or its macOS bundle layout.

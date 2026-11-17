@@ -11,5 +11,6 @@ meaning. To change one, write a new record and set the old one's status to "supe
 | [0003](0003-own-vault-with-import.md) | Own vault with a read-only import | accepted |
 | [0004](0004-embedded-chromium.md) | Embedded Chromium, rendered off-screen | accepted |
 | [0005](0005-platform-tiers.md) | Platform support in tiers | accepted |
+| [0006](0006-addon-vendor-terms.md) | Add-on vendor terms (Claude Code and Codex over ACP) | proposed |
 | [0007](0007-gpui-source-and-pins.md) | GPUI source and pins | accepted |
-| [0012](0012-embedded-browser-trial.md) | Embedded browser trial | proposed (trial in progress) |
+| [0012](0012-embedded-browser-trial.md) | Embedded browser trial | accepted with open questions |
