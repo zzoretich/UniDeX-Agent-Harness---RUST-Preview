@@ -59,6 +59,13 @@ the current plan under `docs/design/plans/`.
 | 2026-11-17 | M0 | Task 15 Electron baseline | builder | Opus | 1 | 443k | done | #8 |
 | 2026-11-17 | M0 | Task 15 | reviewer | Sonnet | 1 review and 1 re-review | at least 146k | needs fixes: 5 important; then approved | #8 |
 | 2026-11-17 | M0 | Task 15 | builder (fresh, fix round) | Sonnet | 1 | 142k | done | #8 |
+| 2026-11-17 | M0 | Task 14 packaging and the nightly workflow | builder | Sonnet | 3 CI rounds and 1 fix round | 355k | done, decision 0014 proposed | #13 |
+| 2026-11-17 | M0 | Task 14 | reviewer | Opus | 1 | 273k | needs fixes: 3 important | #13 |
+| 2026-11-17 | M0 | Task 14 | re-reviewer | Sonnet | 1 round | 121k | approved | #13 |
+| 2026-11-17 | M0 | Task 16 the M0 gate, stage 1 | builder (drafter) | Opus | 1 | 570k | done | #14 |
+| 2026-11-17 | M0 | Task 16 stage 1 | reviewer | Sonnet | 1 | 213k | needs fixes: 4 important | #14 |
+| 2026-11-17 | M0 | Task 16 stage 1 | builder (fix round) | Sonnet | 1 | 200k | done | #14 |
+| 2026-11-17 | M0 | Task 16 stage 1 | re-reviewer | Sonnet | 1 round | 166k | approved | #14 |
 
 ## Notes
 
