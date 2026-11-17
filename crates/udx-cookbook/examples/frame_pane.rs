@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     App, Bounds, Context, Corners, CursorStyle, HitboxBehavior, Image, ImageFormat, RenderImage,
-    Role, SvgRenderer, TitlebarOptions, Window, WindowBounds, WindowOptions, canvas, div,
+    Role, SvgRenderer, Text, TitlebarOptions, Window, WindowBounds, WindowOptions, canvas, div,
     prelude::*, px, rgb, rgba, size, text,
 };
 use udx_cookbook::channel;
@@ -45,6 +45,7 @@ const LAYOUT: SlotLayout = SlotLayout {
 /// The longest message line the reader accepts; a frame message is about 30 bytes.
 const MAX_LINE: usize = 256;
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
+const CARD_TEXT: &str = "A GPUI card, drawn above the frames. Click it.";
 
 type Slots = Arc<Vec<Mutex<Vec<u8>>>>;
 
@@ -266,7 +267,7 @@ impl Render for Pane {
                 div()
                     .id("card")
                     .role(Role::Button)
-                    .aria_label("Card above the page")
+                    .aria_label(CARD_TEXT)
                     .absolute()
                     .top(px(16.))
                     .right(px(16.))
@@ -282,7 +283,8 @@ impl Render for Pane {
                         this.card_clicks += 1;
                         cx.notify();
                     }))
-                    .child(text!("A GPUI card, drawn above the frames. Click it.")),
+                    // The label is on the card; the visible text is kept out of the tree so it is not read twice.
+                    .child(Text::new_inaccessible(CARD_TEXT.into())),
             )
             .child(
                 div()
