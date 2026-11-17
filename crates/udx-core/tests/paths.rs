@@ -142,3 +142,56 @@ fn a_parent_dir_escape_is_refused() {
     ]));
     assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })));
 }
+
+#[test]
+fn a_parent_dir_escape_through_a_missing_folder_is_refused() {
+    let (root, other) = (tmp(), tmp());
+    let name = other.path().file_name().unwrap();
+    let via = root
+        .path()
+        .join("missing")
+        .join("..")
+        .join("..")
+        .join(name)
+        .join("data");
+    let e = AppPaths::resolve(&MapEnv::of([
+        ("UNIDEX_TEST_ROOT", root.path()),
+        ("UNIDEX_DATA_DIR", via.as_path()),
+    ]));
+    assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })));
+}
+
+#[test]
+fn an_empty_variable_counts_as_unset() {
+    let root = tmp();
+    let mut env = MapEnv::of([("UNIDEX_TEST_ROOT", root.path())]);
+    env.0.insert("UNIDEX_DATA_DIR".to_string(), String::new());
+    let p = AppPaths::resolve(&env).unwrap();
+    assert_eq!(p.data_dir, real(root.path()).join("data"));
+}
+
+#[test]
+fn a_dot_dot_that_stays_inside_the_root_is_accepted() {
+    let root = tmp();
+    let via = root.path().join("a").join("..").join("b");
+    let p = AppPaths::resolve(&MapEnv::of([
+        ("UNIDEX_TEST_ROOT", root.path()),
+        ("UNIDEX_DATA_DIR", via.as_path()),
+    ]))
+    .unwrap();
+    assert_eq!(p.data_dir, real(root.path()).join("b"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_symlink_that_points_outside_is_refused() {
+    let (root, other) = (tmp(), tmp());
+    let target = other.path().join("not-yet");
+    std::os::unix::fs::symlink(&target, root.path().join("link")).unwrap();
+    let via = root.path().join("link").join("data");
+    let e = AppPaths::resolve(&MapEnv::of([
+        ("UNIDEX_TEST_ROOT", root.path()),
+        ("UNIDEX_DATA_DIR", via.as_path()),
+    ]));
+    assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })));
+}
