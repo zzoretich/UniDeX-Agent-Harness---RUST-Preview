@@ -208,7 +208,7 @@ pub(crate) fn generic_matches(line: &str) -> Vec<(RuleId, String)> {
     home_matches(line, &mut out);
     for run in NUMBER_RUN.find_iter(line) {
         let parts: Vec<&str> = run.as_str().split('.').collect();
-        if parts.len() != 4 || parts.iter().any(|p| p.len() > 3) {
+        if parts.len() != 4 {
             continue;
         }
         let nums: Vec<u8> = parts.iter().filter_map(|p| p.parse().ok()).collect();

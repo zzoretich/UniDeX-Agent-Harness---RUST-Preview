@@ -61,9 +61,9 @@ impl Terms {
     /// Local-term hits in `text` as (line, term). Matching is case-insensitive
     /// and runs on the whole text with whitespace runs collapsed, so a term
     /// split across lines or padded with extra whitespace is still found. The
-    /// line is the one where the match starts. With `separators`, a term also
-    /// matches when its spaces are `-`, `_` or removed (file names).
-    fn local_hits(&self, text: &str, separators: bool) -> Vec<(usize, String)> {
+    /// line is the one where the match starts. A multi-word term also matches
+    /// with its spaces written as `-`, `_` or removed, in text and in names.
+    fn local_hits(&self, text: &str) -> Vec<(usize, String)> {
         if self.local.is_empty() {
             return Vec::new();
         }
@@ -94,7 +94,7 @@ impl Terms {
         let mut hits: Vec<(usize, String)> = Vec::new();
         for term in &self.local {
             let mut variants = vec![term.clone()];
-            if separators && term.contains(' ') {
+            if term.contains(' ') {
                 for sep in ["-", "_", ""] {
                     variants.push(term.replace(' ', sep));
                 }
@@ -153,7 +153,7 @@ pub fn scan_text(label: &str, text: &str, terms: &Terms) -> Vec<Finding> {
     for (i, line) in text.lines().enumerate() {
         push_generic(label, i + 1, line, &mut out);
     }
-    push_local(label, terms.local_hits(text, false), false, &mut out);
+    push_local(label, terms.local_hits(text), false, &mut out);
     out.sort_by_key(|f| f.line);
     out
 }
@@ -167,6 +167,6 @@ pub fn scan_bytes(label: &str, bytes: &[u8], terms: &Terms) -> Vec<Finding> {
 pub fn scan_path_name(path: &str, terms: &Terms) -> Vec<Finding> {
     let mut out = Vec::new();
     push_generic(path, 0, path, &mut out);
-    push_local(path, terms.local_hits(path, true), true, &mut out);
+    push_local(path, terms.local_hits(path), true, &mut out);
     out
 }
