@@ -32,7 +32,8 @@ Windows including ConPTY, the event loop, `Term`, the grid, selection and events
 0.9.0 (the library, its command builder and the Windows pseudoconsole code), plus `libc` 0.2.191, all from the cargo
 registry; and crates.io and GitHub API pages for versions, release dates, licences, wezterm commits under `pty/`, wezterm
 issues #8338, #6783, #7025, #4205 and #4206, and Alacritty commits under `alacritty_terminal/` and its open ConPTY
-issues. The spike's session type calls both crates through their public APIs; it copies no code from either. Nothing was
+issues. The spike's session type calls both crates through their public APIs; the spike source carries no credit for copied code and the trial's report records
+none. Nothing was
 read or copied from the editor project's crates that are not permissively licensed (its terminal view, markdown and
 editor crates in particular).
 

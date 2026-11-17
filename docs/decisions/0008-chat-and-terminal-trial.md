@@ -60,8 +60,8 @@ for inactive windows was turned off (`inactive_frame_interval: None`) so a lost 
 <folder> 3` (plain), `TARGET_DIR=target/kit CHAT_ARGS="--renderer kit" sh run-macos.sh <folder> 3 --features kit`,
 `TARGET_DIR=target/profiler sh run-macos.sh <folder> 1 --features profiler`, `sh run-term-macos.sh <folder> 3`, and
 `headless-check` three times; `python3 summarize.py <folder>` turns the JSON into the tables below. The raw result
-files were not committed: the
-tables in this record are the kept evidence, and the trial code is deleted at the M0 gate.
+files were not committed: the tables in this record are the kept evidence, and the trial code is deleted at the M0
+gate.
 
 ### Sources and provenance
 
@@ -144,7 +144,8 @@ The kit's runs agree with each other closely; the plain renderer's vary between 
 best on their worst runs. On frame pacing the kit is behind the plain renderer in places, as the table shows: while
 resizing, 27 to 40 intervals over 1.5 times the refresh interval against 12 to 23, and a token p99 of 20.8 to 22.2 ms
 against 15.7 to 18.0 ms; on the first-visit scroll, 1 to 7 intervals over twice the refresh interval against 0 or 1;
-and start-up 17 ms later at the median. It is ahead on memory because it forgets rows it no longer draws (and parses
+on the fast pass, 4, 5 and 8 intervals over twice the refresh interval against 2, 1 and 1; and start-up 17 ms later at
+the median. It is ahead on memory because it forgets rows it no longer draws (and parses
 them again when they return). The kit adds 33 crates to the resolved graph, counted from `cargo metadata` over all
 targets and all dependency kinds; a later recount over normal dependency edges only gave 31, and the difference was not
 traced. All are permissively licensed; one, `instant`, carries an unmaintained notice.
@@ -169,8 +170,8 @@ probe (which runs in every build) tracks presented frames. The time that makes f
 that are new to the view, which includes shaping their text; the share that is text shaping is likely but not isolated,
 because a row's first draw here also pays the trial's own markdown parse and run preparation. Pre-preparing every row
 before the scroll and re-running the first-visit pass would isolate it; that was not done. While the window is being
-resized, the present call itself can also take several ms (the platform resizing its drawable). Start-up in the profiler build: median 166 ms to the first frame painted (141 to
-176, ten launches).
+resized, the present call itself can also take several ms (the platform resizing its drawable). Start-up in the
+profiler build: median 166 ms to the first frame painted (141 to 176, ten launches).
 
 ### Terminal (our grid element over `alacritty_terminal`, both PTY backends)
 
@@ -266,9 +267,10 @@ wrapper over it) or for the terminal (it has nothing for a cell grid). For messa
 provisional: adopt the kit's unstyled layer, `gpui-base`, and its markdown `TextView` (it already passes the licence
 policy) for the selection, copy, link handling, code-block highlighting hooks and background, incremental streaming
 parse that GPUI does not have and the plain renderer would have to build, if the checks below hold. Its measured cost is
-not "close to our own renderer's"; it is worse in places: while resizing, 27 to 40 intervals over 1.5 times the refresh
+worse than our own renderer's in places: while resizing, 27 to 40 intervals over 1.5 times the refresh
 interval against 12 to 23, and a token p99 of about 21 ms against 16 to 18 ms; on a first-visit scroll, 1 to 7
-intervals over twice the refresh interval against 0 or 1; and start-up 17 ms later (169 against 152 ms). It is smaller in
+intervals over twice the refresh interval against 0 or 1; on the fast pass, 4, 5 and 8 against 2, 1 and 1; and
+start-up 17 ms later (169 against 152 ms). It is smaller in
 memory after a full scroll. Two limits on the evidence: the kit was measured only in its element-keyed form, which
 drops its parse whenever a row leaves the view, while the form recommended here (one `TextViewState` per message in an
 app-level cache) was not measured; and selection and links, the reasons for adopting it, were not exercised. Before the
