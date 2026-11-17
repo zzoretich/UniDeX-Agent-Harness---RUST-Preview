@@ -1,0 +1,255 @@
+name: spike-browser
+
+# Temporary: builds the Task 12 browser trial (spikes/browser, decision 0012) on the three
+# platforms. Removed when the trial ends. It runs only for pull requests that touch the trial
+# or this file, and never on main.
+#
+# Same hardening as ci.yml: read-only token, no credentials kept by checkout, every action
+# pinned to a full commit hash, fixed runner labels, no secrets, no event text in scripts.
+#
+# The CEF binary distribution is downloaded here, on the runners, never on a developer machine
+# without the maintainer's agreement. Each archive is pinned by SHA-256 (from the .sha256 file
+# CEF's build host publishes next to it) and placed where the bindings' build script looks
+# first, so the build script verifies it (SHA-1, from the same host's index) and extracts it
+# instead of downloading it again. The build script still fetches the host's index.json (about
+# 10 MB) to read that SHA-1.
+
+on:
+  pull_request:
+    paths:
+      - "spikes/browser/**"
+      - ".github/workflows/spike-browser.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # CEF 156.0.30+g6028375, Chromium 156.0.8078.96: what the pinned `cef = "=156.6.0"` targets.
+  CEF_VERSION: "156.0.30"
+  CEF_BUILD: "cef_binary_156.0.30+g6028375+chromium-156.0.8078.96"
+  CEF_HOST: "https://cef-builds.spotifycdn.com"
+
+jobs:
+  # The protocol, the stand-in and the GPUI app: no CEF. The headless smoke check runs the
+  # stand-in through the real pipes and shared memory on each platform.
+  standin:
+    name: stand-in (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/browser
+    steps:
+      - name: Keep line endings as committed
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install the Linux packages GPUI builds against
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Build (no CEF)
+        run: cargo build --release --locked
+      - name: Smoke check with the stand-in
+        run: |
+          set -eu
+          ext=""
+          if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; fi
+          "target/release/spike-smoke$ext" --frames 60 --expect-marker -- "target/release/spike-standin$ext"
+
+  # The CEF helper, with CEF downloaded on the runner.
+  cef:
+    name: cef helper (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+            platform: macosarm64
+            folder: cef_macos_aarch64
+            # SHA-256 of ${CEF_BUILD}_macosarm64_minimal.tar.bz2 (134,874,408 bytes).
+            sha256: 731b599e78c71bf33530d65bfa18963f7d1d59902c1f381f5452188e5116b855
+          - name: linux
+            os: ubuntu-26.04
+            platform: linux64
+            folder: cef_linux_x86_64
+            # SHA-256 of ${CEF_BUILD}_linux64_minimal.tar.bz2 (333,332,290 bytes).
+            sha256: 356db99d653698aa9ba78b22965032b4fa5b23ba079ffdbaa5d28a8530f04011
+          - name: windows
+            os: windows-2025
+            platform: windows64
+            folder: cef_windows_x86_64
+            # SHA-256 of ${CEF_BUILD}_windows64_minimal.tar.bz2 (175,176,258 bytes).
+            sha256: 74fd321975e99703acd8fc7e3c1b0859292f61b388f4052a0cd7ef1fb3b29f6e
+    env:
+      CEF_PLATFORM: ${{ matrix.platform }}
+      CEF_FOLDER: ${{ matrix.folder }}
+      CEF_SHA256: ${{ matrix.sha256 }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/browser
+    steps:
+      - name: Keep line endings as committed
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      # The bindings build CEF's C++ wrapper with CMake and Ninja. Linux also needs the
+      # libraries libcef.so links against, to link and to run.
+      - name: Install CMake, Ninja and CEF's Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build \
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libgbm1 \
+            libpango-1.0-0 libcairo2 libgtk-3-0t64 libxcomposite1 libxdamage1 libxrandr2 \
+            libxkbcommon0 libasound2t64
+      - name: Install CMake and Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -eu
+          command -v cmake || brew install cmake
+          command -v ninja || brew install ninja
+          cmake --version
+          ninja --version
+      - name: Download and verify the CEF distribution
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/cef/$CEF_VERSION"
+          mkdir -p "$dir"
+          file="${CEF_BUILD}_${CEF_PLATFORM}_minimal.tar.bz2"
+          url="$CEF_HOST/$(printf '%s' "$file" | sed 's/+/%2B/g')"
+          curl --proto '=https' --tlsv1.2 -sSfL -o "$dir/$file" "$url"
+          if command -v sha256sum >/dev/null; then
+            echo "$CEF_SHA256  $dir/$file" | sha256sum -c -
+          else
+            echo "$CEF_SHA256  $dir/$file" | shasum -a 256 -c -
+          fi
+          ls -l "$dir"
+          echo "CEF_PATH=$RUNNER_TEMP/cef" >> "$GITHUB_ENV"
+      - name: Build the CEF helper and the smoke check
+        if: runner.os != 'Windows'
+        run: |
+          set -eu
+          # On Linux the helper finds libcef.so beside itself (the build script copies the
+          # runtime files there), not through LD_LIBRARY_PATH, which the setuid sandbox drops.
+          if [ "$RUNNER_OS" = "Linux" ]; then export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN'; fi
+          cargo build --release --locked -p spike-cef-helper --features cef
+          cargo build --release --locked -p spike-protocol
+      # Ninja with MSVC needs the compiler's environment, which vcvars64.bat sets up.
+      - name: Build the CEF helper and the smoke check (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
+          cargo build --release --locked -p spike-cef-helper --features cef || exit /b 1
+          cargo build --release --locked -p spike-protocol || exit /b 1
+      - name: Sizes of the CEF component
+        run: |
+          set -eu
+          du -sh "$RUNNER_TEMP/cef/$CEF_VERSION"/*.tar.bz2
+          du -sh "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER"
+      - name: Bundle and smoke-check the CEF helper (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -eu
+          cef-helper/bundle-macos.sh "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER" target/release
+          target/release/spike-smoke --frames 10 --timeout-s 60 -- \
+            target/release/spike-cef-helper.app/Contents/MacOS/spike-cef-helper \
+            --profile-dir "$RUNNER_TEMP/cef-profile"
+      # Linux sandbox, two ways. A tarball cannot install a setuid helper, so Chromium needs
+      # unprivileged user namespaces, which Ubuntu restricts with AppArmor since 23.10; the
+      # first run records what happens then (it may fail; that is a finding, not an error).
+      # The second installs the same files as a .deb, which can ship chrome-sandbox owned by
+      # root with the setuid bit, and checks the renderer's seccomp and namespace state.
+      - name: Linux, tarball-style run (no setuid sandbox helper)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          set -u
+          sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone || true
+          ls -l target/release/chrome-sandbox || true
+          target/release/spike-smoke --frames 10 --timeout-s 60 -- \
+            target/release/spike-cef-helper --profile-dir "$RUNNER_TEMP/cef-profile-tar" \
+            --ozone-platform=headless
+      - name: Linux, .deb install with the setuid sandbox helper
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          stage="$RUNNER_TEMP/deb"
+          opt="$stage/opt/unidex-browser-trial"
+          mkdir -p "$opt" "$stage/DEBIAN"
+          cp target/release/spike-cef-helper target/release/spike-smoke "$opt/"
+          cp "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER"/*.so* "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER"/*.pak \
+             "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER"/*.dat "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER"/*.bin \
+             "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER"/*.json "$opt/" 2>/dev/null || true
+          cp -R "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER/locales" "$opt/"
+          cp "$CEF_PATH/$CEF_VERSION/$CEF_FOLDER/chrome-sandbox" "$opt/"
+          chmod 4755 "$opt/chrome-sandbox"
+          printf '%s\n' "Package: unidex-browser-trial" "Version: 0.0.0" "Architecture: amd64" \
+            "Maintainer: trial <trial@example.com>" "Description: Task 12 browser trial" > "$stage/DEBIAN/control"
+          dpkg-deb --root-owner-group --build "$stage" "$RUNNER_TEMP/trial.deb"
+          sudo dpkg -i "$RUNNER_TEMP/trial.deb"
+          ls -l /opt/unidex-browser-trial/chrome-sandbox
+          du -sh /opt/unidex-browser-trial
+          /opt/unidex-browser-trial/spike-smoke --frames 10 --timeout-s 60 --hold-s 15 -- \
+            /opt/unidex-browser-trial/spike-cef-helper --profile-dir "$RUNNER_TEMP/cef-profile-deb" \
+            --ozone-platform=headless &
+          smoke=$!
+          sleep 10
+          for pid in $(pgrep -f -- '--type=renderer' || true); do
+            echo "renderer $pid: $(grep -E '^(Seccomp|NoNewPrivs):' /proc/$pid/status | tr '\n' ' ')"
+            echo "  pid namespace $(readlink /proc/$pid/ns/pid) (ours $(readlink /proc/self/ns/pid))"
+            echo "  net namespace $(readlink /proc/$pid/ns/net) (ours $(readlink /proc/self/ns/net))"
+          done
+          wait "$smoke"
+      # The Windows sandbox needs CEF's bootstrap executable loading the client as a DLL, which
+      # the trial has not built yet. This run is labelled and informational, never a pass.
+      - name: Windows, smoke check without the bootstrap sandbox (informational)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          set -u
+          ls target/release/*.dll | head -20 || true
+          target/release/spike-smoke.exe --frames 10 --timeout-s 60 -- \
+            target/release/spike-cef-helper.exe --profile-dir "$RUNNER_TEMP/cef-profile"
