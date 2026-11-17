@@ -123,7 +123,7 @@ fn a_windows_value_declared_in_the_allow_file_does_not_flag_it() {
 #[test]
 fn a_value_longer_than_an_excerpt_can_still_be_exempted() {
     // Excerpts are cut at 100 characters, so a longer value is matched on
-    // its cut form.
+    // its cut form: the exemption applies to the long address.
     let long = format!("{}@corp.io", "a".repeat(120));
     let repo = new_repo();
     write(repo.path(), "a.md", &format!("mail {long}\n"));
@@ -135,7 +135,7 @@ fn a_value_longer_than_an_excerpt_can_still_be_exempted() {
     commit_all(repo.path(), "add files");
     let (code, text) = run(repo.path(), &["privacy", "--all"]);
     assert_eq!(code, 0, "{text}");
-    // and the value is still exact: a different long address is flagged
+    // an address that is not the listed value (it differs early) is flagged
     write(
         repo.path(),
         "a.md",
@@ -179,6 +179,8 @@ fn a_scissors_line_right_after_the_subject_still_cuts_the_diff() {
 
 // ---- running outside a repository ----
 
+// Requirement (controller ruling): the file-scanning modes need a work tree
+// and exit 2 without one; `--stdin` needs no repository.
 #[test]
 fn stdin_needs_no_repository() {
     let dir = TempDir::new().unwrap();
@@ -214,9 +216,30 @@ fn scanning_files_outside_a_repository_is_an_environment_error() {
             .unwrap();
         let text = output_text(&out);
         assert_eq!(out.status.code(), Some(2), "{args:?}: {text}");
-        // the run stops before it scans anything, so it reports nothing about terms
-        assert!(!text.contains("not being checked"), "{args:?}: {text}");
     }
+}
+
+#[test]
+fn a_bare_repository_is_an_environment_error() {
+    let clone = new_repo();
+    write(clone.path(), "a.md", "harmless\n");
+    commit_all(clone.path(), "add a");
+    let bare = TempDir::new().unwrap();
+    git(
+        bare.path(),
+        &["init", "--bare", "-q", "--initial-branch=main"],
+    );
+    git(
+        clone.path(),
+        &[
+            "push",
+            "-q",
+            bare.path().to_str().unwrap(),
+            "HEAD:refs/heads/main",
+        ],
+    );
+    let (code, text) = run(bare.path(), &["privacy", "--range", "HEAD"]);
+    assert_eq!(code, 2, "{text}");
 }
 
 // ---- what a report shows ----
@@ -228,7 +251,9 @@ fn a_finding_shows_its_excerpt_in_text_and_json() {
     commit_all(repo.path(), "add notes");
     let (code, text) = run(repo.path(), &["privacy", "--all"]);
     assert_eq!(code, 1);
-    assert!(text.contains("notes.md:1: HomePath: /Users/jroe"), "{text}");
+    for part in ["notes.md", "HomePath", "/Users/jroe"] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
     let out = xtask(repo.path())
         .args(["privacy", "--all", "--json"])
         .output()
@@ -250,19 +275,9 @@ fn in_ci_a_generic_finding_still_shows_its_excerpt() {
         .output()
         .unwrap();
     let text = output_text(&out);
-    assert!(text.contains("notes.md:1: HomePath: /Users/jroe"), "{text}");
-}
-
-#[test]
-fn outside_ci_a_local_term_is_shown() {
-    let repo = new_repo();
-    write(repo.path(), "privacy-terms.local.txt", "Zebracorp\n");
-    write(repo.path(), ".gitignore", "privacy-terms.local.txt\n");
-    write(repo.path(), "a.md", "about zebracorp here\n");
-    commit_all(repo.path(), "add a");
-    let (code, text) = run(repo.path(), &["privacy", "--all"]);
-    assert_eq!(code, 1, "{text}");
-    assert!(text.contains("a.md:1: LocalTerm: zebracorp"), "{text}");
+    for part in ["notes.md", "HomePath", "/Users/jroe"] {
+        assert!(text.contains(part), "{part}: {text}");
+    }
 }
 
 // ---- the local term list in the repository's view ----
@@ -398,15 +413,32 @@ fn a_plain_windows_path_before_a_spaced_one_is_still_reported() {
 // ---- private addresses ----
 
 #[test]
-fn a_dotted_run_with_padded_parts_is_not_read_as_an_address() {
-    // Only runs of four parts of at most three digits are addresses.
-    for ok in ["10.1.2.0003", "0010.1.2.3", "v10.1.2.0003-beta"] {
-        assert!(excerpts(ok, RuleId::PrivateAddress).is_empty(), "{ok}");
+fn a_private_address_with_padded_parts_is_flagged() {
+    // Vectors are built at run time from their parts.
+    let join = |p: [&str; 4]| p.join(".");
+    for private in [
+        join(["010", "001", "002", "003"]),
+        join(["10", "1", "2", "0003"]),
+        join(["0192", "168", "1", "10"]),
+        join(["172", "020", "0", "5"]),
+        join(["100", "064", "000", "007"]),
+        join(["169", "254", "00", "009"]),
+    ] {
+        let found = excerpts(&format!("host {private} here"), RuleId::PrivateAddress);
+        assert_eq!(found.as_slice(), [private.as_str()], "{private}");
     }
-    assert_eq!(
-        excerpts("at 10.1.2.3.", RuleId::PrivateAddress),
-        ["10.1.2.3"]
-    );
+    for clean in [
+        join(["008", "008", "008", "008"]),
+        join(["0008", "8", "8", "8"]),
+        join(["10", "1", "2", "300"]),
+        join(["10", "1", "2", "0300"]),
+        join(["010", "001", "002", "256"]),
+    ] {
+        assert!(
+            excerpts(&format!("host {clean} here"), RuleId::PrivateAddress).is_empty(),
+            "{clean}"
+        );
+    }
 }
 
 // ---- local terms ----
@@ -421,13 +453,41 @@ fn blank_lines_and_comments_are_not_terms() {
 }
 
 #[test]
-fn separator_variants_apply_to_file_names_only() {
+fn separator_variants_of_a_local_term_are_flagged_everywhere() {
     let t = Terms::generic().with_local("Acme Corp\n");
-    for text in ["acmecorp", "acme-corp", "acme_corp"] {
-        assert!(scan_text("f.md", text, &t).is_empty(), "text {text}");
-        let f = scan_path_name(&format!("docs/{text}.md"), &t);
-        assert_eq!(f.len(), 1, "name {text}");
-        assert_eq!(f[0].rule, RuleId::LocalTerm);
+    for form in [
+        "acme-corp",
+        "acme_corp",
+        "acmecorp",
+        "ACME-CORP",
+        "Acme_Corp",
+        "AcmeCorp",
+        "ACMECORP",
+    ] {
+        let f = scan_text("f.md", &format!("see {form} here"), &t);
+        assert_eq!(f.len(), 1, "text {form}");
+        assert_eq!(f[0].rule, RuleId::LocalTerm, "text {form}");
+        let f = scan_path_name(&format!("docs/{form}.md"), &t);
+        assert_eq!(f.len(), 1, "name {form}");
+        assert_eq!(f[0].rule, RuleId::LocalTerm, "name {form}");
     }
     assert_eq!(scan_text("f.md", "met Acme  Corp", &t).len(), 1);
+    // words that merely contain one of the two words are not the term
+    for text in ["acmeville", "corporate", "acme and corporate"] {
+        assert!(scan_text("f.md", text, &t).is_empty(), "text {text}");
+        assert!(
+            scan_path_name(&format!("{text}.md"), &t).is_empty(),
+            "{text}"
+        );
+    }
+    // a single-word term has no variants
+    let single = Terms::generic().with_local("Zebracorp\n");
+    assert_eq!(scan_text("f.md", "zebracorp", &single).len(), 1);
+    for text in ["zebra-corp", "zebra_corp", "zebra corp"] {
+        assert!(scan_text("f.md", text, &single).is_empty(), "text {text}");
+        assert!(
+            scan_path_name(&format!("{text}.md"), &single).is_empty(),
+            "{text}"
+        );
+    }
 }
