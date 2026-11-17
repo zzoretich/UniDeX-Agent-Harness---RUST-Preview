@@ -5447,6 +5447,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "spike-cef-helper-win"
+version = "0.0.0"
+dependencies = [
+ "spike-cef-helper",
+]
+
+[[package]]
 name = "spike-protocol"
 version = "0.0.0"
 dependencies = [

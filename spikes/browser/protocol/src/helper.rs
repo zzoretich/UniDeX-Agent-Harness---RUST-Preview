@@ -34,6 +34,7 @@ pub struct HelperBrowser {
     reader: Option<JoinHandle<()>>,
     next_id: u64,
     pid: u32,
+    exit: Option<(bool, String)>,
 }
 
 impl HelperBrowser {
@@ -140,12 +141,19 @@ impl HelperBrowser {
             reader: Some(reader),
             next_id: 1,
             pid,
+            exit: None,
         })
     }
 
     /// The helper's process id, for measurements.
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    /// After [`BrowserView::shutdown`]: whether the helper ended by itself with success, and how
+    /// it ended (its exit status, or "killed after 3 s" when it did not stop by itself).
+    pub fn exit(&self) -> Option<(bool, &str)> {
+        self.exit.as_ref().map(|(ok, how)| (*ok, how.as_str()))
     }
 
     fn send(&self, message: ToHelper) {
@@ -188,7 +196,10 @@ impl BrowserView for HelperBrowser {
             let deadline = Instant::now() + Duration::from_secs(3);
             loop {
                 match child.try_wait() {
-                    Ok(Some(_)) => break,
+                    Ok(Some(status)) => {
+                        self.exit = Some((status.success(), status.to_string()));
+                        break;
+                    }
                     Ok(None) if Instant::now() < deadline => {
                         std::thread::sleep(Duration::from_millis(20))
                     }
@@ -196,6 +207,7 @@ impl BrowserView for HelperBrowser {
                         eprintln!("app: helper did not stop in time, killing it");
                         let _ = child.kill();
                         let _ = child.wait();
+                        self.exit = Some((false, "killed after 3 s".into()));
                         break;
                     }
                 }

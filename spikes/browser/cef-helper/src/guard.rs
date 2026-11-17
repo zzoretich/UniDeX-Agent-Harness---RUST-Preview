@@ -47,7 +47,9 @@ pub fn check(is_subprocess: bool) -> Result<(), String> {
         .append(true)
         .open(&file)
     {
-        let _ = writeln!(log, "{} {} {role}", now.as_millis(), std::process::id());
+        // One write per line, so concurrent starts do not interleave their lines.
+        let line = format!("{} {} {role}\n", now.as_millis(), std::process::id());
+        let _ = log.write_all(line.as_bytes());
     }
     let recent = std::fs::read_to_string(&file)
         .unwrap_or_default()

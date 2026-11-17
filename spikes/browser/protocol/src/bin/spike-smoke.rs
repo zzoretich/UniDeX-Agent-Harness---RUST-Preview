@@ -1,11 +1,16 @@
 //! A headless check of the helper protocol, for CI runners without a GPU or a display.
 //!
 //! ```sh
-//! spike-smoke [--frames N] [--timeout-s S] [--hold-s S] [--expect-marker] -- <helper program> [helper args...]
+//! spike-smoke [--frames N] [--timeout-s S] [--hold-s S] [--expect-marker] [--expect-sandbox]
+//!             -- <helper program> [helper args...]
 //! ```
 //!
 //! `--hold-s` keeps the helper running that long after the checks, so a CI step can inspect its
-//! sub-processes (for example whether Chromium's renderer runs inside its sandbox on Linux).
+//! sub-processes. Before shutting the helper down, the smoke check prints its process tree with
+//! each process's sandbox state as the OS reports it (macOS: `sandbox_check`; Linux: the seccomp
+//! mode and namespaces; Windows: not read). `--expect-sandbox` fails the check unless every
+//! process other than CEF's browser process reports itself sandboxed (macOS and Linux). The
+//! helper must also exit by itself within 3 s of `Shutdown` with status 0.
 //!
 //! Starts the helper the way the app does (piped stdin and stdout, inherited shared memory),
 //! asks for an 800 x 600 view, makes the two DevTools calls (navigate, evaluate), waits for
@@ -33,6 +38,7 @@ fn main() -> ExitCode {
     let timeout = Duration::from_secs(value("--timeout-s").unwrap_or(30));
     let expect_marker = own.iter().any(|a| a == "--expect-marker");
     let hold = Duration::from_secs(value("--hold-s").unwrap_or(0));
+    let expect_sandbox = own.iter().any(|a| a == "--expect-sandbox");
     let Some(program) = rest.get(1) else {
         eprintln!("smoke: usage: spike-smoke [options] -- <helper program> [helper args...]");
         return ExitCode::from(2);
@@ -105,7 +111,32 @@ fn main() -> ExitCode {
         eprintln!("smoke: holding the helper for {} s", hold.as_secs());
         std::thread::sleep(hold);
     }
+    let tree = spike_protocol::tree::ProcessTree::default().sample(browser.pid() as i32);
+    for p in &tree {
+        eprintln!(
+            "smoke: process {} {} sandboxed={:?} ({})",
+            p.pid, p.kind, p.sandboxed, p.sandbox_detail
+        );
+    }
+    let others: Vec<_> = tree.iter().filter(|p| p.kind != "browser").collect();
+    let sandbox_ok = if tree.is_empty() {
+        eprintln!(
+            "smoke: the process tree is not read on this platform; sandbox state not inspected"
+        );
+        !expect_sandbox
+    } else {
+        !others.is_empty() && others.iter().all(|p| p.sandboxed == Some(true))
+    };
+    eprintln!(
+        "smoke: sub-processes {} , all sandboxed: {sandbox_ok}",
+        others.len()
+    );
     browser.shutdown();
+    let (clean_exit, exit) = browser
+        .exit()
+        .map(|(ok, how)| (ok, how.to_string()))
+        .unwrap_or((false, "unknown".into()));
+    eprintln!("smoke: helper exit: {exit} (clean: {clean_exit})");
 
     let navigated = replies
         .iter()
@@ -127,6 +158,8 @@ fn main() -> ExitCode {
         && navigated
         && evaluated.is_some()
         && exited.is_none()
+        && clean_exit
+        && (!expect_sandbox || sandbox_ok)
         && (!expect_marker || marker_ok);
     if ok {
         eprintln!("smoke: ok");

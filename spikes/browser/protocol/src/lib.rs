@@ -7,9 +7,11 @@
 //! - [`helper`]: `HelperBrowser`, the `BrowserView` that spawns a helper process (the stand-in
 //!   now, the CEF helper in phase B) and turns its messages into events.
 //! - [`usage`]: a process's own CPU time and memory, for the trial's measurements.
+//! - [`tree`]: the helper's process tree: CPU, memory and Chromium's sandbox state per process.
 
 pub mod helper;
 pub mod shm;
+pub mod tree;
 pub mod usage;
 pub mod view;
 pub mod wire;

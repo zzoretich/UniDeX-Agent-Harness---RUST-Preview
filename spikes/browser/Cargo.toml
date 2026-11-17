@@ -8,12 +8,16 @@
 # `cef-helper` is a member but not a default member, and its CEF dependency is optional:
 #
 #   cargo check -p spike-cef-helper --features dox   # type-checks against the CEF bindings, downloads nothing
-#   cargo build -p spike-cef-helper --features cef   # phase B only: the bindings' build script fetches CEF
-#                                                    # unless CEF_PATH points at an extracted copy
+#   cargo build -p spike-cef-helper --features cef   # the bindings' build script fetches CEF unless
+#                                                    # CEF_PATH points at an extracted copy (phase B:
+#                                                    # ./build-cef-macos.sh on macOS; the workflow
+#                                                    # spike-browser.yml on Linux and Windows)
+#   cargo build -p spike-cef-helper-win              # Windows only: the helper as the DLL CEF's
+#                                                    # bootstrap executable loads
 
 [workspace]
 resolver = "3"
-members = ["protocol", "standin", "app", "cef-helper"]
+members = ["protocol", "standin", "app", "cef-helper", "cef-helper-win"]
 default-members = ["protocol", "standin", "app"]
 
 [workspace.package]
