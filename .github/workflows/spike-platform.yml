@@ -1,0 +1,96 @@
+name: spike-platform
+
+# Temporary workflow for the Task 11 trial (spikes/platform, decisions 0010 and 0011). It builds the throwaway spike
+# on the three platforms and runs the parts that need no display: the headless tests (GPUI's test platform drives the
+# text fields through key dispatch and the input-handler trait: composition, a dead key, a cancelled composition,
+# Enter in the multi-line field), the binary's `--headless` checks (link metadata and argument parsing), and a
+# validation of the bundle metadata with the platform's own tool. The windowed `--selfcheck` is never run here: the
+# runners have no display (and no tray host), so on Linux and Windows this shows that the GUI and tray code compile,
+# not that they work. Remove this file with the spike.
+
+on:
+  pull_request:
+    paths:
+      - "spikes/platform/**"
+      - ".github/workflows/spike-platform.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Same hardening as ci.yml: read-only token, no persisted credentials, actions pinned to full commit SHAs, fixed
+# runner labels, no secrets, and no event text in any script.
+#
+# Linux packages: ci.yml's list for GPUI (pkg-config, libfontconfig-dev, libxcb1-dev, libxkbcommon-x11-dev), plus
+#   libgtk-3-dev        the tray's default Linux backend (tray-icon's AppIndicator backend and muda link GTK 3;
+#                       libayatana-appindicator3 is loaded at run time, so it is not needed to build)
+#   desktop-file-utils  desktop-file-validate, for the `unidex://` desktop entry
+#
+# Not run here: cargo-deny on the spike. The spike is not in the repository's workspace, and its findings are
+# recorded in decision 0011 (the AppIndicator backend brings glib 0.18.5, RUSTSEC-2024-0429, unsound; the KSNI
+# backend brings ksni, licensed Unlicense).
+
+jobs:
+  spike:
+    name: spike platform (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/platform
+    steps:
+      # Before checkout, so line endings never change file contents (the registry file is committed with CRLF).
+      - name: Keep line endings as committed
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install the Linux packages GPUI and the tray build against
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev \
+            libgtk-3-dev desktop-file-utils
+      - name: Format
+        run: cargo fmt --check
+      - name: Build (default tray backend)
+        run: cargo build --locked
+      - name: Headless tests (GPUI test platform, link metadata)
+        run: cargo test --locked
+      - name: Headless checks of the binary
+        run: ./target/debug/platform-trial --headless
+      - name: Validate Info.plist
+        if: runner.os == 'macOS'
+        run: plutil -lint bundle/Info.plist
+      - name: Validate the desktop entry
+        if: runner.os == 'Linux'
+        run: desktop-file-validate bundle/unidex-platform-trial.desktop
+      - name: Type-check the KSNI tray backend
+        if: runner.os == 'Linux'
+        run: cargo check --locked --no-default-features --features tray-ksni

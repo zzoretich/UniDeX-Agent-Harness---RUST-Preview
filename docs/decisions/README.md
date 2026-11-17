@@ -13,4 +13,8 @@ meaning. To change one, write a new record and set the old one's status to "supe
 | [0005](0005-platform-tiers.md) | Platform support in tiers | accepted |
 | [0006](0006-addon-vendor-terms.md) | Add-on vendor terms (Claude Code and Codex over ACP) | proposed |
 | [0007](0007-gpui-source-and-pins.md) | GPUI source and pins | accepted |
+| [0008](0008-chat-and-terminal-trial.md) | Streaming chat and terminal trial | accepted |
+| [0009](0009-pty-crate.md) | PTY crate | accepted |
+| [0010](0010-platform-integration-trial.md) | Platform integration trial | accepted |
+| [0011](0011-tray-crate.md) | Tray crate | accepted |
 | [0012](0012-embedded-browser-trial.md) | Embedded browser trial | accepted with open questions |
