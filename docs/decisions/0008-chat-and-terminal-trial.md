@@ -59,7 +59,22 @@ three runs on `alacritty_terminal`, one on `portable-pty`). Windows were activat
 for inactive windows was turned off (`inactive_frame_interval: None`) so a lost focus could not throttle a run. Commands: `sh spikes/chat-term/run-macos.sh
 <folder> 3` (plain), `TARGET_DIR=target/kit CHAT_ARGS="--renderer kit" sh run-macos.sh <folder> 3 --features kit`,
 `TARGET_DIR=target/profiler sh run-macos.sh <folder> 1 --features profiler`, `sh run-term-macos.sh <folder> 3`, and
-`headless-check` three times; `python3 summarize.py <folder>` turns the JSON into the tables below.
+`headless-check` three times; `python3 summarize.py <folder>` turns the JSON into the tables below. The raw result
+files were not committed: the
+tables in this record are the kept evidence, and the trial code is deleted at the M0 gate.
+
+### Sources and provenance
+
+Read as reference, all permissively licensed: the pinned `gpui-pre` 0.3.12 crates (the `list` element, the window draw
+loop and frame pacing, the profiler, the text system, keystroke parsing, the elements, and the `input.rs` and
+`list_example.rs` examples), `gpui-pre-macos` (key names), `gpui-component` 0.10.0 and `gpui-base` 0.10.0 (the markdown
+`TextView`, `TextViewState`, `MessageScroller` and the selection modules), `alacritty_terminal` 0.26.0, `vte` 0.15.0,
+`portable-pty` 0.9.0 and `libc` 0.2.191, all from the cargo registry; crates.io and GitHub API pages for versions,
+dates and licences (details in [0009](0009-pty-crate.md)); the design spec (sections 5.7, 5.10, 8, 9 and 11.4),
+decision 0007, the cookbook and the Electron baseline record. The trial's code was written for the trial against those
+crates' public APIs; the spike source carries no credit for copied code and the trial's report records none. Nothing was
+read or copied from the editor project's crates that are not permissively licensed (its terminal view, markdown and
+editor crates in particular).
 
 ## Results
 
@@ -126,10 +141,13 @@ background thread. A streamed token counts as painted only once the parse that c
 | Footprint after scrolling the whole thread | 122 to 128 MiB (state dropped as rows leave) | 145 to 149 MiB (prepared blocks kept) |
 
 The kit's runs agree with each other closely; the plain renderer's vary between runs (see above), so the two compare
-best on their worst runs: on frame pacing they are close, the kit a little behind when the window resizes and on the
-first visit, and slightly ahead on memory because it forgets rows it no longer draws (and parses them again when they
-return). The kit adds 33 crates to the resolved graph (all targets) (all permissively licensed; one, `instant`, carries an unmaintained
-notice).
+best on their worst runs. On frame pacing the kit is behind the plain renderer in places, as the table shows: while
+resizing, 27 to 40 intervals over 1.5 times the refresh interval against 12 to 23, and a token p99 of 20.8 to 22.2 ms
+against 15.7 to 18.0 ms; on the first-visit scroll, 1 to 7 intervals over twice the refresh interval against 0 or 1;
+and start-up 17 ms later at the median. It is ahead on memory because it forgets rows it no longer draws (and parses
+them again when they return). The kit adds 33 crates to the resolved graph, counted from `cargo metadata` over all
+targets and all dependency kinds; a later recount over normal dependency edges only gave 31, and the difference was not
+traced. All are permissively licensed; one, `instant`, carries an unmaintained notice.
 
 ### Where a frame's time goes (GPUI's profiler, plain renderer, one run)
 
@@ -148,8 +166,10 @@ p99 in ms. GPUI renders and lays out the list's rows, and shapes their text, ins
 
 The profiler's present-to-present intervals and the probe's paint-to-paint intervals count the same slow frames, so the
 probe (which runs in every build) tracks presented frames. The time that makes frames late is the prepaint of rows
-that are new to the view; while the window is being resized, the present call itself can also take several ms (the
-platform resizing its drawable). Start-up in the profiler build: median 166 ms to the first frame painted (141 to
+that are new to the view, which includes shaping their text; the share that is text shaping is likely but not isolated,
+because a row's first draw here also pays the trial's own markdown parse and run preparation. Pre-preparing every row
+before the scroll and re-running the first-visit pass would isolate it; that was not done. While the window is being
+resized, the present call itself can also take several ms (the platform resizing its drawable). Start-up in the profiler build: median 166 ms to the first frame painted (141 to
 176, ten launches).
 
 ### Terminal (our grid element over `alacritty_terminal`, both PTY backends)
@@ -185,18 +205,38 @@ all three runs; the PTY figures are in 0009.
 
 ### Against the design's targets and the Electron baseline
 
+Read every verdict below as "in the trial, on this machine", with these caveats: the machine is an Apple silicon
+desktop, not the design's reference machine (a laptop), and a 120 Hz display leaves 8.3 ms per frame instead of
+10 ms; the trial's start-up is an unsigned release build with no home screen and no real work at start (the thread is
+generated in memory); and the Electron start-up figure is a lower bound for the shipped app, not its figure (the
+baseline ran the released JavaScript on the development Electron binary with a mock Keychain, so asar integrity checks,
+the Keychain lookup, signature checks and Gatekeeper are not in it).
+
 | Target (section 9) | This trial (macOS, release) | Electron 2.7.0, same machine | Verdict |
 |---|---|---|---|
-| Cold start to first frame under 400 ms | Fresh process, file cache warm: 152 ms painted, 164 ms presented (medians of 10); first launch after a build: 627 ms (one observation) | Fresh process, file cache warm: 724 ms visible, 665 ms rendered; first launch of a session: 2,835 ms (one observation) | Met for a fresh process, with the thread generated in memory rather than read from disk; a first launch after a reboot was not measured |
-| No periodic wake-ups when idle | 0 frames and 0.00 CPU-s in 30 s; `top` counts 0 to 2 wake-ups in 25 s. Terminal: 1 frame without blink; 58 frames (the blink) with it | 625 wake-ups and 1.2 CPU-s per 60 s | Met |
-| Idle memory under 150 MB | 40 MiB footprint idle; 145 to 149 MiB after scrolling all 5,000 messages | 239 MiB footprint idle | Met at start; at the limit after a full scroll, because nothing is evicted |
-| 5,000-message scroll with no dropped frames | At 2,000 px/s: 0 to 20 of 1,000 intervals over 1.5 times the refresh interval, 0 or 1 over twice it; 0 to 6 over 16.7 ms. At 30,000 px/s: 3.5 to 6.3 % over 1.5 times | At 2,000 px/s: 2 of 9,998 over 1.5 times (15 ms), the longest 20.6 ms (over twice); at 10,000 px/s none over 15 ms | Not met as written: a few slow frames when rows enter the view for the first time; close to Electron at 2,000 px/s |
-| First streamed token on screen within 50 ms | p99 11 to 14 ms to the painted frame in the 5,000-message thread (add at most one refresh, 10 ms, for presentation); 16 to 18 ms while resizing | 304 to 641 ms in the 5,000-message thread | Met, by a wide margin |
+| Cold start to first frame under 400 ms | Fresh process, file cache warm: 152 ms painted, 164 ms presented (medians of 10); first launch after a build: 627 ms (one observation) | Fresh process, file cache warm: 724 ms visible, 665 ms rendered; first launch of a session: 2,835 ms (one observation) | Met in the trial, on this machine, for a fresh process with the thread generated in memory; the 627 ms first launch after a build is over the target; a first launch after a reboot was not measured |
+| No periodic wake-ups when idle | Chat: 0 frames and 0.00 CPU-s in 30 s, three runs. Terminal: 1 frame without blink; 58 frames in 30 s with the cursor blinking | 625 wake-ups and 1.2 CPU-s per 60 s | Met in the trial for the chat only (no frames, no CPU). The terminal with its blink on draws about two frames a second. The verdict rests on frame counts and CPU time, not on the `top` counter |
+| Idle memory under 150 MB | 40 MiB footprint idle; 145 to 149 MiB after scrolling all 5,000 messages | 239 MiB footprint idle | Met at start in the trial; at the limit after a full scroll, because nothing is evicted |
+| 5,000-message scroll with no dropped frames | At 2,000 px/s, paint intervals: 0 to 20 of 1,000 over 1.5 times the refresh interval, 0 or 1 over twice it; 0 to 6 over 16.7 ms. At 30,000 px/s: 3.5 to 6.3 % over 1.5 times. Frame-signal intervals: see below | At 2,000 px/s: 2 of 9,998 over 1.5 times (15 ms), the longest 20.6 ms (over twice); at 10,000 px/s none over 15 ms | Not met as written, and on this measure worse than Electron: up to 20 of 1,000 first-visit intervals (2 %) against 2 of 9,998 (0.02 %), about a hundred times the rate; up to 6.3 % on the fast pass against none for Electron at 10,000 px/s (a slower pass, so that pair is not like for like) |
+| First streamed token on screen within 50 ms | Rendering path only: p99 11 to 14 ms from an in-process channel send to the end of paint, for steady tokens into a row that already exists in the 5,000-message thread (add at most one refresh, 10 ms, for presentation); 16 to 18 ms while resizing | 304 to 641 ms from the CLI writing the reply to it on screen, in the 5,000-message thread (includes file watching and rendering) | Not comparable with the Electron figure and not the target's measure. The rendering path costs 11 to 14 ms per token at p99, which leaves room inside the 50 ms target; the first-token path through a real provider (process, network, creating the row) was not measured |
+
+How the scroll was measured, and which measure to trust. Scrolling was driven programmatically (`list.scroll_by` from
+a next-frame callback), which misses real trackpad input; the Electron baseline also set its scroll from script, and
+records that a trackpad scroll was not measured. Two measures were recorded for each scroll run. The paint intervals
+(the table above) are the time between the ends of successive paints. The frame-signal intervals are the time between
+successive next-frame callbacks, the closest in kind to the baseline's `requestAnimationFrame` timestamps. On the
+frame-signal measure the first-visit scroll at 2,000 px/s had 0, 0 and 0 of 999 intervals over 1.5 times the refresh
+interval (longest 10.4 to 14.7 ms), the second visit 0, 0 and 0, the fast pass 0, 0 and 1 of about 4,615 (the one
+also over twice, 20.0 ms), and the random jumps 2, 0 and 3 of 659. The two measures disagree, and the trial does not
+explain why. The profiler build's intervals between successive present calls matched
+the paint intervals (14 of 999 over 1.5 times at 2,000 px/s on a first visit; 157 of 4,614 on the fast pass), so the
+paint-interval figures are the ones the verdict rests on, and the frame-signal figures show only the cadence of the
+callbacks.
 
 The Electron app lays out all 5,000 messages when the thread opens (322 ms, a 574,784 px tall page), so scrolling only
 moves pixels the compositor already has; the GPUI list lays out only what is visible and shapes text as rows come into
-view. That is why its start-up and its token latency are far better and its scrolling is slightly worse on a first
-visit. The slow frames concentrate where many new rows appear at once: the first pass at 2,000 px/s, the fast pass,
+view. That is why its start-up is far better and its scrolling worse on a first visit; the token latencies cannot be
+compared (see the table). The slow frames concentrate where many new rows appear at once: the first pass at 2,000 px/s, the fast pass,
 and jumps (the frame after a jump does 3 to 15 ms of draw work).
 
 The runs disagree with each other more than the frames within a run do: in the second run of every chat scenario the
@@ -222,13 +262,20 @@ core through a channel into a GPUI task, with each message's parsed markdown kep
 parsed incrementally; build the terminal as our own element over `alacritty_terminal`, with the PTY from 0009.
 
 **Widget kit:** do not adopt it for the thread list (GPUI's `list` is enough, and the kit's `MessageScroller` is a thin
-wrapper over it) or for the terminal (it has nothing for a cell grid). For message bodies, adopt the kit's unstyled
-layer, `gpui-base`, and its markdown `TextView`, which already passes the licence policy: it brings selection, copy,
-link handling, code-block highlighting hooks and a background, incremental streaming parse that GPUI does not have and
-the plain renderer would have to build, at a measured cost close to our own renderer's. Two conditions come with it:
-hold one `TextViewState` per message in an app-level cache (rather than the element-keyed form, which drops its parse
-whenever a row leaves the view), and check that a long message whose parse lands a frame later does not shift the rows
-around it. The styled layer (`gpui-component`) is not needed for these two surfaces.
+wrapper over it) or for the terminal (it has nothing for a cell grid). For message bodies the recommendation is
+provisional: adopt the kit's unstyled layer, `gpui-base`, and its markdown `TextView` (it already passes the licence
+policy) for the selection, copy, link handling, code-block highlighting hooks and background, incremental streaming
+parse that GPUI does not have and the plain renderer would have to build, if the checks below hold. Its measured cost is
+not "close to our own renderer's"; it is worse in places: while resizing, 27 to 40 intervals over 1.5 times the refresh
+interval against 12 to 23, and a token p99 of about 21 ms against 16 to 18 ms; on a first-visit scroll, 1 to 7
+intervals over twice the refresh interval against 0 or 1; and start-up 17 ms later (169 against 152 ms). It is smaller in
+memory after a full scroll. Two limits on the evidence: the kit was measured only in its element-keyed form, which
+drops its parse whenever a row leaves the view, while the form recommended here (one `TextViewState` per message in an
+app-level cache) was not measured; and selection and links, the reasons for adopting it, were not exercised. Before the
+recommendation is final, measure: the cached-state form in the same scenarios (scroll, jumps, stream, resize);
+selection and copy within a message and across messages in the virtualised list; link activation; and that a long
+message whose parse lands a frame later does not shift the rows around it. None of that was measured here. The styled
+layer (`gpui-component`) is not needed for these two surfaces.
 
 ## Who decided
 
@@ -239,9 +286,10 @@ A design call from the M0 trial (Task 10), within decision 0002 and design secti
 - The chat needs, as its own work: a cache of prepared messages with eviction (memory grows with every message seen
   otherwise), a persistent cache of shaped text or a smarter first-visit path if the scroll target is to be met
   strictly (GPUI keeps line layouts only from the previous frame, so a row that leaves the view is shaped again when
-  it returns), and a scrollbar that copes with unmeasured rows (estimated heights, or GPUI's uniform height hint).
-- Streaming is not where the risk is: the token path (Tokio task, channel, GPUI task, incremental parse, one row
-  re-measured, frame) is about 7 ms at the median and 13 ms at p99 to a painted frame, and the parse is a few
+  it returns; that shaping is the likely, not isolated, cause of the slow first-visit frames), and a scrollbar that copes with unmeasured rows (estimated heights, or GPUI's uniform height hint).
+- Streaming is probably not where the risk is: the rendering path for a token (Tokio task, channel, GPUI task,
+  incremental parse, one row re-measured, frame) is about 7 ms at the median and 13 ms at p99 to a painted frame, for
+  steady tokens into an existing row (the first token of a reply, and a real provider, were not measured), and the parse is a few
   microseconds per token. Even a full re-parse of a 40 KB message per token would fit (0.08 ms); incremental parsing
   matters more for very long messages and for keeping prepared blocks stable.
 - Text selection across messages, link activation, syntax highlighting, IME input in the terminal, right-to-left
@@ -287,11 +335,16 @@ A design call from the M0 trial (Task 10), within decision 0002 and design secti
 
 ## What remains unverified
 
-- Everything visual on Linux and Windows. The runners have no display, so CI shows that `chat` and `term` compile on
-  the three platforms and that their windowless self-tests pass (`--selftest`: every message's text runs cover its text
-  on character boundaries; GPUI keystrokes map to the expected bytes), and runs `headless-check` (markdown, keys, the
-  emulator, both PTY backends with real child processes). It does not show a window, a frame time or a glyph on Linux
-  or Windows. Task 13 looks at rendering without hardware.
+- Everything visual on Linux and Windows. The runners have no display, so nothing visual was verified there: no
+  window, frame time or glyph. CI (workflow run 44093008374 on commit 332cbf2, all three jobs green) shows that `chat`
+  and `term` build in release on macOS, Linux and Windows, that `--features kit,profiler` type-checks there, and that
+  their windowless self-tests pass (`--selftest`: every message's text runs cover its text on character boundaries;
+  GPUI keystrokes map to the expected bytes). `headless-check` (markdown, keys, the emulator, both PTY backends with real
+  child processes) passed with 48 of 48 on macOS, 46 passed and 0 failed on Linux with 2 warnings, and 38 passed and 0
+  failed on Windows with 2 warnings. The Linux warnings are the `vi` resize check on both backends (`vi` still reported
+  80x24 after a resize to 70x18, and the check timed out); the Windows warnings are the 33-key raw keystroke round trip
+  on both backends, which stopped at the key "z" with no reply, so it is an open question for the real terminal on
+  Windows. Details are in [0009](0009-pty-crate.md). Task 13 looks at rendering without hardware.
 - What the frames look like on macOS: no screenshots were taken (the trial may not capture the screen), so glyph
   fallback for emoji and CJK, right-to-left shaping of the Arabic and Hebrew messages, wrapping of long lines and the
   terminal's colours were checked only through the emulator's state and the app's own records. The maintainer's
