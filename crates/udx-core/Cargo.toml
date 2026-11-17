@@ -6,3 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+
+[dev-dependencies]
+tempfile = "3"
+udx-test-support = { path = "../udx-test-support" }

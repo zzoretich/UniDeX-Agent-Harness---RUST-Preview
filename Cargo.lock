@@ -501,6 +501,18 @@ dependencies = [
 [[package]]
 name = "udx-core"
 version = "0.0.1"
+dependencies = [
+ "tempfile",
+ "udx-test-support",
+]
+
+[[package]]
+name = "udx-test-support"
+version = "0.0.1"
+dependencies = [
+ "tempfile",
+ "udx-core",
+]
 
 [[package]]
 name = "unicode-ident"
