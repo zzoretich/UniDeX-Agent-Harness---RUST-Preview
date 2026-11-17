@@ -1,0 +1,90 @@
+name: spike-chat-term
+
+# Temporary workflow for the Task 10 trial (spikes/chat-term, decisions 0008 and 0009). It builds the throwaway spike
+# on the three platforms and runs the parts that need no display: the headless check (incremental markdown, key
+# encoding, the terminal emulator, and both PTY backends driving real child processes) and the windowless self-tests
+# of the two GPUI binaries. The GPUI windows themselves are never opened here: the runners have no display, so on
+# Linux and Windows this shows that the GUI code compiles, not that it works. Remove this file with the spike.
+
+on:
+  pull_request:
+    paths:
+      - "spikes/chat-term/**"
+      - ".github/workflows/spike-chat-term.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-chat-term-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Same hardening as ci.yml: read-only token, no persisted credentials, actions pinned to full commit SHAs, fixed
+# runner labels, no secrets, and no event text in any script. Linux packages: ci.yml's list for GPUI, plus vim-tiny
+# so the full-screen check has a `vi` to run.
+
+jobs:
+  spike:
+    name: spike chat-term (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/chat-term
+    steps:
+      # Before checkout, so line endings never change file contents.
+      - name: Keep line endings as committed
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install the Linux packages GPUI builds against, and vi
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev vim-tiny
+      # The core crate has no GPUI, so the headless check builds and runs first, on its own.
+      - name: Build the headless check
+        run: cargo build --release --locked -p chat-term-core --bin headless-check
+      - name: Headless check (markdown, keys, emulator, both PTY backends)
+        env:
+          PLATFORM: ${{ matrix.name }}
+        run: |
+          set -eu
+          rc=0
+          ./target/release/headless-check --out "headless-${PLATFORM}.json" || rc=$?
+          echo "----- headless-${PLATFORM}.json -----"
+          cat "headless-${PLATFORM}.json" || true
+          exit "$rc"
+      - name: Build the GPUI binaries (chat, term)
+        run: cargo build --release --locked -p chat-term-app --bins
+      - name: Windowless self-tests of the GPUI binaries
+        run: |
+          set -eu
+          ./target/release/chat --selftest
+          ./target/release/term --selftest
+      - name: Type-check the widget-kit and profiler variants
+        run: cargo check --locked -p chat-term-app --bins --features kit,profiler
