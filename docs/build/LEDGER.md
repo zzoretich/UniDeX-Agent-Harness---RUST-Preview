@@ -66,6 +66,15 @@ the current plan under `docs/design/plans/`.
 | 2026-11-17 | M0 | Task 16 stage 1 | reviewer | Sonnet | 1 | 213k | needs fixes: 4 important | #14 |
 | 2026-11-17 | M0 | Task 16 stage 1 | builder (fix round) | Sonnet | 1 | 200k | done | #14 |
 | 2026-11-17 | M0 | Task 16 stage 1 | re-reviewer | Sonnet | 1 round | 166k | approved | #14 |
+| 2026-11-17 | M0 | Task 16 the M0 gate, stage 2 | builder (cookbook builder) | Opus | 1 | 563k | done | #15 |
+| 2026-11-17 | M0 | Task 16 | builder (documents drafter) | Sonnet | 1 | 201k | done | #15 |
+| 2026-11-17 | M0 | Task 16 | reviewer (code) | Sonnet | 1 | 225k | needs fixes: 2 important | #15 |
+| 2026-11-17 | M0 | Task 16 | reviewer (documents) | Sonnet | 1 | 185k | needs fixes: 2 important | #15 |
+| 2026-11-17 | M0 | Task 16 | builder (fresh, fix round, code and documents) | Sonnet | 1 | 163k | done | #15 |
+| 2026-11-17 | M0 | Task 16 | re-reviewer | Sonnet | 1 | 132k | approved | #15 |
+| 2026-11-17 | M0 | Task 16 | reviewer (final whole-branch) | Opus | 1 | 503k | ready to merge with fixes: 10 important, none critical | #15 |
+| 2026-11-17 | M0 | Task 16 | builder (fresh, final fix wave) | Opus | 1 | 371k | done | #15 |
+| 2026-11-17 | M0 | Task 16 | re-reviewer (final) | Sonnet | 1 | 202k | approved | #15 |
 
 ## Notes
 

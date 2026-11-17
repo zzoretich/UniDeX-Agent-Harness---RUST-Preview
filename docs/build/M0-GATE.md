@@ -874,32 +874,34 @@ not recorded; a total marked "+" is a lower bound. Rows are in `docs/build/LEDGE
 | 13 Rendering trial | 475k+ O | | n/r S | n/r S | n/r S | 475k+ | 3 builder rounds, 1 review, 1 fix round |
 | 14 Packaging | 355k S (3 CI rounds and 1 fix round) | | 273k O | | 121k S | 749k | 1 review, 1 fix round |
 | 15 Electron baseline | 443k O | | 146k+ S | 142k S | | 731k+ | 1 review, 1 fix round |
-| 16 The M0 gate, stage 1 | 570k O (drafter) | | 213k S | 200k S | 166k S | 1,149k+ | 1 review, 1 fix round; stage 2 not yet recorded |
+| 16 The M0 gate, stage 1 | 570k O (drafter) | | 213k S | 200k S | 166k S | 1,149k | 1 review, 1 fix round |
+| 16 The M0 gate, stage 2 and final review | 563k O (cookbook builder), 201k S (documents drafter) | | 225k S (code), 185k S (documents), 503k O (final whole-branch) | 163k S, 371k O | 132k S, 202k S | 2,545k | 1 review each of code and documents, 1 fix round and 1 re-review; then 1 final review, 1 fix wave, 1 re-review. Task 16 in all: 1,149 + 2,545 = 3,694k |
 
 S is Sonnet, O is Opus. Incomplete figures: Task 5 (reviewer), 6, 9, 11 and 12 (each a re-reviewer), 10 (later fix
-and re-review turns), 13 (only the first builder's first two rounds are recorded), 12 (phase A is the agent's noted
-context size, not a reported figure), and Task 16 (stage 2 is not yet recorded; the controller adds it at close). The
+and re-review turns), 13 (only the first builder's first two rounds are recorded), and 12 (phase A is the agent's noted
+context size, not a reported figure). The
 controller's own usage is not recorded anywhere and is not included.
 
-**Recorded total, Tasks 1 to 16 (Task 16's stage 1 only): about 12.9 million tokens** (a lower bound). The arithmetic:
+**Recorded total, Tasks 1 to 16 (Task 16 with both stages and the final review): about 15.4 million tokens** (a lower bound). The arithmetic:
 the rows of Tasks 1 to 13 and 15 sum to 10,962k (211 + 825 + 445 + 1,067 + 101 + 1,006 + 494 + 697 + 800 + 1,098 + 839 +
-2,173 + 475 + 731); Task 14 is 355 + 273 + 121 = 749k; Task 16 stage 1 is 570 + 213 + 200 + 166 = 1,149k; 10,962 + 749 +
-1,149 = 12,860k.
+2,173 + 475 + 731); Task 14 is 355 + 273 + 121 = 749k; Task 16 is 570 + 213 + 200 + 166 = 1,149k for stage 1 and 563 + 201 + 225 + 185 + 163 + 132 + 503 + 371 + 202 = 2,545k
+for stage 2 and the final review, 3,694k in all; 10,962 + 749 + 3,694 = 15,405k.
 
-By role: builders about 6.35M (about half; Opus 5.03M, Sonnet 1.32M), reviewers about 3.48M (27 %), fresh fix agents
-about 1.64M (13 %), separate re-reviewers 0.99M recorded (8 %), test authors 0.40M (3 %). The arithmetic, in thousands:
-builders 5,427 + 355 + 570 = 6,352 (Opus 4,464 + 570 = 5,034; Sonnet 963 + 355 = 1,318); reviewers 2,997 + 273 + 213 =
-3,483; fresh fix agents 1,443 + 200 = 1,643; re-reviewers 700 + 121 + 166 = 987; test authors 395. These sum to
-12,860k. Task 14's fix round was its own builder, so it is inside the builder's 355k; Task 16's fix round was a fresh
-agent.
+By role: builders about 7.12M (46 %; Opus 5.60M, Sonnet 1.52M), reviewers about 4.40M (29 %), fresh fix agents
+about 2.18M (14 %), separate re-reviewers 1.32M recorded (9 %), test authors 0.40M (3 %). The arithmetic, in thousands:
+builders 5,427 + 355 + 570 + 764 (563 + 201) = 7,116 (Opus 4,464 + 570 + 563 = 5,597; Sonnet 963 + 355 + 201 = 1,519);
+reviewers 2,997 + 273 + 213 + 913 (225 + 185 + 503) = 4,396; fresh fix agents 1,443 + 200 + 534 (163 + 371) = 2,177;
+re-reviewers 700 + 121 + 166 + 334 (132 + 202) = 1,321; test authors 395. These sum to
+15,405k. Task 14's fix round was its own builder, so it is inside the builder's 355k; Task 16's fix rounds were fresh
+agents.
 
 By kind of task: code with a separate test author (Tasks 2, 3) 0.45M to 0.83M; CI and packaging (Tasks 4, 14) 0.75M to
 1.07M; documents with a Sonnet builder (Tasks 5, 7) 0.1M+ to 0.49M+; research documents with an Opus builder (Tasks 6,
-8, 15) 0.70M+ to 1.01M+; the gate report (Task 16, stage 1 only) 1.15M+; GPUI integration (Task 9) 0.80M+; trials
+8, 15) 0.70M+ to 1.01M+; the gate report (Task 16, both stages and the final review) 3.69M; GPUI integration (Task 9) 0.80M+; trials
 (Tasks 10 to 13) 0.84M+ to 2.2M+.
 
 The plan's stop thresholds (500k per attempt for a code or document task, 1M for a trial) held, with one exception: no
-code or document agent passed 500k except the gate report's drafter (570k, Task 16 stage 1); the largest of the others
+code or document agent passed 500k except three of the gate's (the stage 1 drafter at 570k, the stage 2 cookbook builder at 563k and the final whole-branch reviewer at 503k, all Task 16); the largest of the others
 was the threat model's author at 430k. Several trial agents passed 500k (the largest 614k, cumulative over three CI
 rounds), none reached 1M.
 
@@ -963,9 +965,10 @@ a task that needs one stops and reports. These are caps, not forecasts: most M0 
 | Trial | 1.3M; 2.6M for a high-risk one | ordinary: builder 600k, reviewer 250k, fix agent 300k, re-reviewer 100k, 50k reserve; high-risk: two builder phases of 600k, reviewer 400k, fix agents 650k, re-reviewers 150k, 200k reserve | Task 10: 1,098k+ (Tasks 11, 13: 839k+, 475k+); Task 12: about 2,173k+. 1,098k x 1.2 = 1,318k, so 1.3M; 2,173k x 1.2 = 2,608k, so 2.6M |
 
 With Task 14 included the rule gives the same figures. Its total is 749k, below Task 4's 1,067k, which stays the
-highest recorded for CI or packaging, so that row is still 1.3M. Task 16 is left out of the rule: its stage 1 alone is
-1,149k, above the document budget, because a gate report reads every record; stage 2 is not yet recorded, and it is the
-only task of its kind. That suggests the 0.6M the M1 estimate gives the gate report is low.
+highest recorded for CI or packaging, so that row is still 1.3M. Task 16 is left out of the rule: it cost
+1,149 + 2,545 = 3,694k in all (stage 1, then stage 2 and the final review), above the document budget, because a gate
+report reads every record, and stage 2 also built the cookbook; it is the only task of its kind. That suggests the 0.6M
+the M1 estimate gives the gate report is low: this gate cost more than six times that.
 
 **M1 as a whole: 22 million tokens**, with a check-in at 11 million. Reasoning, to be replaced by the M1 architect's
 real task list: design 6 puts one hosted and one local provider, the engine loop, core tools, the shell sandbox,
@@ -975,12 +978,13 @@ each of three platforms, permission cards and the chat window (7 x 1.3M = 9.1M);
 provider clients, file tools, shell and web tools, the session log, `unidex chat`, the mock provider with golden tests,
 the evaluation harness (8 x 1.0M = 8.0M); two CI tasks, signed nightlies and the automation-socket harness (2 x 1.3M =
 2.6M); two documents, the threat model update and the gate report (2 x 0.6M = 1.2M); and the gate's security review
-(0.5M). Total 0.5 + 9.1 + 8.0 + 2.6 + 1.2 + 0.5 = 21.9M, called 22M. It is a cap: M0's sixteen tasks used about 12.9M
+(0.5M). Total 0.5 + 9.1 + 8.0 + 2.6 + 1.2 + 0.5 = 21.9M, called 22M. It is a cap: M0's sixteen tasks used about 15.4M
 recorded (a lower bound), and the earlier draft of these figures gave 18.3M. If you prefer a lower cap, the earlier
 figures (700k for a code unit, 400k for a document, 900k for a research document and for a CI task) are below the
 highest recorded M0 totals by 125k, 94k, 106k and 167k respectively, so tasks as large as those would stop and report.
-The 22M total is also short if a gate report costs what this one's first stage did (about 1.15M against the 0.6M
-allowed): by about 0.5M or more.
+The 22M total is also short if the M1 gate costs what this one did (3,694k against the 0.6M
+allowed): by about 3.1M. Part of that was the cookbook's code and the final whole-branch review, so a gate that adds no
+cookbook would cost less.
 
 ### Pacing
 
