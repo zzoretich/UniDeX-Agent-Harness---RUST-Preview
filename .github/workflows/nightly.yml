@@ -8,8 +8,11 @@ name: nightly
 # The packages are UNSIGNED trial builds, named so, and are not releases. Signing is not set up: when the
 # maintainer supplies signing identities as CI secrets, the macOS signing and notarization settings go in
 # packaging/Packager.toml and the secrets are passed through the environment of the "Package" step of the macOS
-# job, in this file and only there. The Windows installer would be signed in a step after "Package". Until
-# those exist, a missing secret never fails a build: there is no secret to miss.
+# job, in this file and only there. Windows signing is likewise a setting of the "Package" step (cargo-packager signs
+# the program, the uninstaller and the installer itself), not a later step. Before any secret is added: it must not be
+# available to pull_request runs, the -vv flag on "Package" (it traces the whole configuration) must go, and the
+# per-platform signing environment needs a condition on the operating system (decision 0014). Until then there is
+# no secret to miss.
 #
 # Triggers:
 #   schedule            once a day, and only when there has been a commit in the last 25 hours (see "Decide").
@@ -47,9 +50,13 @@ env:
 #   cargo-packager 0.11.8   `cargo install --locked --version`: cargo checks every downloaded crate against the
 #                           checksum in the registry index and builds with the crate's own lockfile. There is no
 #                           separate published hash of cargo-packager itself. On first use cargo-packager
-#                           downloads NSIS (Windows); it verifies that download against a hash compiled into the
-#                           tool (nsis-3.09.zip SHA-1, nsis_tauri_utils.dll SHA-1); decision 0014 lists what is
-#                           and is not verified.
+#                           downloads NSIS (Windows); it verifies the NSIS archive and nsis_tauri_utils.dll
+#                           against hashes compiled into the tool (SHA-1), and WiX the same way (not used here).
+#                           NOT hash-checked, and fetched on every run: on Windows the NSIS ApplicationID plugin
+#                           (its DLL is shipped inside the installer), and on macOS the create-dmg shell script
+#                           (pinned to a commit in its URL, executed on the runner). Before any build is released
+#                           to users each must be hash-checked or supplied from a verified copy; decision 0014
+#                           lists what is and is not verified.
 
 jobs:
   decide:
@@ -71,7 +78,9 @@ jobs:
           set -eu
           # A scheduled run on an idle repository would spend the scarce macOS runner for nothing, so it builds
           # only when the newest commit is at most 25 hours old: the schedule is every 24 hours, and the extra
-          # hour covers a late start. A day with no commit is skipped; the day after a commit builds it. A
+          # hour allows a short late start. It is approximate: a run that starts more than an hour late, or is
+          # dropped, leaves a commit unbuilt by the schedule, and a commit made in the hour before a run is built
+          # twice. A day with no commit is skipped; the day after a commit builds it. A
           # failed nightly is not retried by the next one (use workflow_dispatch). Every other event builds.
           run=true
           if [ "${EVENT_NAME}" = "schedule" ]; then

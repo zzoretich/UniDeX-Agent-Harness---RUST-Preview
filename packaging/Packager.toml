@@ -19,6 +19,7 @@ productName = "UniDeX Rust Preview"
 version = "0.0.1"
 identifier = "example.unidex.rust-preview.trial"
 description = "Trial build of the UniDeX Rust Preview cookbook window"
+longDescription = "An unsigned trial package of the UniDeX Rust Preview, built by the project's nightly workflow. It is not a release."
 publisher = "UniDeX contributors"
 authors = ["UniDeX contributors"]
 copyright = "Copyright (c) UniDeX contributors"
