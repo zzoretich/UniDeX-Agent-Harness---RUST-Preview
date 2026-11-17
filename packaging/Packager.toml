@@ -22,12 +22,14 @@ description = "Trial build of the UniDeX Rust Preview cookbook window"
 publisher = "UniDeX contributors"
 authors = ["UniDeX contributors"]
 copyright = "Copyright (c) UniDeX contributors"
-licenseFile = "../LICENSE"
 category = "DeveloperTool"
 
 binariesDir = "../target/packaging/bin"
 outDir = "../target/packaging/out"
 binaries = [{ path = "unidex-rust-preview", main = true }]
+# The MIT notice travels with the program as a resource. (`licenseFile` is not used: on macOS it makes the dmg show a
+# click-through licence agreement when opened, which an MIT program does not need.)
+resources = [{ src = "../LICENSE", target = "LICENSE" }]
 
 [deb]
 packageName = "unidex-rust-preview"

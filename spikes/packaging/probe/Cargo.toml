@@ -38,3 +38,7 @@ upgrade-guid = "5F6E4D3C-2B1A-4F0E-9D8C-7B6A5F4E3D2C"
 path-guid = "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"
 license = false
 eula = false
+
+# cargo-dist ignores a package marked `publish = false` unless told otherwise (round 1).
+[package.metadata.dist]
+dist = true

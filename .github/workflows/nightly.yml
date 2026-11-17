@@ -135,12 +135,14 @@ jobs:
           cp "target/release/examples/hello_window${ext}" "target/packaging/bin/unidex-rust-preview${ext}"
           ls -l target/packaging/bin
       - name: Install cargo-packager
+        timeout-minutes: 25
         run: |
           set -eu
           cargo install --locked --version 0.11.8 cargo-packager
           cargo packager --version
       # The signing secrets, once they exist, are passed here and only here (see the header).
       - name: Package
+        timeout-minutes: 20
         run: |
           set -eu
           case "$RUNNER_OS" in
@@ -153,6 +155,7 @@ jobs:
           echo "everything under target/packaging/out:"
           find target/packaging/out | sort
       - name: Collect the unsigned packages
+        timeout-minutes: 5
         run: |
           set -eu
           ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' packaging/Packager.toml)
@@ -183,6 +186,7 @@ jobs:
               cp "$(pick '*.exe')" "$out/${base}-windows-x86_64-setup.exe" ;;
           esac
       - name: Show what was built
+        timeout-minutes: 10
         run: |
           set -eu
           cd target/packaging/artifacts
@@ -197,7 +201,8 @@ jobs:
               *.dmg)
                 mnt="$RUNNER_TEMP/dmg-mount"
                 mkdir -p "$mnt"
-                hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$f"
+                # "Y" answers the agreement prompt if an image ever carries one; without it hdiutil cancels.
+                hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$f" <<< "Y"
                 find "$mnt" -maxdepth 3 | sort
                 codesign -dv "$mnt"/*.app 2>&1 || true
                 hdiutil detach "$mnt" ;;

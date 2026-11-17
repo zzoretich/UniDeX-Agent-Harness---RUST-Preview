@@ -109,6 +109,7 @@ jobs:
 
       # ---- cargo-packager ----
       - name: Install cargo-packager
+        timeout-minutes: 30
         id: pk_install
         continue-on-error: true
         run: |
@@ -116,6 +117,7 @@ jobs:
           cargo install --locked --version 0.11.8 cargo-packager
           cargo packager --version
       - name: cargo-packager, macOS app and dmg
+        timeout-minutes: 20
         id: pk_mac
         if: runner.os == 'macOS'
         continue-on-error: true
@@ -123,16 +125,19 @@ jobs:
           CI: "1"
         run: cargo packager --release -c packaging/Packager.toml --formats app,dmg -vv
       - name: cargo-packager, Linux deb
+        timeout-minutes: 15
         id: pk_deb
         if: runner.os == 'Linux'
         continue-on-error: true
         run: cargo packager --release -c packaging/Packager.toml --formats deb -vv
       - name: cargo-packager, Linux deb with a setuid file
+        timeout-minutes: 15
         id: pk_setuid
         if: runner.os == 'Linux'
         continue-on-error: true
         run: cargo packager --release -c spikes/packaging/packager-setuid.toml --formats deb -vv
       - name: cargo-packager, Linux AppImage
+        timeout-minutes: 15
         id: pk_appimage
         if: runner.os == 'Linux'
         continue-on-error: true
@@ -140,27 +145,42 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: cargo packager --release -c packaging/Packager.toml --formats appimage -vv
       - name: cargo-packager, Linux pacman
+        timeout-minutes: 15
         id: pk_pacman
         if: runner.os == 'Linux'
         continue-on-error: true
         run: cargo packager --release -c packaging/Packager.toml --formats pacman -vv
+      - name: cargo-packager, Linux AppImage with an icon
+        timeout-minutes: 15
+        id: pk_appimage2
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo packager --release -c spikes/packaging/packager-appimage.toml --formats appimage -vv
       - name: cargo-packager, Windows NSIS
+        timeout-minutes: 15
         id: pk_nsis
         if: runner.os == 'Windows'
         continue-on-error: true
         run: cargo packager --release -c packaging/Packager.toml --formats nsis -vv
       - name: cargo-packager, Windows WiX
+        timeout-minutes: 15
         id: pk_wix
         if: runner.os == 'Windows'
         continue-on-error: true
         run: cargo packager --release -c packaging/Packager.toml --formats wix -vv
       - name: cargo-packager outputs
+        timeout-minutes: 5
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: |
           set -eu
-          sh spikes/packaging/diag.sh target/packaging/out target/packaging/out-setuid
+          for d in target/packaging/out target/packaging/out-setuid target/packaging/out-appimage; do
+            if [ -d "$d" ]; then sh spikes/packaging/diag.sh "$d"; else echo "(no $d on this platform or it failed)"; fi
+          done
       - name: cargo-packager, macOS dmg inspection
+        timeout-minutes: 10
         if: ${{ !cancelled() && runner.os == 'macOS' }}
         continue-on-error: true
         run: |
@@ -170,7 +190,7 @@ jobs:
           hdiutil imageinfo "$dmg" | head -n 30
           mnt="$RUNNER_TEMP/dmg-mount"
           mkdir -p "$mnt"
-          hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$dmg"
+          hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$dmg" <<< "Y"
           ls -la "$mnt"
           app=$(find "$mnt" -maxdepth 1 -name '*.app' | head -n 1)
           echo "app: $app"
@@ -183,6 +203,7 @@ jobs:
           spctl --assess --type execute -vv "$app" 2>&1 || true
           hdiutil detach "$mnt"
       - name: cargo-packager, Linux deb inspection, install and removal
+        timeout-minutes: 10
         if: ${{ !cancelled() && runner.os == 'Linux' }}
         continue-on-error: true
         run: |
@@ -203,21 +224,40 @@ jobs:
           echo "deb: $sdeb"
           dpkg-deb --contents "$sdeb"
       - name: cargo-packager, Windows NSIS install and uninstall (silent)
+        timeout-minutes: 8
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         continue-on-error: true
+        shell: pwsh
         run: |
-          set -eu
-          exe=$(find target/packaging/out -name '*setup*.exe' | head -n 1)
-          echo "installer: $exe"
-          7z l "$exe" | tail -n 40 || true
-          "$exe" /S
-          sleep 5
-          find "$LOCALAPPDATA" "/c/Program Files" -maxdepth 2 -iname '*unidex*' 2>/dev/null || true
-          dir=$(find "$LOCALAPPDATA" -maxdepth 2 -iname '*unidex*' -type d | head -n 1)
-          echo "installed to: $dir"
-          ls -la "$dir"
-          if [ -f "$dir/uninstall.exe" ]; then "$dir/uninstall.exe" /S; sleep 5; ls -la "$dir" || echo "folder removed"; fi
+          # Round 1 hung here for two hours: the installer, started from bash with /S, never returned. Each
+          # process is now waited for with a limit and killed, so a hang is reported as this step's result.
+          $ErrorActionPreference = 'Stop'
+          function Run-Limited($file, $argList, $seconds) {
+            $p = Start-Process -FilePath $file -ArgumentList $argList -PassThru
+            if (-not $p.WaitForExit($seconds * 1000)) {
+              Write-Output "STILL RUNNING after $seconds s: $file $argList"
+              Get-Process | Where-Object { $_.ProcessName -match 'unidex|setup|uninstall|Au_' } | Format-Table Id, ProcessName, MainWindowTitle, Responding
+              $p.Kill()
+              return -1
+            }
+            Write-Output "exit code $($p.ExitCode): $file $argList"
+            return $p.ExitCode
+          }
+          $exe = (Get-ChildItem target/packaging/out -Filter '*setup*.exe' -File | Select-Object -First 1).FullName
+          Write-Output "installer: $exe"
+          $rc = Run-Limited $exe '/S' 120
+          Start-Sleep -Seconds 3
+          Get-ChildItem $env:LOCALAPPDATA, 'C:\Program Files' -Filter '*unidex*' -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Output "found: $($_.FullName)"; Get-ChildItem $_.FullName -Recurse | Format-Table FullName, Length }
+          Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match 'UniDeX' } | Format-List DisplayName, DisplayVersion, Publisher, InstallLocation, UninstallString
+          $dir = (Get-ChildItem $env:LOCALAPPDATA -Filter '*unidex*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if ($dir -and (Test-Path (Join-Path $dir.FullName 'uninstall.exe'))) {
+            $null = Run-Limited (Join-Path $dir.FullName 'uninstall.exe') '/S' 120
+            Start-Sleep -Seconds 3
+            if (Test-Path $dir.FullName) { Get-ChildItem $dir.FullName -Recurse | Format-Table FullName, Length } else { Write-Output 'folder removed' }
+          }
+          if ($rc -ne 0) { exit 1 }
       - name: cargo-packager, Windows MSI contents
+        timeout-minutes: 5
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         continue-on-error: true
         run: |
@@ -228,6 +268,7 @@ jobs:
 
       # ---- cargo-deb (Linux) ----
       - name: Install cargo-deb
+        timeout-minutes: 30
         id: cd_install
         if: runner.os == 'Linux'
         continue-on-error: true
@@ -236,6 +277,7 @@ jobs:
           cargo install --locked --version 3.8.0 cargo-deb
           cargo deb --version
       - name: cargo-deb, build, inspect, install
+        timeout-minutes: 10
         id: cd_run
         if: runner.os == 'Linux'
         continue-on-error: true
@@ -257,6 +299,7 @@ jobs:
 
       # ---- cargo-dist ----
       - name: Install cargo-dist
+        timeout-minutes: 30
         id: dist_install
         continue-on-error: true
         run: |
@@ -264,6 +307,7 @@ jobs:
           cargo install --locked --version 0.34.0 cargo-dist
           dist --version
       - name: Install cargo-wix (Windows, for cargo-dist's MSI)
+        timeout-minutes: 30
         id: wix_install
         if: runner.os == 'Windows'
         continue-on-error: true
@@ -273,6 +317,7 @@ jobs:
           cargo wix --version
           ls "/c/Program Files (x86)" | grep -i wix || echo "no WiX folder under Program Files (x86)"
       - name: cargo-dist, plan and build
+        timeout-minutes: 15
         id: dist_run
         continue-on-error: true
         run: |
@@ -289,6 +334,7 @@ jobs:
           dist build --artifacts=local --target "$host" --output-format=human
           sh ../diag.sh target/distrib
       - name: cargo-dist, archive contents
+        timeout-minutes: 5
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: |
@@ -304,7 +350,13 @@ jobs:
           done
 
       # ---- Velopack ----
+      - name: Install .NET for Velopack (the macOS image has no .NET 10 runtime)
+        if: runner.os == 'macOS'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
       - name: Install Velopack vpk
+        timeout-minutes: 10
         id: vpk_install
         continue-on-error: true
         run: |
@@ -312,6 +364,7 @@ jobs:
           dotnet tool install vpk --tool-path "$RUNNER_TEMP/vpk-tool" --version 1.2.161
           "$RUNNER_TEMP/vpk-tool/vpk" --version
       - name: Velopack, pack
+        timeout-minutes: 10
         id: vpk_run
         continue-on-error: true
         run: |
@@ -333,6 +386,7 @@ jobs:
             --packDir target/packaging/bin --mainExe "$exe" --outputDir target/packaging/velopack $extra
           sh spikes/packaging/diag.sh target/packaging/velopack
       - name: Velopack, output contents
+        timeout-minutes: 5
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: |
@@ -356,6 +410,7 @@ jobs:
           path: |
             target/packaging/out
             target/packaging/out-setuid
+            target/packaging/out-appimage
             target/packaging/out-cargo-deb
             target/packaging/velopack
             spikes/packaging/probe/target/distrib
@@ -370,6 +425,7 @@ jobs:
           PK_SETUID: ${{ steps.pk_setuid.outcome }}
           PK_APPIMAGE: ${{ steps.pk_appimage.outcome }}
           PK_PACMAN: ${{ steps.pk_pacman.outcome }}
+          PK_APPIMAGE2: ${{ steps.pk_appimage2.outcome }}
           PK_NSIS: ${{ steps.pk_nsis.outcome }}
           PK_WIX: ${{ steps.pk_wix.outcome }}
           CD_INSTALL: ${{ steps.cd_install.outcome }}
