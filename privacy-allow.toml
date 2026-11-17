@@ -92,6 +92,8 @@ reason = "invented test vectors"
 path = "xtask/tests/**"
 rule = "PrivateAddress"
 values = [
+    "0010.1.2.3",
+    "10.1.2.0003",
     "10.1.2.3",
     "100.64.0.7",
     "169.254.0.9",
