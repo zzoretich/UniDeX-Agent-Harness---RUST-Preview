@@ -311,29 +311,40 @@ early: every unproven technology is tried in M0, and a real window exists from M
 
 ## 7. Parity with the Electron app
 
-M0 replaces this table with one row per section of the Electron app's smoke and acceptance documents. Until then:
+`docs/acceptance/CHECKLIST.md` decides the fate of each of the Electron app's 346 acceptance items; the table below
+sums it per source section.
 
-| Electron feature | Rust Preview | Milestone |
-|---|---|---|
-| Sessions, Vault chat, History | Carried over, on the `Engine` trait | M1, M4 |
-| Code tab: terminals, diff pane | Carried over | M4 |
-| Code tab: chat over a live terminal | Replaced by ACP sessions | M5 |
-| Cross-review and handoff | Carried over, between any two engines or roles | M5 |
-| Memory, recall, wrap-up, feedback rules and drafts | Carried over | M3 |
-| Local-model management | Carried over | M4 |
-| Cost tracking | Carried over, from provider usage data | M2 |
-| Pulse, Notifications, Proposals, Routines | Carried over | M6 |
-| Chief of Staff | Carried over; runs on any role's model | M6 |
-| Computer pane | Carried over: embedded Chromium (5.8) | M7 |
-| Spaces, Files, To-Do, Runs | Carried over | M8 |
-| Brain hub and notes editor | Carried over | M9 |
-| Brain Map | Changed: drawn from links our own index finds. The external graph builder is not carried over. (Design call.) | M9 |
-| Agents, Agent Teams, Skills | Carried over as UniDeX's own; importable from other tools' folders, no mirroring | M10 |
-| Connectors | Carried over as MCP servers for our engine | M10 |
-| App links, multiple windows, quit gate | Carried over (`unidex://`) | M4 |
-| Tray popover, command palette, quick capture, tour | Carried over | M4 to M11 |
-| Setup wizard that downloads Node, uv, the CLIs | Dropped: one binary. Onboarding offers a provider, a key or a local model | M11 |
-| Host plugins, hooks, status line, CLAUDE.md edits | Dropped (non-goal) | none |
+| source section                                         | items | carry | change | drop | milestones         |
+|--------------------------------------------------------|-------|-------|--------|------|--------------------|
+| Install paths                                          | 3     | 1     | 2      | 0    | M4                 |
+| The app                                                | 12    | 4     | 3      | 5    | M4, M11            |
+| Files                                                  | 27    | 25    | 2      | 0    | M8                 |
+| Settings                                               | 16    | 5     | 9      | 2    | M4, M5, M6         |
+| Config (both hosts)                                    | 5     | 0     | 3      | 2    | M1, M6             |
+| Pulse                                                  | 17    | 9     | 7      | 1    | M4, M6             |
+| To-Do                                                  | 8     | 8     | 0      | 0    | M8                 |
+| Proposals                                              | 9     | 7     | 2      | 0    | M6                 |
+| Notifications                                          | 9     | 7     | 2      | 0    | M6                 |
+| Agent teams (both hosts)                               | 4     | 1     | 3      | 0    | M10                |
+| Agent Teams tab (both hosts)                           | 11    | 8     | 3      | 0    | M10                |
+| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M4                 |
+| Spaces / Runs                                          | 23    | 13    | 9      | 1    | M8                 |
+| Brain                                                  | 28    | 20    | 7      | 1    | M3, M9             |
+| Routines                                               | 11    | 6     | 3      | 2    | M6                 |
+| Skills (both hosts)                                    | 10    | 2     | 3      | 5    | M10                |
+| Connectors (both hosts)                                | 17    | 5     | 5      | 7    | M10                |
+| Agents (both hosts)                                    | 8     | 0     | 3      | 5    | M10                |
+| Cross-review and handoff (both hosts; each run spends) | 3     | 0     | 3      | 0    | M5                 |
+| Codex host                                             | 22    | 0     | 8      | 14   | M3, M5, M6, M8, M9 |
+| Vault chat (per provider)                              | 6     | 0     | 6      | 0    | M4                 |
+| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M2, M4, M5, M10    |
+| Code                                                   | 27    | 12    | 9      | 6    | M4, M5, M8         |
+| Computer pane (per host; each turn spends)             | 29    | 20    | 7      | 2    | M7                 |
+| Launch sequence                                        | 6     | 0     | 4      | 2    | M6, M11            |
+| Guided tour                                            | 6     | 5     | 1      | 0    | M11                |
+| Telemetry switch                                       | 2     | 0     | 0      | 2    | none               |
+| Review readiness                                       | 3     | 2     | 1      | 0    | M4, M6             |
+| **total**                                              | 346   | 168   | 116    | 62   |                    |
 
 ## 8. Platforms
 
