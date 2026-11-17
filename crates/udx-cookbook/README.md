@@ -57,17 +57,17 @@ machines and CI runners without it keep working. To turn it on for one shell ses
 export RUSTC_WRAPPER=sccache
 ```
 
-Then build as usual. `sccache --show-stats` shows the hit rate. Turn it off with `unset RUSTC_WRAPPER`. The cache lives in
-sccache's default folder, limited to 10 GB unless `SCCACHE_CACHE_SIZE` says otherwise. Measured build times are in
+Then build as usual. `sccache --show-stats` shows the hit rate. Turn it off with `unset RUSTC_WRAPPER`. The cache lives
+in sccache's default folder, limited to 10 GB unless `SCCACHE_CACHE_SIZE` says otherwise. Measured build times are in
 decision 0007.
 
 ## Upgrade GPUI
 
 An upgrade is its own change, on its own branch, never mixed with feature work.
 
-1. Pick the new snapshot: the `gpui-pre` version that the newest `gpui-kit` release requires (read it from that release's
-   dependencies on crates.io), unless decision 0007 has been superseded. Note the upstream commit it was cut from, which
-   is in the crate's description and in `[package.metadata.gpui-pre]` of its `Cargo.toml`.
+1. Pick the new snapshot: the `gpui-pre` version that the newest `gpui-kit` release requires (read it from that
+   release's dependencies on crates.io), unless decision 0007 has been superseded. Note the upstream commit it was cut
+   from, which is in the crate's description and in `[package.metadata.gpui-pre]` of its `Cargo.toml`.
 2. Change the version in both lines of `[workspace.dependencies]` in the root `Cargo.toml`, keeping the exact `=x.y.z`
    form, then run `cargo update -p gpui-pre -p gpui-pre-platform` so `Cargo.lock` follows (every other `gpui-pre-*`
    crate moves with them). Read the lockfile diff.
@@ -75,8 +75,8 @@ An upgrade is its own change, on its own branch, never mixed with feature work.
    crate folder (sources, `build.rs`, `vendor/`) against its `gpui-pre-*` copy in the cargo registry, and read every
    "Modified for gpui-pre" notice. Then compare each manifest's dependency tables (names, versions, features, and any
    swap from a git source to a registry release) with upstream's manifest and workspace `Cargo.toml`, including
-   `[patch.crates-io]`. Any change that has no notice, or that decision 0007 does not document, stops the upgrade until it
-   is understood and recorded.
+   `[patch.crates-io]`. Any change that has no notice, or that decision 0007 does not document, stops the upgrade until
+   it is understood and recorded.
 4. Build and run the cookbook (`cargo build --workspace --examples --locked`, then
    `cargo run -p udx-cookbook --example hello_window`) and fix every example and UI crate the new snapshot breaks. Then
    run the full local gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
@@ -92,5 +92,5 @@ An upgrade is its own change, on its own branch, never mixed with feature work.
 GPUI and the `gpui-pre-*` snapshot crates are Apache-2.0. Much of the editor GPUI comes from is not permissively
 licensed, including its terminal view. Read permissively licensed code (GPUI itself, its examples and docs, GPUI Kit) as
 reference, and write the examples here in your own words. Never copy code from any crate or file that is not
-permissively licensed. Reviewers check where code came from, and `cargo deny` checks every dependency's licence, including GPUI's, which the cookbook takes as a dev-dependency
-(`include-dev = true` in `deny.toml`).
+permissively licensed. Reviewers check where code came from, and `cargo deny` checks every dependency's licence,
+including GPUI's, which the cookbook takes as a dev-dependency (`include-dev = true` in `deny.toml`).
