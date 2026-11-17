@@ -127,8 +127,9 @@ fn outside(dir: &Path, root: &Path) -> PathError {
 /// component is pushed and, if it is a symlink (dangling or not), replaced by
 /// its target, whose own components are then walked. A component that does not
 /// exist is kept and the walk continues, so a later `..` or symlink is still
-/// handled. `None` means a loop, an exhausted hop budget, or an unreadable
-/// link: the caller refuses.
+/// handled. `None` means a loop, an exhausted hop budget, or a component or
+/// link that cannot be read for any reason other than not existing: the caller
+/// refuses. The result's spelling is then settled by `normalise`.
 fn resolve_path(path: &Path) -> Option<PathBuf> {
     let mut hops = MAX_LINK_HOPS;
     let mut base = PathBuf::new();
@@ -144,7 +145,13 @@ fn resolve_path(path: &Path) -> Option<PathBuf> {
             Some(Component::RootDir | Component::Prefix(_)) => base.push(&part),
             Some(Component::Normal(_)) => {
                 base.push(&part);
-                if std::fs::symlink_metadata(&base).is_ok_and(|m| m.file_type().is_symlink()) {
+                let is_link = match std::fs::symlink_metadata(&base) {
+                    Ok(m) => m.file_type().is_symlink(),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+                    // Anything else (for example no permission) cannot be trusted.
+                    Err(_) => return None,
+                };
+                if is_link {
                     hops = hops.checked_sub(1)?;
                     let target = std::fs::read_link(&base).ok()?;
                     base.pop();
@@ -156,7 +163,26 @@ fn resolve_path(path: &Path) -> Option<PathBuf> {
             }
         }
     }
-    Some(base)
+    Some(normalise(base))
+}
+
+/// Settle the spelling of a resolved path: canonicalize its longest existing
+/// prefix and append the rest. The path has no `..` and its existing
+/// components are already symlink-free, so only the spelling can change (for
+/// example `\\?\` prefixes or short names on Windows), never the location.
+fn normalise(path: PathBuf) -> PathBuf {
+    let mut prefix = path.clone();
+    let mut rest: Vec<OsString> = Vec::new();
+    loop {
+        if let Ok(real) = std::fs::canonicalize(&prefix) {
+            return rest.iter().rev().fold(real, |p, part| p.join(part));
+        }
+        match prefix.file_name() {
+            Some(name) => rest.push(name.to_os_string()),
+            None => return path,
+        }
+        prefix.pop();
+    }
 }
 
 /// Queue the components of `path` so the first is walked next.

@@ -93,7 +93,8 @@ fn without_a_test_root_the_os_folders_are_used() {
 fn cargo_gives_every_test_process_a_test_root() {
     let root = std::env::var("UNIDEX_TEST_ROOT").unwrap();
     assert!(!root.is_empty());
-    let real_root = std::fs::canonicalize(&root).unwrap_or_else(|_| PathBuf::from(&root));
+    std::fs::create_dir_all(&root).unwrap();
+    let real_root = real(Path::new(&root));
     let p = AppPaths::resolve(&ProcessEnv).unwrap();
     assert!(p.config_dir.starts_with(&real_root));
     assert!(p.data_dir.starts_with(&real_root));
@@ -302,4 +303,22 @@ fn under_cargo_overrides_do_not_lift_the_requirement() {
         AppPaths::resolve(&env),
         Err(PathError::CargoWithoutTestRoot)
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_folder_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tmp();
+    let locked = root.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Permissions are not enforced for root, so there is nothing to test.
+    let enforced = std::fs::read_dir(&locked).is_err();
+    let via = locked.join("x").join("data");
+    let result = data_via(root.path(), &via);
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if enforced {
+        assert!(matches!(result, Err(PathError::OutsideTestRoot { .. })));
+    }
 }
