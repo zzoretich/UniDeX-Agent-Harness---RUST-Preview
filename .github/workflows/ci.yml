@@ -19,7 +19,19 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
 
-# Caching is added when GPUI arrives; the workspace is small until then.
+# Build caching (decision 0007): the jobs that compile GPUI (lint and test)
+# restore the cargo registry and `target/` with actions/cache/restore. Only a
+# push to main saves a cache, with actions/cache/save, so a pull request can
+# use main's cache but never write one (no poisoning from a pull request, and
+# pull requests do not crowd main's caches out of the repository's quota).
+# The key is the job, the platform, the toolchain file and Cargo.lock; a
+# lockfile change falls back to the newest cache of the same job, platform
+# and toolchain. A toolchain change starts cold.
+#
+# Linux: GPUI's build scripts and links need these packages (decision 0007):
+#   pkg-config, libfontconfig-dev (fontconfig and freetype), libxcb1-dev
+#   (x11rb links libxcb), libxkbcommon-x11-dev (xkbcommon and xkbcommon-x11).
+# Versions are the runner image's; apt packages are not pinned.
 #
 # Runner labels are fixed (never -latest). Source: the runner-images README
 # (github.com/actions/runner-images), general-availability table:
@@ -40,10 +52,37 @@ jobs:
           set -eu
           rustup toolchain install
           cargo --version
+      - name: Install the Linux packages GPUI builds against
+        shell: bash
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Restore the build cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: lint-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            lint-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Save the build cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   test:
     name: test (${{ matrix.name }})
@@ -73,9 +112,42 @@ jobs:
           set -eu
           rustup toolchain install
           cargo --version
+      - name: Install the Linux packages GPUI builds against
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Restore the build cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: test-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            test-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-
       - name: Test
         shell: bash
         run: cargo test --workspace --locked
+      # `cargo test` already builds every example; this step keeps the cookbook
+      # built even if the test command or an example's settings change.
+      - name: Build the cookbook examples
+        shell: bash
+        run: cargo build -p udx-cookbook --examples --locked
+      - name: Save the build cache
+        if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
   deny:
     name: deny
