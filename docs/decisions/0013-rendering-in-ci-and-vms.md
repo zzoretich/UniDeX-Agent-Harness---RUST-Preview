@@ -18,7 +18,7 @@ element tree back and capture a frame, without becoming a way into a user's runn
 test-only feature in a release build is threat 4 of the supply-chain section, with controls P37 and L13; endpoints
 are owner-only and peer-checked, L28 and P39; entry points take named verbs and validated arguments, L5); what
 "CI-verified" can honestly claim per platform; and whether virtual machines on the development machine (an Apple
-silicon laptop with 16 GB) should become a hands-on step. GPUI is the pinned `gpui-pre =0.3.12` snapshot (decision
+silicon desktop with 16 GB) should become a hands-on step. GPUI is the pinned `gpui-pre =0.3.12` snapshot (decision
 [0007](0007-gpui-source-and-pins.md)).
 
 Step 3 of the task (running virtual machines on the development machine) was not run: the maintainer has not approved

@@ -26,7 +26,7 @@ its features, its data formats, its design tokens, its security lessons and its 
   LM Studio, vLLM), assignable per role so one setup can mix them.
 - G3. Engine quality is measured, not assumed: an evaluation suite runs across a matrix of models (section 10.2).
 - G4. Claude Code, Codex and other agents usable as optional add-on engines through the Agent Client Protocol (ACP).
-  Removing them breaks nothing.
+  Removing them breaks nothing. Open at the M0 gate: see `docs/build/M0-GATE.md`, question 6.
 - G5. A native Rust UI on GPUI. No web view for the app's own screens.
 - G6. Chromium embedded inside the app window for the Computer screen (section 5.8).
 - G7. One codebase for macOS, Linux and Windows. A feature works on all three or is listed as an exception in section 8.
@@ -265,7 +265,8 @@ The Computer screen shows Chromium inside the app window and offers the same `co
   weeks, so each update is a recurring release task: new pins and hashes, a rebuilt and signed helper on every platform,
   and the checks run again (decision 0012).
 - On Windows the M0 trial chose CEF as well, run by CEF's bootstrap executable with the helper built as a library, the
-  arrangement Chromium's Windows sandbox needs. The OS-provided web view can sit under app-drawn UI only after a GPUI
+  arrangement Chromium's Windows sandbox needs. The evidence is headless CI runs under an elevated account, with nothing
+  drawn and no input tried (decision 0012; see `docs/build/M0-GATE.md`, question 20). The OS-provided web view can sit under app-drawn UI only after a GPUI
   change, so it is a fallback before an external window, not the first choice (decision 0012; design call).
 - If embedding fails on a platform in the M0 trial, that platform falls back to an external browser window and is
   listed as an exception in section 8. The other platforms are not held back.
@@ -279,7 +280,8 @@ this app and the Electron app.
 
 ### 5.10 Application
 
-- GPUI with the pinned widget kit; the Electron app's `--udx-*` tokens become a Rust theme, light and dark.
+- GPUI with the pinned widget kit; the Electron app's `--udx-*` tokens become a Rust theme, light and dark. Open at the
+  M0 gate: see `docs/build/M0-GATE.md`, question 23.
 - Screen state and actions live in `udx-ui-model`, which has no GPUI types. Screens in `udx-app` render that state and
   send actions. Most screen behaviour can therefore be tested on every platform without drawing anything, and less of
   the app is tied to the framework.
@@ -391,7 +393,7 @@ Support is stated in tiers, so a claim never outruns its evidence.
 What "CI-verified" means is made as strong as it can be without hardware: the build, the unit tests, the view-model
 tests, and end-to-end tests that drive the real app through its automation socket (section 10.3). M0 also checks whether
 virtual machines on the development machine can render the app; if they can, they become a hands-on step for Tier 2.
-Open at the M0 gate: see `docs/build/M0-GATE.md`, question 23 (virtual machines were researched, not run).
+Open at the M0 gate: see `docs/build/M0-GATE.md`, question 24 (virtual machines were researched, not run).
 
 The M0 trial showed what "CI-verified" covers on the hosted runners, which have no GPU, and the label claims this and no
 more (decision 0013; design call):
@@ -399,13 +401,13 @@ more (decision 0013; design call):
 - **Linux (x64):** the app builds and its tests pass; its window opens and renders on X11 under a virtual display
   through both of GPUI's Linux paths, Vulkan and OpenGL, on Mesa's software rasterisers; a frame is captured and
   checked automatically for the expected colours, layout and the presence of text; the automation socket clicks a
-  control, reads GPUI's accessibility tree and the app's element list, and captures a frame. Wayland rendered under a
+  control, reads GPUI's accessibility tree and the app's element list, and captures a frame (on X11). Wayland rendered under a
   headless compositor in the trial, but that check could not fail the job, so Wayland is not stated as checked until
   the real harness makes it a hard check.
 - **Windows (x64):** the app builds and its tests pass; its window renders on a Windows Server 2025 interactive session
   with a software Direct3D adapter (Direct3D 11 on Microsoft's software rasteriser, WARP); the composed window on
-  screen is captured and checked; the automation socket, over a named pipe only the user can open, clicks a control,
-  reads GPUI's accessibility tree and captures a frame.
+  screen is captured and checked; the automation socket, over a named pipe whose access list names only the current user (not verified against a
+  second local user), clicks a control, reads GPUI's accessibility tree and captures a frame.
 - **Not covered on either:** real GPU drivers; real desktop environments and window managers, and on Windows the
   client editions' shell; scaling other than 100 percent and multiple monitors; input methods and dead keys; input
   through the operating system rather than inside GPUI; real font configuration; the tray, notifications, file
@@ -417,8 +419,8 @@ more (decision 0013; design call):
 | PTY | `alacritty_terminal`'s own PTY (decision 0009) | `alacritty_terminal`'s own PTY (decision 0009) | ConPTY, through `alacritty_terminal` (decision 0009) |
 | Secrets | Keychain | Secret Service | Credential Manager |
 | Wake-up for routines | launchd | systemd user timer | Task Scheduler |
-| Tray | `tray-icon` (decision 0011) | separate crate; the backend is open at the M0 gate (`docs/build/M0-GATE.md`, question 11) | `tray-icon` (decision 0011) |
-| Browser | CEF, off-screen (decision 0012) | CEF, off-screen; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | CEF, off-screen, under CEF's bootstrap; the OS web view as a fallback (decision 0012) |
+| Tray | `tray-icon` (decision 0011) | separate crate; the backend is open at the M0 gate (`docs/build/M0-GATE.md`, question 11) | `tray-icon` (decision 0011); chosen, never run on Windows |
+| Browser | CEF, off-screen (decision 0012) | CEF, off-screen; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | CEF, off-screen, under CEF's bootstrap; the OS web view as a fallback (decision 0012); chosen on headless CI evidence, nothing drawn (`docs/build/M0-GATE.md`, question 20) |
 | Package | signed, notarized `.dmg` | `.deb` and a tarball; AppImage only without the browser; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | installer, signed if a certificate is supplied |
 
 Known exceptions at design time:
@@ -439,9 +441,9 @@ no GPU and cannot time frames reliably:
 
 - In CI, on every change: benchmarks of the core, download size, and a count of idle wake-ups. A regression fails the
   change.
-- At each milestone gate, on the reference machine (meant to be an Apple silicon laptop with 16 GB): cold start, frame
-  pacing and token latency. A miss blocks the gate. M0's measurements, the Electron baseline and the trials, were taken
-  on an Apple silicon desktop with 16 GB and external displays at 100 Hz and 60 Hz, not on that laptop.
+- At each milestone gate, on the reference machine (an Apple silicon laptop with 16 GB): cold start, frame pacing and
+  token latency. A miss blocks the gate. M0's measurements, the Electron baseline and the trials, were taken on an
+  Apple silicon desktop with 16 GB and external displays at 100 Hz and 60 Hz, not on that laptop.
 
 Open at the M0 gate: which machine is the reference, and how each target is defined; see `docs/build/M0-GATE.md`,
 question 3.
@@ -554,9 +556,10 @@ is available if the maintainer turns it on.
 - Screen layouts follow the Electron app's design unless section 7 or `docs/acceptance/CHECKLIST.md` says otherwise.
 
 Settled in M0, so no longer left open: the GPUI source and pin (the `gpui-pre` 0.3.12 snapshot, set once in the
-workspace manifest; the widget kit is not adopted yet; decision 0007), the PTY crate (`alacritty_terminal`'s own PTY;
-decision 0009), and the tray crate on macOS and Windows (`tray-icon`; decision 0011). The Linux tray backend is open at
-the M0 gate: see `docs/build/M0-GATE.md`, question 11.
+workspace manifest; decision 0007), the PTY crate (`alacritty_terminal`'s own PTY; decision 0009), and the tray crate on
+macOS and Windows (`tray-icon`; decision 0011). The Linux tray backend is open at the M0 gate: see
+`docs/build/M0-GATE.md`, question 11. Decision 0007 pinned the GPUI snapshot the widget kit requires and deferred the
+kit itself; whether it is adopted is open at the M0 gate: see `docs/build/M0-GATE.md`, question 23.
 
 ## 14. Main risks
 
