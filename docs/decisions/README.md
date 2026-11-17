@@ -14,3 +14,4 @@ meaning. To change one, write a new record and set the old one's status to "supe
 | [0007](0007-gpui-source-and-pins.md) | GPUI source and pins | accepted |
 | [0008](0008-chat-and-terminal-trial.md) | Streaming chat and terminal trial | accepted |
 | [0009](0009-pty-crate.md) | PTY crate | accepted |
+| [0013](0013-rendering-in-ci-and-vms.md) | Rendering in CI and in virtual machines | accepted with open questions |
