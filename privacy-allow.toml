@@ -62,8 +62,11 @@ rule = "Email"
 values = [
     "icon@2x.io",
     "jane.roe@corp.io",
+    "noreply@github.com.example.io",
     "other.person@corp.io",
+    "someone@github.com",
     "x@y.io",
+    "xnoreply@github.com",
 ]
 reason = "invented test vectors"
 

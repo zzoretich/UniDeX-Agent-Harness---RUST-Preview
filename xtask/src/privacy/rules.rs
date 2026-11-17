@@ -101,6 +101,8 @@ fn email_allowed(m: &str) -> bool {
     if m.ends_with("@users.noreply.github.com")
         || m == "noreply@anthropic.com"
         || m == "git@github.com"
+        // GitHub's own committer address for merges made through its interface.
+        || m == "noreply@github.com"
     {
         return true;
     }
