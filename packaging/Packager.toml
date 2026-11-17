@@ -1,0 +1,49 @@
+# Packaging configuration for cargo-packager (decision 0014). Read by .github/workflows/nightly.yml:
+#   cargo packager --release -c packaging/Packager.toml --formats <list>
+#
+# Paths are relative to this folder (cargo-packager changes into the config's folder). The workflow stages the
+# release build of the cookbook window as target/packaging/bin/unidex-rust-preview (with .exe on Windows) and
+# collects the packages in target/packaging/out.
+#
+# The identity below is a PLACEHOLDER for the trial, not the product's identity. The maintainer confirms the
+# bundle identifier and display name (decision 0014, "Proposed identity"); until then nothing built from this
+# file is a release. No personal name, account handle or personal domain may appear in this file: where a format
+# needs a publisher or maintainer it gets the project-level value "UniDeX contributors".
+#
+# Signing is absent. When the maintainer supplies signing identities as CI secrets, `[macos] signingIdentity` and
+# the notarization settings are added here (macOS) and the workflow passes them through its environment; until
+# then every package is unsigned and says so in its artifact name.
+
+name = "unidex-rust-preview"
+productName = "UniDeX Rust Preview"
+version = "0.0.1"
+identifier = "example.unidex.rust-preview.trial"
+description = "Trial build of the UniDeX Rust Preview cookbook window"
+publisher = "UniDeX contributors"
+authors = ["UniDeX contributors"]
+copyright = "Copyright (c) UniDeX contributors"
+licenseFile = "../LICENSE"
+category = "DeveloperTool"
+
+binariesDir = "../target/packaging/bin"
+outDir = "../target/packaging/out"
+binaries = [{ path = "unidex-rust-preview", main = true }]
+
+[deb]
+packageName = "unidex-rust-preview"
+section = "devel"
+# Runtime libraries of the pinned GPUI snapshot on Linux. Checked against `ldd` of the staged binary in the
+# workflow's diagnostics; the browser component will add its own later.
+depends = [
+  "libc6",
+  "libfontconfig1",
+  "libfreetype6",
+  "libxcb1",
+  "libxkbcommon0",
+  "libxkbcommon-x11-0",
+  "libwayland-client0",
+  "libvulkan1",
+]
+
+[macos]
+minimumSystemVersion = "13.0"
