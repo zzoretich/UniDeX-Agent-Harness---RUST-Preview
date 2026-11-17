@@ -1,7 +1,7 @@
 # M0 gate report
 
-Status: draft, stage 1 of 2 · 2026-11-17. Stage 2 adds decision 0014 (packaging), the cookbook patterns, the removal of
-the trial code and the full gate run; the places it fills are marked "Stage 2".
+Status: complete, awaiting the maintainer · 2026-11-17. It includes decision 0014 (packaging), the cookbook patterns
+and the removal of the trial code.
 
 This report is for the maintainer. It says what milestone M0 built, what its trials found, and what only the
 maintainer can decide before M1 is planned. Every statement points to a record in this repository: a decision record
@@ -14,13 +14,15 @@ Words used throughout:
 
 - **Tier 1 and Tier 2** (design 8): macOS gets a hands-on check by the maintainer at every gate; Linux and Windows are
   "verified by CI only".
-- **A trial** is throwaway code in `spikes/` that answered one question and ended in a decision record.
+- **A trial** was throwaway code in `spikes/` that answered one question and ended in a decision record. The trial code
+  is removed at this gate and remains in history (section a).
 - **Run by a program** means a script or the trial's own self-check drove the app and read the result back. Nobody
   operated any trial by hand. Where a person is needed, the step is listed in section d.
 
 ## a. Where M0 stands
 
-**On `main`** (pull requests #1 and #3 to #12; #2 was a throwaway proof that the privacy check fails a bad commit):
+**On `main`**: every M0 task (pull requests #1 and #3 to #13; #2 was a throwaway proof that the privacy check fails a
+bad commit; this gate is pull request #14):
 
 - The workspace skeleton: `unidex --version`, the crates `udx-core`, `udx-cli`, `udx-test-support` and
   `udx-cookbook`, and `xtask`.
@@ -28,26 +30,24 @@ Words used throughout:
   user folders. Both are covered by mutation testing in CI.
 - CI on macOS, Linux and Windows with eight required checks: lint, tests on three platforms, licences and sources
   (`cargo deny`), advisories (`cargo audit`), mutation testing and the privacy scan.
-- The task ledger and the decision log (records 0001 to 0013), the threat model (revision 3) and `SECURITY.md`, the
-  acceptance checklist (346 items), the Electron 2.7.0 baseline, and the cookbook crate with one example on the pinned
-  GPUI.
-- Four trials under `spikes/` (chat and terminal, platform integration, embedded browser, rendering in CI), each with
-  its own temporary workflow. Stage 2 copies the patterns worth keeping into the cookbook and deletes them.
+- The task ledger and the decision log (records 0001 to 0014), the threat model (revision 3) and `SECURITY.md`, the
+  acceptance checklist (346 items), the Electron 2.7.0 baseline, and the cookbook crate.
+- Packaging and the nightly workflow (Task 14, decision 0014): packages of the cookbook window built in CI on all
+  three platforms. The nightly workflow's daily schedule has been live since Task 14 merged on 2026-11-17. A scheduled
+  run builds only when the newest commit is at most 25 hours old; the workflow publishes nothing; its artifacts are
+  unsigned, named so and kept 7 days.
+- The four trials (chat and terminal, platform integration, embedded browser, rendering in CI) and their temporary
+  workflows are removed at this gate. They remain in history at commit c6880ec, the last commit on `main` that contains
+  them. The patterns worth keeping are copied into the cookbook and listed in `crates/udx-cookbook/README.md`. The
+  hands-on procedures for the platform trial and the browser trial are in `docs/acceptance/hands-on/`.
 
-**In progress:**
+**In progress:** nothing. This gate's own pull request (#14) runs the required checks again when it is opened.
 
-- Task 14, packaging and the nightly workflow: a draft pull request. Its first CI round built Linux and Windows
-  packages; the macOS package step and the Windows packaging trial failed (the second hit the two-hour limit). In the
-  second round the Linux and Windows jobs were green in both workflows and the two-hour hang was gone; the macOS jobs
-  were not picked up by a hosted runner and are being re-run. A draft decision 0014 exists; stage 2 completes this
-  item.
-- Task 16, this gate: stage 1 is this report, the design updates and the document touch-ups described in this
-  branch's commits. Stage 2 is listed at the top.
-
-**CI:** the eight required checks were green on each task's last commit before it merged. One trial job is red by
-design: the embedded browser's Linux helper job fails on purpose because Chromium's GPU process ran unconfined there
-(decision 0012; question 19). Hosted macOS runners were repeatedly unavailable (a capacity message from the CI
-provider); that delayed several merges but changed no result.
+**CI:** the eight required checks were green on each task's last commit before it merged. While the trials existed, one
+trial job was red by design: the embedded browser's Linux helper job failed on purpose because Chromium's GPU process
+ran unconfined there (decision 0012; question 19). It went with the trial workflows. Hosted macOS runners were
+repeatedly unavailable (a capacity message from the CI provider); that delayed several merges, Task 14's included, but
+changed no result.
 
 **Already decided by the maintainer during M0** (working notes): the plan, with installing the Rust toolchain and the
 named cargo tools and the first push; that `cargo deny` fails an "unmaintained" notice only for a crate the workspace
@@ -66,7 +66,8 @@ virtual machine software was not approved and was not asked yet (question 24).
   folder's preferences, because macOS ignores a substituted home folder for preferences. No vault, app data or agent
   configuration was touched (baseline, "Isolation").
 - For one run the platform trial's app bundle existed for a few minutes and was deleted unopened; whether the system
-  indexed it was not checked. The undo command in `spikes/platform/CHECKLIST.md` covers it (decision 0010).
+  indexed it was not checked. The undo command in the platform trial's checklist covers it (decision 0010; section d
+  says where the checklist now lives).
 
 ## b. What M0 found
 
@@ -87,7 +88,7 @@ ran); **not verified**.
 | Rendering in CI | Can CI render the app and check frames without a GPU? | Yes: Linux X11 on software Vulkan and OpenGL, Windows Server on software Direct3D; frames checked automatically; an automation socket drives the app. Wayland passed but its check could not fail the job | CI on Linux and Windows, five runs; the socket also run by program on the dev Mac. Virtual machines: researched, not run | 0013 |
 | Vendor terms (study, not a trial) | May UniDeX drive Claude Code and Codex through ACP, and who pays? | Both only with API-key credentials until a vendor confirms otherwise | Primary sources read on 2026-11-16; a reviewer fetched every cited page. Not legal advice | 0006 |
 | Electron baseline (study) | How fast is the Electron app 2.7.0? | Warm start 724 ms (a lower bound for the shipped app), 625 idle wake-ups a minute, 239 MiB idle, scrolls at the display's rate, 304 to 641 ms to show a reply in a long thread | Program, dev Mac, development Electron binary with a mock keychain | baseline |
-| Packaging | Which tool, and a nightly build? | Stage 2 (decision 0014) | Stage 2 | 0014 |
+| Packaging | Which tool makes the `.dmg`, the Windows installer and the `.deb`, and can CI build them nightly? | cargo-packager 0.11.8 for the `.dmg`, the Windows NSIS installer and, for now, the `.deb`; the tarball is a plain `tar`; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (cargo-packager cannot keep a setuid file or run an install script). Velopack (no `.dmg`, AppImage only on Linux) and cargo-dist (no `.dmg` or `.deb`) rejected. The record is "proposed": the tool stands unless you reopen it, and the identity awaits you (question 5) | CI, three platforms: the `.dmg`, `.deb`, tarball and Windows installer built unsigned from the cookbook window. The `.deb` was installed and removed on a Linux runner, and the Windows installer installed and removed on a Windows runner (file, library and registry checks). Nothing was opened on a display and nothing was run by a person; signing, notarization, the updater, the browser's nested bundles and the Windows `.msi` were not tried | 0014 |
 
 ## c. Decisions for the maintainer
 
@@ -99,18 +100,23 @@ design carries a one-line pointer to it and its approved wording stands.
 | Group | Questions |
 |---|---|
 | Before M1 is planned | 1 to 5 |
-| Before the milestone that needs it | 6 to 23 |
+| Before the milestone that needs it | 6 to 23 (question 23 is the one due before M1's chat window is built) |
 | Whenever convenient | 24 to 28 |
 
 Changes the design already took (each settles something it left open, or states a fact about M0 beside the approved
 text without changing it): the PTY crate (5.7), how browser frames travel and CEF on Windows (5.8), what "CI-verified"
-covers in decision 0013's words (8), the tray crate on macOS and Windows (8, 13), the GPUI pin (13), and that M0
-measured on a desktop, not the reference laptop (9). Section 7 was corrected to match the checklist. If any of these
-should not stand, say so.
+covers in decision 0013's words, including the "(on X11)" qualifier on the Linux automation socket's frame capture (8),
+the tray crate on macOS and Windows (8, 13), the GPUI pin (13), the packaging tool for the `.dmg`, the Windows
+installer and the `.deb`, with the tarball made separately and the `.deb` moving to a second tool when the browser's
+setuid helper arrives (8, 13; decision 0014, which is "proposed"), and that M0 measured on a desktop, not the
+reference laptop (9). Section 7 was corrected to match the checklist, and a pointer to question 6 was added at goal G4.
+If any of these should not stand, say so.
 
 Where a record disagrees with text the maintainer approved, the design was not changed and the disagreement is a
-question: the widget kit (5.10, 13; question 23), the reference machine (9; question 3), goal G4 and design 3 (question
-6), and the rest are marked by pointers.
+question: the widget kit (5.10; question 23; section 13 only states that the kit was deferred and points to the
+question), the reference machine (9; question 3), goal G4 and design 3 (question 6), and the rest are marked by
+pointers. Decision 0014 disagrees with no approved text: the design's package row and its statements on signing and
+updates stand with it. Its open points (identity, schedule, signing) are question 5, with a one-line pointer.
 
 ### Must be settled before M1 is planned
 
@@ -216,15 +222,100 @@ kit for message bodies is a separate decision (question 23).
 **If not answered.** The target stays as written, and M1's chat window would likely miss it at its gate, as the trial
 did.
 
-#### 5. Packaging and identity (Stage 2)
+#### 5. Packaging and identity: the app's name, its schedule, and signing
 
-Placeholder: stage 2 completes this entry from decision 0014. It will ask for:
-- the app's bundle identifier and display name (the trial uses a placeholder identifier and the publisher "UniDeX
-  contributors"; neither may contain personal information);
-- whether the nightly workflow runs on a daily schedule or only on demand (the draft runs daily, on demand and on pull
-  requests that touch it, and a scheduled run builds only when the newest commit is at most 25 hours old);
-- the signing identities, supplied as CI secrets (design 8). M1 delivers nightly builds signed on macOS (design 6), so
-  this is needed before M1 is planned.
+**Why.** Decision 0014 chose cargo-packager and built unsigned packages of the cookbook window on all three platforms.
+The record is "proposed": the tool is a design call from the trial and stands unless you reopen it, and the identity is
+yours to confirm. The trial uses placeholders: the identifier `example.unidex.rust-preview.trial`, the display name
+"UniDeX Rust Preview", and "UniDeX contributors" as publisher, author, copyright and Debian maintainer. None carries a
+personal name, handle or domain. Five parts need you. The first four have no deadline stronger than "before a build is
+released or signed"; part (v) is needed before M1's first signed nightly (design 6), so the whole question sits before
+M1 is planned.
+
+**(i) The display name.** This is the value that sticks. On Windows it names the install folder and the uninstall
+entry (the CI install confirmed both); on macOS it is the app bundle's name. Renaming it after a release leaves the old
+install beside the new one. The identifier does not do this on Windows (decision 0014). The Debian package and the
+program's file name are `unidex-rust-preview` whatever you choose.
+
+- A. "UniDeX Rust Preview", the record's proposal: it matches the edition's name and differs from the Electron app's
+  "UniDeX". Cost: none. Risk: it names the edition "Rust Preview", which is wrong once the app is no longer a
+  preview, and a rename then leaves two installs.
+- B. "UniDeX Preview". Cost: none. Risk: close to the Electron app's name.
+- C. "UniDeX (Rust Preview)". Risk: parentheses are awkward in file names and paths (decision 0014).
+
+**(ii) The bundle identifier.** On macOS it keys the app's preferences, Keychain items and privacy permissions, so
+changing it later makes macOS treat the app as new (decision 0014).
+
+- A. `example.unidex.rust-preview`: claims no domain, and `.example` can never be registered. Cost: none. Risk: not
+  fit for a release you mean to keep; it must be replaced before the first signed preview, which resets preferences and
+  permissions.
+- B. `dev.unidex.rustpreview` (or another top-level domain): conventional and under the project's control once the
+  project registers the matching domain. The project owns none today, and the record did not check that any is
+  available. Risk if used before owning the domain: its owner could ship an app with the same identifier.
+- C. `io.github.<project-organization>.unidex-rust-preview`: collision-safe by construction and usual for projects with
+  no domain, but it needs a GitHub organization named for the project first. The repository sits under a personal
+  account whose handle must not appear.
+
+**(iii) Publisher, copyright and Debian maintainer.** All four fields hold "UniDeX contributors". A Debian maintainer
+normally has an address; `dpkg` accepted this one without. Options: keep the string with no address; add a project
+contact address (it would sit in every package, and the repository has none today: `SECURITY.md` offers no email);
+or choose another string. Say which, and whether the copyright line stays.
+
+**(iv) The nightly's schedule.** The nightly workflow already runs on a daily schedule (it has since Task 14 merged
+on 2026-11-17), as well as on demand and on pull requests that touch it. A scheduled run builds only when the newest
+commit is at most 25 hours old, publishes nothing, and attaches unsigned packages to the run for 7 days. That rule
+was exercised on the pull request path only when the record was written (decision 0014).
+
+- A. Keep the daily schedule. Cost: hosted runner time on three platforms each day that has a commit; hosted macOS
+  runners were often unavailable in M0, so a scheduled run can fail or wait for that reason. Risk: unattended red runs.
+- B. Run only on demand and on pull requests. Turning the schedule off takes a change to one entry in the workflow's
+  triggers. Cost: nobody sees a break until someone starts a run. M1 promises nightly builds (design 6).
+
+**(v) Signing identities.** Needed before the first signed nightly, which M1 delivers on macOS (design 6). Decision 0014
+lists what you would supply as repository secrets: for macOS a Developer ID Application certificate (a base64 `.p12`)
+and its password, the signing identity string, and notarization credentials (an Apple ID, an app-specific password and
+a team id, or an App Store Connect API key); for Windows a code-signing certificate usable on the runner, or a cloud
+signing service; for updates, if the cargo-packager updater is used, a minisign key pair. The secret names come from
+the tool's source and have never been exercised. Three workflow changes must come first (decision 0014): secrets must
+not be available to `pull_request` runs (the workflow runs on pull requests that change its paths); the `-vv` flag on
+the Package step, which traces the whole configuration, must go; and the Package step is one matrix step, so each
+platform's signing environment needs a condition on the operating system.
+
+- A. macOS first, as M1 promises: supply the Apple certificate and notarization credentials after (ii) is settled, so
+  the signed app does not carry a placeholder identifier. Windows and updates wait for M4 or M11. Cost: an Apple
+  developer account able to issue the certificate (its price is not in the record). Risk: low.
+- B. All platforms at once. Cost: also a Windows certificate or signing service (cost not researched).
+- C. Stay unsigned until the first tagged preview (M4). Cost: none. Risk: M1's deliverable changes (design 6), and
+  macOS says what it says about an unsigned app (below).
+
+**Also in decision 0014, open or not tried.**
+- **A condition before any build is released to users.** The packaging tool fetches two things at build time with no
+  hash check: a small NSIS plugin whose DLL (203,264 bytes) ends up inside the Windows installer and runs on the user's
+  machine at install time, and the `create-dmg` script that the macOS runner executes. The nightly fetches both on every
+  run. Decision 0014 disclosed this after the Task 14 review found it undisclosed. Before any release, each must be
+  fetched with a hash check or supplied from a copy verified in advance; the tool's source shows a way to use a
+  pre-placed copy of each. (Its AppImage tooling is also unhashed, one more reason the AppImage is not used.) The
+  tool's other downloads are hash-checked in the tool.
+- **What macOS will say.** The unsigned app carries only the linker's signature, and `codesign --verify` and `spctl
+  --assess` both fail on the CI-built copy. A downloaded copy may therefore be called "damaged", not "unidentified". The
+  two fallbacks in the hand check (section d), removing the quarantine attribute from your copy and re-signing it with
+  a local ad hoc signature, were not tried.
+- **Nothing was opened on a display.** No package was opened on real hardware, and nobody knows whether the Linux or
+  Windows program opens a window from its package; the installs were checked by file, library and registry entries.
+- **The tool's age.** cargo-packager's last release is 2025-11-27 (its repository has commits in November 2026 and
+  about 267,000 downloads); it is version 0.x; its configuration is one small file, so replacing it is bounded.
+- **Updates were not tried.** The tool's updater is optional and not forced by the choice; it does not cover `.deb`
+  installs or make deltas. Whether to use it is a decision for M4's auto-update work (decision 0014).
+
+**Recommendation (build team).** (i) A. (ii) A until a domain or an organization exists, then B or C before the first
+signed preview, and before (v). (iii) Keep "UniDeX contributors" and add an address only when the project has one.
+(iv) A: M1 asks for nightlies, and the schedule rule needs a real scheduled run to be tested. (v) A, after (ii).
+Confirm the display name with the same care as the identifier, because it is the harder one to change. The condition
+on the two fetches is not a decision: it is a release blocker the build team will keep on the list.
+
+**If not answered.** (i) and (ii) The placeholders stay in the unsigned nightlies; nothing is signed or released under
+them, so the first signed build waits. (iii) The string stays as it is. (iv) The daily schedule keeps running. (v) No
+signing; M1's signed macOS nightlies cannot be delivered, and no secret exists to be misplaced.
 
 ### Must be settled before the milestone that needs it
 
@@ -543,6 +634,9 @@ then ask the person to allow access, and that prompt names the helper, not the a
 
 #### 23. Is the widget kit adopted for chat message bodies? (before M1's chat window is built)
 
+This is the one question in its group that is due before M1's chat window is built, earlier than the rest of the
+group (section g).
+
 **Why.** Design 5.10 says "GPUI with the pinned widget kit", and design 3 notes that the kit is published as
 `gpui-kit`. Decision 0007 pinned the GPUI snapshot the kit requires and deferred the kit itself: its styled layer needs
 the 0BSD licence (since allowed by the maintainer) and its tree carries more unmaintained notices. Decision 0008 then
@@ -571,8 +665,9 @@ design was not changed; it carries a pointer.
 **Recommendation (build team).** C with A's measurements as an early M1 task: adopt the kit for message bodies only if
 all four pass, otherwise B. The kit stays out of the thread list and the terminal either way (decision 0008).
 
-**If not answered.** The kit is not a dependency (decision 0007), design 5.10's wording stands, and M1's chat window uses
-our own renderer, the form the trial measured as sound.
+**If not answered.** The kit is not a dependency (decision 0007), design 5.10's wording stands, and M1's chat window
+uses our own renderer, the form the trial measured; in that measurement it missed the scroll target and reached the
+memory limit (decision 0008; question 4).
 
 ### Whenever convenient
 
@@ -661,21 +756,19 @@ written joined, hyphenated or underscored, so a two-word term whose joined form 
 | Check | What to do | Instructions | About how long |
 |---|---|---|---|
 | The cookbook window | Run `cargo run -p udx-cookbook --example hello_window`; expect a window titled "UniDeX cookbook" with a label and a button that counts clicks | `crates/udx-cookbook/README.md`, "Run an example" | A few minutes, most of it the first build |
-| The platform trial's 14 steps | Input methods, dead keys, press-and-hold, the tray, menus, a second window, open and save dialogs, VoiceOver, quit | `spikes/platform/CHECKLIST.md` | About 15 minutes plus a first build of a few minutes |
-| The embedded browser | Start the trial app with the real browser on a test page (its options are in `spikes/browser/app/src/main.rs`), then type in a form, use an input method, scroll a long page and watch the app's overlay card draw over the page | No look-at-it procedure exists yet: `spikes/browser/measure-macos.sh` runs scripted scenarios and is not one. Stage 2 or a later task must write one before the check can be done | The records give none; the build team's guess is 10 to 15 minutes of looking once the app is built, plus a build time that was not estimated |
-| The trial package | Download the unsigned macOS package from the nightly workflow and open it by hand | Stage 2 (decision 0014) | Stage 2 |
+| The trial package | Take a green `nightly` run on the default branch (scheduled or started by hand), or this gate's pull request run, not a run from a fork. Download the artifact `unidex-rust-preview-nightly-unsigned-macos` (about 3.2 MB), unzip it, open the `.dmg`, and drag the app to a scratch folder, not Applications. macOS will refuse to open an unsigned download: it will say it cannot verify the app is free of malware or that it is damaged. If it offers a choice, use System Settings, Privacy & Security, "Open Anyway". A window titled "UniDeX cookbook" with a Count button should open. Afterwards quit it, drag the app to the Trash, eject the disk image and delete the download. Report what macOS said: it is the one result CI cannot give | Decision 0014, "Maintainer's step". Two fallbacks if it only says "damaged" were never tried: `xattr -dr com.apple.quarantine` on your copy, then, if it still refuses, `codesign --force --deep --sign -` on your copy | The record gives none; the build team's guess is about 10 minutes (not measured) |
+| The platform trial's 14 steps | Input methods, dead keys, press-and-hold, the tray, menus, a second window, open and save dialogs, VoiceOver, quit | `docs/acceptance/hands-on/platform-trial.md`; it needs a separate checkout of commit c6880ec, as that file explains | About 15 minutes plus a first build of a few minutes |
+| The embedded browser | Run the trial app with the real browser on a test page, then type in a form, use an input method, scroll a long page and watch the app's overlay card draw over the page | `docs/acceptance/hands-on/browser-trial.md`; it also needs a separate checkout of commit c6880ec, as that file explains | The build team's earlier guess was 10 to 15 minutes of looking once the app is built, plus a build time that was not estimated |
 
 Three things to know before starting:
 
-- **Order.** Stage 2 deletes `spikes/`, and with it the platform checklist and the browser trial. Do those two checks
-  first, or tell the build team to keep them. After the deletion they can still be run from a checkout of commit
-  1b092db, which takes more steps.
+- **The trial code is gone from `main`.** The platform and browser procedures run the trials, which exist only in
+  history at commit c6880ec. Each procedure says how to make that separate checkout, so the 14 steps and the browser
+  check no longer depend on the code being in the working tree, and they take a few more steps than they did.
 - **The platform checklist decides question 12.** Step 13 (VoiceOver) is what narrows the screen-reader exception on
   macOS.
-- **The browser check waits for your word, and for a procedure.** Every start of the trial browser contacts Chromium's
-  vendor's servers and can download components, and no control exists yet (question 21), so it is not run until you say
-  so. Its build needs the CEF distribution already unpacked in the trial's worktree, and the written steps do not exist
-  yet (see the table).
+- **The browser check waits for your word.** Every start of the trial browser contacts Chromium's vendor's servers and
+  can download components, and no control exists yet (question 21), so it is not run until you say so.
 
 ## e. What stayed unknown
 
@@ -691,7 +784,7 @@ Three things to know before starting:
 | Speed | The reference laptop; the first token through a real provider; an idle floor for an empty native window; the signed Electron release's start-up; trackpad scrolling (baseline, decisions 0008 and 0012) | Question 3; M1's measurements |
 | Vendor terms | Whether UniDeX counts as a product running Claude Code; how the Claude adapter reports a keyless Console sign-in; an isolated Codex credential store through the adapter; which pool a Codex personal access token bills; the bundled vendor binaries; OpenAI's clause after 2026-11-20 (decision 0006) | Question 6; Anthropic's and OpenAI's answers; an M5 check |
 | Acceptance checklist | 13 rows carry a milestone chosen by judgement and marked "?" (the checklist's column notes): APP9 (M4), ST-IMPORT (M4), C1 and C3 (M1), P6 (M6), BR28 (M9), CX4 (M8), CH6 (M4), TM4 and TM20 (M8), TM22 (M4), LS3 (M6), LS6 (M11) | The architect of each row's milestone confirms or moves it when that milestone is planned; the maintainer decides only if he wants one moved |
-| Packaging | Stage 2 (decision 0014) | Stage 2 |
+| Packaging | Any package opened on real hardware, and what macOS says about a downloaded copy (the app is not validly signed, so it may say "damaged"; both fallbacks untried); whether the Linux or Windows program opens a window from its package (the runners have no display; installs were checked by file, library and registry entries); signing, notarization, the updater and the secret names (read from the tool's source, never exercised); the nested helper bundles on macOS, the Windows bootstrap arrangement and the browser component's size in a package; that the `.deb` can carry the browser's setuid helper through cargo-deb (the tool measured it; cargo-packager's `.deb` cannot); the Windows `.msi`, never installed; download size against the 40 MB target (the program is a one-window example with the default release profile, so sizes measure the formats, not the product); the nightly's schedule rule, which only the pull request path had exercised when decision 0014 was written; the hash-checked fetching the record requires before any release; the tool's last release date (2025-11-27) and its 0.x versioning (decision 0014) | The trial package hand check (section d); question 5; a first signed build; the browser packaged in M7; a Tier 2 tester or a virtual machine (question 24); a real scheduled run |
 
 Records that disagree:
 
@@ -724,25 +817,36 @@ not recorded; a total marked "+" is a lower bound. Rows are in `docs/build/LEDGE
 | 11 Platform trial | 554k O | | 147k S | 138k S | n/r S | 839k+ | 1 review, 1 fix round |
 | 12 Browser trial | about 600k O (phase A, approximate) and 599k O (phase B) | | 360k O | 614k O | n/r S | about 2,173k+ | 1 review, 1 fix round over three CI rounds |
 | 13 Rendering trial | 475k+ O | | n/r S | n/r S | n/r S | 475k+ | 3 builder rounds, 1 review, 1 fix round |
-| 14 Packaging | Stage 2 | | | | | Stage 2 | In progress |
+| 14 Packaging | 355k S (3 CI rounds and 1 fix round) | | 273k O | | 121k S | 749k | 1 review, 1 fix round |
 | 15 Electron baseline | 443k O | | 146k+ S | 142k S | | 731k+ | 1 review, 1 fix round |
+| 16 The M0 gate, stage 1 | 570k O (drafter) | | 213k S | 200k S | 166k S | 1,149k+ | 1 review, 1 fix round; stage 2 not yet recorded |
 
 S is Sonnet, O is Opus. Incomplete figures: Task 5 (reviewer), 6, 9, 11 and 12 (each a re-reviewer), 10 (later fix
 and re-review turns), 13 (only the first builder's first two rounds are recorded), 12 (phase A is the agent's noted
-context size, not a reported figure). The controller's own usage is not recorded anywhere and is not included.
+context size, not a reported figure), and Task 16 (stage 2 is not yet recorded; the controller adds it at close). The
+controller's own usage is not recorded anywhere and is not included.
 
-**Recorded total, Tasks 1 to 13 and 15: about 11.0 million tokens** (a lower bound), plus 192k so far for Task 14.
+**Recorded total, Tasks 1 to 16 (Task 16's stage 1 only): about 12.9 million tokens** (a lower bound). The arithmetic:
+the rows of Tasks 1 to 13 and 15 sum to 10,962k (211 + 825 + 445 + 1,067 + 101 + 1,006 + 494 + 697 + 800 + 1,098 + 839 +
+2,173 + 475 + 731); Task 14 is 355 + 273 + 121 = 749k; Task 16 stage 1 is 570 + 213 + 200 + 166 = 1,149k; 10,962 + 749 +
+1,149 = 12,860k.
 
-By role: builders about 5.43M (about half; Opus 4.46M, Sonnet 0.96M), reviewers about 3.00M (27 %), fresh fix agents
-about 1.44M (13 %), separate re-reviewers 0.70M recorded (6 %), test authors 0.40M (4 %).
+By role: builders about 6.35M (about half; Opus 5.03M, Sonnet 1.32M), reviewers about 3.48M (27 %), fresh fix agents
+about 1.64M (13 %), separate re-reviewers 0.99M recorded (8 %), test authors 0.40M (3 %). The arithmetic, in thousands:
+builders 5,427 + 355 + 570 = 6,352 (Opus 4,464 + 570 = 5,034; Sonnet 963 + 355 = 1,318); reviewers 2,997 + 273 + 213 =
+3,483; fresh fix agents 1,443 + 200 = 1,643; re-reviewers 700 + 121 + 166 = 987; test authors 395. These sum to
+12,860k. Task 14's fix round was its own builder, so it is inside the builder's 355k; Task 16's fix round was a fresh
+agent.
 
-By kind of task: code with a separate test author (Tasks 2, 3) 0.45M to 0.83M; CI (Task 4) 1.07M; documents with a
-Sonnet builder (Tasks 5, 7) 0.1M+ to 0.49M+; research documents with an Opus builder (Tasks 6, 8, 15) 0.70M+ to 1.01M+;
-GPUI integration (Task 9) 0.80M+; trials (Tasks 10 to 13) 0.84M+ to 2.2M+.
+By kind of task: code with a separate test author (Tasks 2, 3) 0.45M to 0.83M; CI and packaging (Tasks 4, 14) 0.75M to
+1.07M; documents with a Sonnet builder (Tasks 5, 7) 0.1M+ to 0.49M+; research documents with an Opus builder (Tasks 6,
+8, 15) 0.70M+ to 1.01M+; the gate report (Task 16, stage 1 only) 1.15M+; GPUI integration (Task 9) 0.80M+; trials
+(Tasks 10 to 13) 0.84M+ to 2.2M+.
 
-The plan's stop thresholds (500k per attempt for a code or document task, 1M for a trial) held: no code or document
-agent passed 500k (the largest was the threat model's author at 430k); several trial agents passed it (the largest
-614k, cumulative over three CI rounds), none reached 1M.
+The plan's stop thresholds (500k per attempt for a code or document task, 1M for a trial) held, with one exception: no
+code or document agent passed 500k except the gate report's drafter (570k, Task 16 stage 1); the largest of the others
+was the threat model's author at 430k. Several trial agents passed 500k (the largest 614k, cumulative over three CI
+rounds), none reached 1M.
 
 ### What the reviews caught
 
@@ -769,6 +873,8 @@ Each of these would otherwise have shipped (working notes; the first is also a n
   fail its job (Task 13).
 - The Electron start-up figure from a development binary was framed as the shipped app's, and "cold start" was measured
   with a warm cache (Task 15).
+- The nightly workflow fetches two tools at build time without a hash check (an installer plugin and a disk-image
+  script), and the record did not say so until the review (Task 14).
 
 ### Where effort was wasted
 
@@ -778,8 +884,9 @@ Each of these would otherwise have shipped (working notes; the first is also a n
 - Two controller errors cost a fix round each (Tasks 3 and 4).
 - Faults in checks, not in the work, cost CI rounds: a count that ended a step under strict shell settings (Task 13),
   a sandbox check that mistook forked processes for their parent (Task 12), a missing newline before annotations
-  (Task 10), a Windows path-length limit (Task 12).
-- Hosted macOS runners were often not available, which meant re-runs and waiting (Tasks 10, 11, 12).
+  (Task 10), a Windows path-length limit (Task 12), an installer started from a bash step on Windows that hung to the
+  two-hour limit (Task 14).
+- Hosted macOS runners were often not available, which meant re-runs and waiting (Tasks 10, 11, 12, 14).
 - Index conflicts in `docs/decisions/README.md` when trials merged in a different order (Tasks 11, 12, 13).
 - The advisory policy was asked twice on one day: a sixth notice appeared hours after five were accepted by name.
 
@@ -793,24 +900,29 @@ a task that needs one stops and reports. These are caps, not forecasts: most M0 
 | Task type | Budget | Per role | Highest recorded in M0, and the arithmetic |
 |---|---|---|---|
 | Well-specified code unit (Sonnet test author and builder, Opus reviewer): a provider client, a tool, a CLI verb | 1.0M | test author 150k, builder 300k with its fix rounds, reviewers 500k with re-reviews, 50k reserve | Task 2: 825k (3 fix rounds); Task 3: 445k. 825k x 1.2 = 990k, so 1.0M |
-| Core code (Opus builder): engine loop, sandbox, permission cards, the GPUI chat window | 1.3M | builder 600k, reviewer 350k, fix agent 300k, 50k reserve | Tasks 9, 10, 11: 800k+, 1,098k+, 839k+. 1,098k x 1.2 = 1,318k, so 1.3M |
+| Core code (Opus builder): engine loop, sandbox, permission cards, the GPUI chat window | 1.3M | builder 600k, reviewer 350k, fix agent 300k, 50k reserve | Tasks 9, 10, 11: 800k+, 1,098k+, 839k+. 1,098k x 1.2 = 1,318k, so 1.3M. This rests on trials (Tasks 10 and 11) as the proxy for core code, since M0 had no core-code task; the one non-trial task, Task 9, alone would give 800k x 1.2 = 960k, so 950k |
 | Document (Sonnet) | 600k | builder 250k, reviewer 300k, 50k reserve | Task 7: 494k+ (Task 5: 101k+). 494k x 1.2 = 593k, so 600k |
 | Research document (Opus) | 1.2M | builder 500k, reviewer 350k, fix agent 250k, 100k reserve | Tasks 6, 8, 15: 1,006k+, 697k+, 731k+. 1,006k x 1.2 = 1,207k, so 1.2M |
 | CI or packaging | 1.3M | builders and test author 450k, reviewers with re-reviews 700k, 150k reserve | Task 4: 1,067k with a mutation-test sub-task. 1,067k x 1.2 = 1,280k, so 1.3M |
 | Trial | 1.3M; 2.6M for a high-risk one | ordinary: builder 600k, reviewer 250k, fix agent 300k, re-reviewer 100k, 50k reserve; high-risk: two builder phases of 600k, reviewer 400k, fix agents 650k, re-reviewers 150k, 200k reserve | Task 10: 1,098k+ (Tasks 11, 13: 839k+, 475k+); Task 12: about 2,173k+. 1,098k x 1.2 = 1,318k, so 1.3M; 2,173k x 1.2 = 2,608k, so 2.6M |
 
+With Task 14 included the rule gives the same figures. Its total is 749k, below Task 4's 1,067k, which stays the
+highest recorded for CI or packaging, so that row is still 1.3M. Task 16 is left out of the rule: its stage 1 alone is
+1,149k, above the document budget, because a gate report reads every record; stage 2 is not yet recorded, and it is the
+only task of its kind. That suggests the 0.6M the M1 estimate gives the gate report is low.
+
 **M1 as a whole: 22 million tokens**, with a check-in at 11 million. Reasoning, to be replaced by the M1 architect's
 real task list: design 6 puts one hosted and one local provider, the engine loop, core tools, the shell sandbox,
-permission cards, a session log, a GPUI chat window, `unidex chat`, the first evaluation run and signed macOS
-nightlies in M1. Read as tasks: an architect pass (0.5M); seven core tasks, the engine loop, streaming into GPUI, the
-sandbox on each of three platforms, permission cards and the chat window (7 x 1.3M = 9.1M); eight well-specified tasks,
-two provider clients, file tools, shell and web tools, the session log, `unidex chat`, the mock provider with golden
-tests, the evaluation harness (8 x 1.0M = 8.0M); two CI tasks, signed nightlies and the automation-socket harness (2 x
-1.3M = 2.6M); two documents, the threat model update and the gate report (2 x 0.6M = 1.2M); and the gate's security
-review (0.5M). Total 0.5 + 9.1 + 8.0 + 2.6 + 1.2 + 0.5 = 21.9M, called 22M. It is a cap: M0's fifteen tasks used about
-11M recorded, and the earlier draft of these figures gave 18.3M. If you prefer a lower cap, the earlier figures (700k
-for a code unit, 400k for a document, 900k for a research document and for a CI task) are below the highest recorded M0
-totals by 125k, 94k, 106k and 167k respectively, so tasks as large as those would stop and report.
+permission cards, a session log, a GPUI chat window, `unidex chat`, the first evaluation run and signed macOS nightlies
+in M1. Read as tasks: an architect pass (0.5M); seven core tasks, the engine loop, streaming into GPUI, the sandbox on
+each of three platforms, permission cards and the chat window (7 x 1.3M = 9.1M); eight well-specified tasks, two
+provider clients, file tools, shell and web tools, the session log, `unidex chat`, the mock provider with golden tests,
+the evaluation harness (8 x 1.0M = 8.0M); two CI tasks, signed nightlies and the automation-socket harness (2 x 1.3M =
+2.6M); two documents, the threat model update and the gate report (2 x 0.6M = 1.2M); and the gate's security review
+(0.5M). Total 0.5 + 9.1 + 8.0 + 2.6 + 1.2 + 0.5 = 21.9M, called 22M. It is a cap: M0's sixteen tasks used about 12.9M
+recorded (a lower bound), and the earlier draft of these figures gave 18.3M. If you prefer a lower cap, the earlier
+figures (700k for a code unit, 400k for a document, 900k for a research document and for a CI task) are below the
+highest recorded M0 totals by 125k, 94k, 106k and 167k respectively, so tasks as large as those would stop and report.
 
 ### Pacing
 
@@ -828,8 +940,9 @@ with a findings file. The build team proposes the same pacing for M1.
    cannot be written without them.
 2. Questions 3 and 4 (the reference machine and target definitions; the scroll target). Every M1 gate measurement
    depends on them.
-3. Question 5 (identity and signing, completed in stage 2). M1 promises signed macOS nightlies.
-4. The platform checklist and, if you allow it, the browser check (section d), before stage 2 deletes the trials.
+3. Question 5 (packaging and identity). M1 promises signed macOS nightlies, so the identifier (part ii) and the signing
+   identities (part v) are needed before the first one; the display name (part i) before any release.
+4. The cookbook window and the trial package checks (section d): the plan's own sign-off step, before M1 is planned.
 5. Question 23 (the widget kit), before M1's chat window is built; M1's architect can plan around it (option C).
 
 **What M1's plan needs from M0's findings, beyond those answers** (decisions 0008, 0009 and 0013): the chat's message
@@ -848,7 +961,11 @@ hands-on Linux items.
 **Then, before each later milestone is planned:** questions 13 and 6 to 8 (M2, M3, M5); 9 to 12 (M4); 14 to 16 (M6);
 17 (M8); 18 to 22 (M7).
 
-**What can proceed regardless:** stage 2 of this gate (decision 0014, the cookbook patterns, removing the trials once
-the hands-on checks are done or the trials are kept, the full gate run); the M1 architect's crate interfaces and event
-types (design 11.1); the mock provider, recorded HTTP fixtures and golden event-log tests (design 10.1); and the
-provider clients, which need no answer above except question 6's re-read.
+**Before any build is released to users** (not needed to plan M1): the two unhashed build-time fetches in the packaging
+tool, an installer plugin and a disk-image script, are fetched with a hash check or supplied from a verified copy
+(decision 0014; question 5). The build team keeps this on its list as a release blocker.
+
+**What can proceed regardless:** the platform trial's 14 steps and the browser check from `docs/acceptance/hands-on/`
+(section d; the first decides question 12, the second waits for your word on question 21); the M1 architect's crate
+interfaces and event types (design 11.1); the mock provider, recorded HTTP fixtures and golden event-log tests (design
+10.1); and the provider clients, which need no answer above except question 6's re-read.
