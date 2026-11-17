@@ -213,7 +213,16 @@ struct StderrLogger {
 
 impl log::Log for StderrLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= self.level
+        // The graphics crates log every frame at debug level; keep them at info unless trace is asked for.
+        let noisy = ["wgpu", "naga", "zbus", "calloop", "polling", "async_io"]
+            .iter()
+            .any(|t| metadata.target().starts_with(t));
+        let level = if noisy && self.level < log::LevelFilter::Trace {
+            self.level.min(log::LevelFilter::Info)
+        } else {
+            self.level
+        };
+        metadata.level() <= level
     }
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
