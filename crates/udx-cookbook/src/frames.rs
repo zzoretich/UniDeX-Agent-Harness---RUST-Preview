@@ -38,9 +38,9 @@ impl std::fmt::Display for FrameError {
 }
 
 impl SlotLayout {
-    /// Bytes in one slot: the largest frame, four bytes a pixel (BGRA).
-    pub fn slot_bytes(&self) -> usize {
-        self.max_width as usize * self.max_height as usize * 4
+    /// Bytes in one slot: the largest frame, four bytes a pixel (BGRA); `None` if that does not fit in `usize`.
+    pub fn slot_bytes(&self) -> Option<usize> {
+        frame_bytes(self.max_width, self.max_height)
     }
 
     /// Checks a frame description from the other side before any pixel is touched, and returns the frame's length
@@ -55,8 +55,15 @@ impl SlotLayout {
         if width == 0 || height == 0 || width > self.max_width || height > self.max_height {
             return Err(FrameError::BadSize { width, height });
         }
-        Ok(width as usize * height as usize * 4)
+        frame_bytes(width, height).ok_or(FrameError::BadSize { width, height })
     }
+}
+
+/// Four bytes a pixel, with every step checked so a large size is refused instead of wrapping or panicking.
+fn frame_bytes(width: u32, height: u32) -> Option<usize> {
+    (width as usize)
+        .checked_mul(height as usize)?
+        .checked_mul(4)
 }
 
 /// "A frame is ready in this slot": `frame <slot> <seq> <width> <height>`, one line, decimal numbers.
@@ -180,9 +187,26 @@ mod tests {
 
     #[test]
     fn a_frame_that_fits_gives_its_length() {
-        assert_eq!(LAYOUT.slot_bytes(), 640 * 400 * 4);
+        assert_eq!(LAYOUT.slot_bytes(), Some(640 * 400 * 4));
         assert_eq!(LAYOUT.check(0, 640, 400), Ok(640 * 400 * 4));
         assert_eq!(LAYOUT.check(2, 1, 1), Ok(4));
+    }
+
+    #[test]
+    fn a_layout_too_large_to_measure_is_refused_not_overflowed() {
+        let huge = SlotLayout {
+            slots: 1,
+            max_width: u32::MAX,
+            max_height: u32::MAX,
+        };
+        assert_eq!(huge.slot_bytes(), None);
+        assert_eq!(
+            huge.check(0, u32::MAX, u32::MAX),
+            Err(FrameError::BadSize {
+                width: u32::MAX,
+                height: u32::MAX
+            })
+        );
     }
 
     #[test]

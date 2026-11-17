@@ -100,6 +100,22 @@ not have (and the cookbook adds none) or is not a GPUI pattern. Paths are at com
   (`.github/workflows/spike-browser.yml`); input methods tested through GPUI's macOS view and pages read back with
   DevTools (`spikes/browser/app/src/mac_ime.rs`, `script.rs`); the sandbox verified per process
   (`protocol/src/tree.rs`). Needs CEF and its build, `objc2`, `libc` and `windows-sys`. Decision 0012.
+- Driving a scripted scenario from the next-frame callback, so a run measures itself without a person scrolling
+  (`start_scenario` and the scenario kinds in `spikes/chat-term/app/src/bin/chat.rs`). It is the way the trial scrolled
+  programmatically, which misses real trackpad input. Needs nothing beyond GPUI, but it is a measuring harness rather
+  than a pattern for the application. Decision 0008.
+- The Windows handle-list requirement for the shared-memory mapping. The trial's mapping
+  (`spikes/browser/protocol/src/shm.rs`) is inheritable and passed through ordinary process spawning, which lets any
+  other inheriting child receive it too; a real build passes it through an explicit handle list
+  (`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`). This is a requirement the trial did not meet, so there is no code to copy.
+  Decision 0012.
+- The helper's explicit key-code tables (`spikes/browser/cef-helper/src/keys.rs`). The precedent's special-key bug did
+  not occur on macOS; the Linux and Windows tables are unverified. And handing CEF the process's own argument memory
+  on Linux, so Chromium's process titles name each sub-process's role (`spikes/browser/cef-helper/src/main.rs`). Both
+  need CEF. Decision 0012.
+- Sending "pointer left" to the helper when the pane's hitbox stops being hovered after a move, rather than from
+  GPUI's hover state (`spikes/browser/app/src/main.rs`). `frame_pane` carries the hitbox inserted in prepaint but has
+  no helper to tell. Decision 0012.
 - The in-app frame capture (`spikes/render-ci/src/bin/render-ci/capture.rs`). Needs GPUI's `test-support` feature,
   which release builds must not have, and `x11rb`. Decision 0013.
 - The automation socket and its driver (`spikes/render-ci/src/bin/render-ci/automation.rs`,

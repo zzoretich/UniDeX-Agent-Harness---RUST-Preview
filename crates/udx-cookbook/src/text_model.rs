@@ -7,6 +7,12 @@
 //! that logic without GPUI, so it is tested here; the `text_input` example wires it to a window. Decision 0010 measured
 //! the sequences in the tests below through GPUI's macOS view (E2 to E6).
 //!
+//! Known limitation: movement and deletion are by Unicode scalar value, not by grapheme cluster. A letter with a
+//! combining accent takes two backspaces, the caret can stop between the letter and its accent, and an emoji joined
+//! with zero-width joiners is split. A real field needs grapheme-cluster segmentation, from a segmentation library or
+//! the platform's text services; this crate adds no dependency, so the tests `backspace_removes_one_scalar_not_one_grapheme`
+//! and `the_caret_can_land_inside_a_grapheme_cluster` pin the current behaviour.
+//!
 //! Written for the platform trial in its own words, with GPUI's `examples/input.rs` (Apache-2.0) read as reference.
 
 use std::ops::Range;
@@ -82,8 +88,12 @@ impl TextModel {
         self.to_utf16(range.start)..self.to_utf16(range.end)
     }
 
+    /// The UTF-8 range of a UTF-16 range, always in order: a range whose start is after its end is the same range
+    /// with its ends swapped. Every range that enters the model passes through here, so the stored selection and
+    /// marked range are never inverted and can be sliced by.
     pub fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.from_utf16(range.start)..self.from_utf16(range.end)
+        let (a, b) = (self.from_utf16(range.start), self.from_utf16(range.end));
+        a.min(b)..a.max(b)
     }
 
     pub fn len_utf16(&self) -> usize {
@@ -100,9 +110,7 @@ impl TextModel {
 
     /// The text of a UTF-16 range and the range actually used, after snapping to character boundaries.
     pub fn text_for_range_utf16(&self, range: Range<usize>) -> (String, Range<usize>) {
-        let range = self.range_from_utf16(&range);
-        let start = range.start.min(range.end);
-        let actual = start..range.end;
+        let actual = self.range_from_utf16(&range);
         (
             self.text[actual.clone()].to_string(),
             self.range_to_utf16(&actual),
@@ -115,7 +123,7 @@ impl TextModel {
             .map(|range| self.range_from_utf16(&range))
             .or(self.marked.clone())
             .unwrap_or(self.selection.clone());
-        range.start.min(range.end)..range.end
+        range.start.min(range.end)..range.start.max(range.end)
     }
 
     /// Committed text. Replaces `range` (UTF-16), or else the marked text, or else the selection, and ends any
@@ -263,7 +271,20 @@ impl TextModel {
 mod tests {
     use super::*;
 
+    /// A range with its start after its end, built without a literal that clippy rejects: what a hostile or buggy
+    /// platform caller could send.
+    fn rev(start: usize, end: usize) -> Range<usize> {
+        Range { start, end }
+    }
+
+    /// The state, after checking the model's invariant: the selection and the marked range are in order, inside the
+    /// text and on character boundaries, so a copier can slice by them.
     fn state(m: &TextModel) -> (&str, Option<Range<usize>>, Range<usize>) {
+        let ranges = [Some(m.selection()), m.marked()];
+        for range in ranges.into_iter().flatten() {
+            assert!(range.start <= range.end, "inverted range {range:?}");
+            assert!(m.text().get(range.clone()).is_some(), "bad range {range:?}");
+        }
         (m.text(), m.marked(), m.selection())
     }
 
@@ -415,5 +436,147 @@ mod tests {
         );
         m.set_selection_utf16(1..1);
         assert_eq!(m.text_runs().caret, (0, 1));
+    }
+
+    /// "a😀b" with the caret at the end: bytes a=0, the emoji 1..5, b=5..6; UTF-16 units 0, 1..3, 3.
+    fn emoji_model() -> TextModel {
+        let mut m = TextModel::new(false);
+        m.replace_text_in_range(None, "a😀b");
+        m
+    }
+
+    #[test]
+    fn text_for_range_survives_hostile_ranges() {
+        let m = emoji_model();
+        // Out of range: clamped to the end.
+        assert_eq!(m.text_for_range_utf16(2..99), ("b".to_string(), 3..4));
+        // Entirely past the end: empty, at the end.
+        assert_eq!(m.text_for_range_utf16(50..60), (String::new(), 4..4));
+        // Inverted: the same range with its ends in order.
+        assert_eq!(m.text_for_range_utf16(rev(3, 1)), ("😀".to_string(), 1..3));
+        // Splitting a surrogate pair: both ends snap to the end of the character.
+        assert_eq!(m.text_for_range_utf16(2..2), (String::new(), 3..3));
+        assert_eq!(m.text_for_range_utf16(1..2), ("😀".to_string(), 1..3));
+        assert_eq!(m.text_for_range_utf16(2..3), (String::new(), 3..3));
+    }
+
+    #[test]
+    fn set_selection_orders_and_clamps_hostile_ranges() {
+        let mut m = emoji_model();
+        m.set_selection_utf16(rev(3, 1));
+        assert_eq!(state(&m).2, 1..5);
+        m.set_selection_utf16(rev(60, 50));
+        assert_eq!(state(&m).2, 6..6);
+        m.set_selection_utf16(2..99);
+        assert_eq!(state(&m).2, 5..6);
+        m.set_selection_utf16(2..2);
+        assert_eq!(state(&m).2, 5..5);
+        m.set_selection_utf16(rev(99, 0));
+        assert_eq!(state(&m).2, 0..6);
+    }
+
+    #[test]
+    fn replace_text_orders_and_clamps_hostile_ranges() {
+        let mut m = emoji_model();
+        // Inverted: replaces the same text as the ordered range would.
+        m.replace_text_in_range(Some(rev(3, 1)), "X");
+        assert_eq!(state(&m), ("aXb", None, 2..2));
+        // Out of range: the end is clamped.
+        m.replace_text_in_range(Some(1..99), "Y");
+        assert_eq!(state(&m), ("aY", None, 2..2));
+        // Entirely past the end: an insertion at the end.
+        m.replace_text_in_range(Some(50..60), "Z");
+        assert_eq!(state(&m), ("aYZ", None, 3..3));
+        // Inverted and past the end.
+        m.replace_text_in_range(Some(rev(60, 50)), "W");
+        assert_eq!(state(&m), ("aYZW", None, 4..4));
+        // Splitting a surrogate pair replaces the whole character.
+        let mut m = emoji_model();
+        m.replace_text_in_range(Some(1..2), "X");
+        assert_eq!(state(&m), ("aXb", None, 2..2));
+        let mut m = emoji_model();
+        m.replace_text_in_range(Some(2..2), "X");
+        assert_eq!(state(&m), ("a😀Xb", None, 6..6));
+    }
+
+    #[test]
+    fn replace_and_mark_orders_and_clamps_hostile_ranges() {
+        let mut m = emoji_model();
+        m.replace_and_mark_text_in_range(Some(rev(3, 1)), "xy", Some(1..1));
+        assert_eq!(state(&m), ("axyb", Some(1..3), 2..2));
+
+        let mut m = emoji_model();
+        m.replace_and_mark_text_in_range(Some(50..60), "xy", None);
+        assert_eq!(state(&m), ("a😀bxy", Some(6..8), 8..8));
+
+        let mut m = emoji_model();
+        m.replace_and_mark_text_in_range(Some(1..99), "xy", None);
+        assert_eq!(state(&m), ("axy", Some(1..3), 3..3));
+
+        let mut m = emoji_model();
+        m.replace_and_mark_text_in_range(Some(2..2), "xy", None);
+        assert_eq!(state(&m), ("a😀xyb", Some(5..7), 7..7));
+
+        // An inverted or out-of-range selection inside the new text is ordered and clamped to it.
+        let mut m = emoji_model();
+        m.replace_and_mark_text_in_range(Some(0..0), "abc", Some(rev(2, 0)));
+        assert_eq!(state(&m), ("abca😀b", Some(0..3), 0..2));
+        m.replace_and_mark_text_in_range(None, "abc", Some(rev(99, 40)));
+        assert_eq!(state(&m), ("abca😀b", Some(0..3), 3..3));
+        // An inverted selection that splits a surrogate pair of the new text.
+        let mut m = TextModel::new(false);
+        m.replace_and_mark_text_in_range(None, "😀", Some(rev(2, 1)));
+        assert_eq!(state(&m), ("😀", Some(0..4), 4..4));
+    }
+
+    #[test]
+    fn hostile_ranges_never_leave_the_model_inconsistent() {
+        let sizes = [0usize, 1, 2, 3, 4, 5, 99];
+        for &a in &sizes {
+            for &b in &sizes {
+                let mut m = emoji_model();
+                m.set_selection_utf16(a..b);
+                state(&m);
+                m.replace_and_mark_text_in_range(Some(a..b), "é", Some(b..a));
+                state(&m);
+                m.replace_text_in_range(Some(b..a), "😀");
+                state(&m);
+                m.backspace();
+                state(&m);
+                let _ = m.text_for_range_utf16(a..b);
+            }
+        }
+    }
+
+    #[test]
+    fn backspace_removes_one_scalar_not_one_grapheme() {
+        // Known limitation: "e" plus U+0301 is one letter on screen and two scalar values, so it takes two
+        // backspaces. A real field needs grapheme-cluster deletion from a segmentation library or the platform.
+        let mut m = TextModel::new(false);
+        m.replace_text_in_range(None, "e\u{301}");
+        m.backspace();
+        assert_eq!(state(&m), ("e", None, 1..1));
+        m.backspace();
+        assert_eq!(state(&m), ("", None, 0..0));
+
+        // A joined emoji is split: the family sequence is several scalars joined by zero-width joiners.
+        let mut m = TextModel::new(false);
+        m.replace_text_in_range(None, "👨\u{200d}👩\u{200d}👧");
+        m.backspace();
+        assert_eq!(m.text(), "👨\u{200d}👩\u{200d}");
+    }
+
+    #[test]
+    fn the_caret_can_land_inside_a_grapheme_cluster() {
+        // Known limitation (see above): arrow movement is by scalar value, so the caret stops between a base
+        // letter and its combining mark.
+        let mut m = TextModel::new(false);
+        m.replace_text_in_range(None, "e\u{301}x");
+        m.move_left();
+        m.move_left();
+        assert_eq!(m.caret(), 1);
+        assert_eq!(&m.text()[..m.caret()], "e");
+        m.move_right();
+        assert_eq!(m.caret(), 3);
     }
 }

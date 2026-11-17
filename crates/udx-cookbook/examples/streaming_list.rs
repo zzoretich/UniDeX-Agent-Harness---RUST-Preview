@@ -12,7 +12,7 @@
 //!   grows with each message seen; the real chat needs eviction.
 //! - Tokens come from another thread (a Tokio task in the application) over a channel. A foreground task awaits the
 //!   first, drains the rest, applies the batch in one update and re-measures only the streaming row, so the UI thread
-//!   never waits and a burst costs one frame.
+//!   never waits and a burst costs one frame. The view is notified once per drained batch, not once per token.
 //! - Timing without the profiler: `render` marks the start of a draw and a zero-size `canvas` painted last marks the
 //!   end of its paint phase (`udx_cookbook::stats`).
 //!

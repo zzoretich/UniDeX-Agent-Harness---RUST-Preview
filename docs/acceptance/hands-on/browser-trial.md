@@ -23,8 +23,9 @@ trial's code was removed from `main` at the M0 gate.
   from CEF's build host, checked against the SHA-256 the trial's workflow pinned before anything is unpacked. The
   trial's `unpack-cef.sh` refuses an archive holding an absolute path or a `..` component but does not check the hash
   itself, so the hash check below comes first, as it did in the trial.
-- Several gigabytes of disk in the scratch checkout: the archive and the unpacked distribution, the helper's app bundle
-  (about 350 MB as built) and the Rust build of the app, GPUI included.
+- About 4.3 GB of disk in the scratch checkout (the figure measured on the development machine; yours will differ):
+  the archive and the unpacked distribution, the helper's app bundle (about 350 MB as built) and the Rust build of the
+  app, GPUI included.
 - Network access: for the download, and because Chromium contacts its vendor on every start (see the warning).
 
 ## Get and build the trial

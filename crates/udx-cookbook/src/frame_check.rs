@@ -404,4 +404,63 @@ mod tests {
         assert!(Rgba8::new(2, 2, &[0; 15]).is_none());
         assert!(Rgba8::new(u32::MAX, u32::MAX, &[]).is_none());
     }
+
+    #[test]
+    fn fails_at_a_scale_too_small_to_trust() {
+        // A capture at 0.4 of the scene: the red block is found but the scale is below the floor.
+        let canvas = synthetic(0.4, (0, 0), false, true);
+        let report = check_frame(&canvas.frame(), false);
+        assert!(!report.ok);
+        assert!(failed(&report).contains(&"red_block_found"));
+    }
+
+    #[test]
+    fn fails_when_the_parts_are_not_at_one_scale() {
+        // The red block drawn at twice the size of everything else: the scale read from it puts every other
+        // sample in the wrong place.
+        let mut canvas = synthetic(1.0, (0, 0), false, true);
+        let c = rgb_bytes(RED);
+        let side = (BLOCK_SIDE * 2.0) as u32;
+        for y in RED_AT.1 as u32..RED_AT.1 as u32 + side {
+            for x in RED_AT.0 as u32..RED_AT.0 as u32 + side {
+                let at = ((y * canvas.width + x) * 4) as usize;
+                canvas.pixels[at..at + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        let report = check_frame(&canvas.frame(), false);
+        assert!(!report.ok);
+        assert_eq!(report.scale, Some(2.0));
+    }
+
+    #[test]
+    fn fails_on_a_frame_that_is_not_the_scene() {
+        // Another window: plenty of colours, but no block of the scene's red.
+        let (width, height) = (480u32, 320u32);
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                pixels.extend_from_slice(&[(x % 251) as u8 / 2, (y % 241) as u8 / 2, 90, 255]);
+            }
+        }
+        let report = check_frame(&Rgba8::new(width, height, &pixels).unwrap(), false);
+        assert!(!report.ok);
+        assert_eq!(report.scale, None);
+        assert_eq!(failed(&report), vec!["red_block_found"]);
+    }
+
+    #[test]
+    fn fails_on_a_frame_with_a_red_block_but_another_layout() {
+        // A different window that happens to hold a red square: the other parts are not where the scene has them.
+        let mut pixels = [20u8, 30, 40, 255].repeat(480 * 320);
+        let c = rgb_bytes(RED);
+        for y in 100..100 + BLOCK_SIDE as usize {
+            for x in 100..100 + BLOCK_SIDE as usize {
+                let at = (y * 480 + x) * 4;
+                pixels[at..at + 4].copy_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        let report = check_frame(&Rgba8::new(480, 320, &pixels).unwrap(), false);
+        assert!(!report.ok);
+        assert!(failed(&report).contains(&"green_block"));
+    }
 }

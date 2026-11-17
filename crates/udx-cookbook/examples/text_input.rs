@@ -22,8 +22,10 @@
 //! - Accessibility: an id, a role, a label and the value, plus one text run per line so a screen reader can count
 //!   characters and follow the caret (E21).
 //!
-//! A real field also needs mouse selection, word movement, undo, wrapping and bidirectional text; decision 0010
-//! recommends the widget kit's input for those.
+//! A real field also needs mouse selection, word movement, undo, wrapping and bidirectional text, and
+//! grapheme-cluster movement and deletion (here backspace and the arrows work by scalar value, so a letter with a
+//! combining accent takes two backspaces; that needs a segmentation library or the platform's text services).
+//! Decision 0010 recommends the widget kit's input for these.
 
 use std::ops::Range;
 
@@ -143,6 +145,7 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        // `range_from_utf16` puts the ends in order, so `end - start` below cannot underflow.
         let range = self.model.range_from_utf16(&range);
         let (index, (start, line)) =
             (self.layout.iter().enumerate()).rfind(|(_, (start, _))| *start <= range.start)?;

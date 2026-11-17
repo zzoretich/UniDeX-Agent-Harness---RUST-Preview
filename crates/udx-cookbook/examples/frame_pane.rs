@@ -129,6 +129,10 @@ fn reader(
                 return;
             }
         };
+        // Stand-in shortcuts that must not be copied into the real transport (decision 0012 treats the helper as
+        // untrusted): this reader does not check that the named slot is currently the peer's, so a peer could name
+        // a slot twice or one the app still holds; and the free-slot channel is unbounded, so a misbehaving peer
+        // could make it grow. The real transport tracks each slot's owner and bounds what it queues.
         let bgra = slots[msg.slot as usize].lock().unwrap()[..len].to_vec();
         let _ = free.send(msg.slot);
         // The size was checked, so the conversion cannot fail; a decoding error would be a bug, and is reported.
@@ -166,7 +170,7 @@ impl Pane {
     fn new(reader_end: PipeReader, writer_end: PipeWriter, cx: &mut Context<Self>) -> Self {
         let slots: Slots = Arc::new(
             (0..LAYOUT.slots)
-                .map(|_| Mutex::new(vec![0; LAYOUT.slot_bytes()]))
+                .map(|_| Mutex::new(vec![0; LAYOUT.slot_bytes().expect("a fixed, small layout")]))
                 .collect(),
         );
         let (free_tx, free_rx) = mpsc::channel();
