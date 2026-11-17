@@ -16,6 +16,8 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "MPL-2.0",
+    # Allowed by the maintainer on 2026-11-17 (decision 0007): it sets no conditions at all.
+    "0BSD",
 ]
 confidence-threshold = 0.8
 
@@ -27,6 +29,17 @@ wildcards = "allow"
 version = 2
 yanked = "deny"
 # Vulnerabilities are always errors in advisories version 2.
+#
+# Accepted by the maintainer on 2026-11-17 (decision 0007): five informational "unmaintained" notices with no
+# patched release, all in GPUI's dependency tree. Exactly these five; any other advisory still fails. Review the
+# list at every GPUI upgrade and remove an entry as soon as its crate is replaced or patched.
+ignore = [
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: required directly by gpui-pre and through fontdb and rustybuzz" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz: required by usvg, which gpui-pre uses for SVG" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: zbus 5 on Linux, through accesskit_unix, ashpd and oo7" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: zbus 5 on Linux, as for zvariant" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: zbus 5 on Linux, as for zvariant" },
+]
 
 [sources]
 unknown-registry = "deny"

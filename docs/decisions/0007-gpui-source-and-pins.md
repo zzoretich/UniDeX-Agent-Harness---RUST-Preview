@@ -139,12 +139,15 @@ Apple's Metal compiler, which this Mac's Xcode 27.1 lacks (Xcode ships it as a s
 may lack too.
 
 **Widget kit: deferred.** `gpui-kit` is not a dependency yet. Its styled layer (`gpui-component` 0.10.0) needs the 0BSD
-licence, which is not on the allow list; adding a licence is the maintainer's call, not this decision's. The choice
+licence. The maintainer allowed 0BSD on 2026-11-17 (see "Maintainer decisions" below), so the licence no longer rules
+the kit out; the kit's tree still carries three more unmaintained notices than the five accepted below, which a trial
+that adopts it must bring to the maintainer. The choice
 between the styled kit, `gpui-base` alone (which passes the policy) and plain GPUI belongs to the trial tasks (Tasks 10
 and 11), which build real screens. Whatever they choose, this pin is the snapshot `gpui-kit 0.10.0` requires, so adding
 `gpui-kit = { version = "=0.10.0", ... }` later moves no GPUI version.
 
-**Advisories: open, for the maintainer.** Every candidate's tree carries five informational "unmaintained" notices with
+**Advisories: decided by the maintainer** (see "Maintainer decisions" below; the rest of this paragraph is the
+question as it stood). Every candidate's tree carries five informational "unmaintained" notices with
 no patched release: RUSTSEC-2026-0192 (`ttf-parser`), RUSTSEC-2026-0206 (`rustybuzz`), RUSTSEC-2026-0370 (`zvariant`),
 RUSTSEC-2026-0371 (`zbus_names`) and RUSTSEC-2026-0372 (`zvariant_derive`). None is a vulnerability. `ttf-parser` is a
 direct dependency of `gpui-pre`; `rustybuzz` comes through `usvg`; the three `zbus` 5 crates come through the Linux
@@ -155,9 +158,22 @@ decision's: for example ignoring exactly these five IDs in `deny.toml`, each wit
 still fails. Nothing is ignored here. `cargo audit` reports the five, and `paste` (RUSTSEC-2024-0436, present in
 `Cargo.lock` but not in any build), as warnings and passes.
 
+## Maintainer decisions (2026-11-17)
+
+Two questions this record raised were put to the maintainer, who decided both:
+
+- **The five advisories are accepted.** `deny.toml` ignores exactly RUSTSEC-2026-0192, -0206, -0370, -0371 and -0372,
+  each with its reason. Any other advisory, and any vulnerability, still fails the check. The list is reviewed at
+  every GPUI upgrade, and an entry is removed as soon as its crate is replaced or patched. The alternatives offered
+  were to stop failing on unmaintained notices for indirect dependencies altogether (rejected: future notices would
+  pass silently) and not to accept them (which would have ruled GPUI out).
+- **The 0BSD licence is allowed.** It is added to the licence allow list. It sets no conditions, so it is compatible
+  with the project's MIT licence.
+
 ## Who decided
 
-A design call, within the maintainer's decision 0002.
+A design call, within the maintainer's decision 0002. The advisory exceptions and the 0BSD allowance were decided by
+the maintainer.
 
 ## Consequences
 
