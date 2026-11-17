@@ -226,7 +226,8 @@ record (8 to 30 words), the agent's `text` record (1 to 3 paragraphs of 6 to 18 
 three-item list, 15% name a file in inline code, 5% end with a fenced code block of 3 to 6 lines), a `usage` and a
 `done` record; one `session` record in the first turn. That is 5,000 messages, 10,002 records and 2,140,999 bytes,
 generated from a fixed seed from a made-up vocabulary. The generator is committed as
-`docs/baseline/fixtures/long-thread.mjs` (with a README) and reproduces these exact bytes. Prompts run 8 to 30 words
+`docs/baseline/fixtures/long-thread.mjs` (with a README) and reproduces the fixture's size and its message text, not the
+original's run-time timestamps and session id. Prompts run 8 to 30 words
 (median 19); replies run 6 to 146 words (median 53) and 32 to 901 characters (median 323, 95th percentile 628). The
 app is launched with the Sessions surface on and a stand-in `claude` CLI recorded as the host's binary, as the
 project's Sessions spec does.

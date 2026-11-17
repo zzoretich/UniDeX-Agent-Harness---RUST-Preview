@@ -128,9 +128,9 @@ relevant rule).
 - Long-lived OAuth token (A4, A15). A token made with the CLI's setup-token command and set as
   `CLAUDE_CODE_OAUTH_TOKEN` authenticates with the user's Claude subscription and needs a Pro, Max, Ultra, Team or
   Enterprise plan (A4). It outranks the stored `/login` credential but ranks below an API key in the precedence list
-  (A4). Besides the shell, user settings files can set it (A4); project and local settings cannot (A15). A15 also
-  lists `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` as a claude.ai credential. A file-descriptor variant appears in R1's code but
-  is not documented in the Anthropic pages read.
+  (A4). Besides the shell, user settings files can set it (A4), and managed settings can too; project and local
+  settings cannot (A15). A15 also lists `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` as a claude.ai credential. A file-descriptor
+  variant appears in R1's code but is not documented in the Anthropic pages read.
 - Statements pointing the other way. A7 (its June 2026 update, still on the page) says Agent SDK, `claude -p` and
   third-party app usage still draw from subscription limits. A10 says the usage-bundle balance also covers third-party
   products that use a Claude account. A1 says advertised plan limits assume ordinary, individual use of Claude Code and
@@ -278,8 +278,8 @@ notice, Apache-2.0, built on the Codex App Server, reuses Codex's existing sign-
 | Licence | Apache-2.0 (LICENSE file and package.json). | Apache-2.0 (LICENSE file text and package.json; GitHub's metadata shows the licence as unrecognised). |
 | How it runs the agent | Built on the Claude Agent SDK (depends on `@anthropic-ai/claude-agent-sdk`), which runs the Claude Code binary. Release archives ship the Claude CLI next to the adapter; `CLAUDE_CODE_EXECUTABLE` selects an installed CLI instead. | Starts the Codex App Server and translates ACP to it. The npm package depends on `@openai/codex`, so it brings its own Codex binary; `CODEX_PATH` selects an installed one instead. |
 | Authentication | Uses whatever credential the Claude CLI already holds (subscription login, Console login, API key, key helper, environment OAuth token, cloud provider). Advertises two terminal login methods that run the CLI's own login: claude.ai subscription and Anthropic Console. | Uses the account Codex already holds: it asks for a login only when Codex needs OpenAI auth and has no account (`readAuthRequirement`), so an API key placed only in the environment is ignored while a ChatGPT account is cached. Advertises API key (`CODEX_API_KEY` or `OPENAI_API_KEY`), ChatGPT browser login (hidden when `NO_BROWSER` is set), ChatGPT device code (offered only to clients that support URL elicitation) and an opt-in custom gateway. Choosing its API-key method makes it log in to the app server with an API key, which Codex stores (O2) in the login cache the CLI and IDE share (O1); whether O1's store modes change that for the app server the adapter starts is not verified. Passes the ACP client's name, title and version to the app server as its `clientInfo`. |
-| Subscription guard | The `--hide-claude-auth` flag hides the subscription login method and refuses a session or turn when the account the SDK reports looks billed to a Free, Pro, Max or Team plan. Gaps, each confirmed in R1's code or tests: an account whose credential is an environment OAuth token passes the guard even with a Pro plan (the token-source test case), although A4 says that token authenticates with the Claude subscription; a Claude Enterprise plan passes, citing an Anthropic allowance that no Anthropic page read states; the guard fails open when the account cannot be read; a credential swapped mid-session is seen only at the next prompt; the guard is off while a provider or gateway override routes traffic; the v2 code says the adapter's `/remote-control` command is not guarded (for v1 this is not confirmed). | None. Nothing in R2 refuses a ChatGPT-billed session. |
-| Identity reporting | Reports the identity the agent uses through an `_auth/status_update` notification and the ACP `auth/status` request: kind `account` (a Claude plan), `api_key`, `gateway`, `external` (cloud provider) or `none`. When it cannot tell, it sends nothing and `auth/status` answers unknown. Reporting only. | Pushes the identity in an `_auth/status_update` notification after `initialize` and on each change: kind `account` for a ChatGPT sign-in, `api_key` for an API key and also for a personal access token, `gateway`, or `none`. When it cannot tell, it sends nothing. |
+| Subscription guard | The `--hide-claude-auth` flag hides the subscription login method and refuses a session or turn when the account the SDK reports looks billed to any Claude plan other than Enterprise (not only the Free, Pro, Max and Team plans). Gaps, each confirmed in R1's code or tests: an account whose credential is an environment OAuth token passes the guard even with a Pro plan (the token-source test case), although A4 says that token authenticates with the Claude subscription; a Claude Enterprise plan passes, citing an Anthropic allowance that no Anthropic page read states; the guard fails open when the account cannot be read; a credential swapped mid-session is seen only at the next prompt; the guard is off while a provider or gateway override routes traffic; the adapter's `/remote-control` command is not guarded in either the v1 or the v2 code path. | None. Nothing in R2 refuses a ChatGPT-billed session. |
+| Identity reporting | Reports the identity the agent uses through an `_auth/status_update` notification and the ACP `auth/status` request: kind `account` (a Claude plan), `api_key`, `gateway`, `external` (cloud provider) or `none`. When it cannot tell, it sends nothing and `auth/status` answers unknown. Reporting only. | Pushes the identity in an `_auth/status_update` notification after `initialize` and on each change: kind `account` for a ChatGPT sign-in, `api_key` for an API key and also for a personal access token, `gateway`, one of its external kinds, or `none`. When it cannot tell, it sends nothing. |
 | Refusals | Answers a refused or signed-out session with the ACP auth-required error; a refused subscription carries a reason field naming that case. | Answers with the ACP auth-required error when Codex has no account and no default login request is configured; with `DEFAULT_AUTH_REQUEST` set, it logs in by itself instead. No refusal based on which account pays. |
 | Described as official | No. Its README calls the Agent SDK official, not itself; no Anthropic page read mentions it (A5). The ACP site lists it as Zed's SDK adapter (R4). | No. No OpenAI page read mentions it (O5). The ACP site lists it as ACP's adapter (R4). |
 
@@ -343,12 +343,16 @@ Claude add-on:
    says the first authenticates with the Claude subscription and R1's guard lets it through; A15 lists the refresh
    token as a claude.ai credential. A cleaned
    process environment does not cover a token set in Claude Code's own settings files (A4), which is why rule 10's check
-   is still required.
-10. Run a turn only when the adapter reports kind `api_key` or `external`. Refuse `account` (any Claude plan, Enterprise
-    included), `gateway`, `none` and no report. Whether the adapter reports a keyless Console sign-in as `api_key` is
-    not confirmed; until it is, the settings text says keyless Console sign-in is not supported.
+   is still required. Whether rule 10 catches such a token when a Console key is also stored is not confirmed.
+10. Run a turn only when the adapter reports kind `api_key` or `external`. For `api_key`, also check the report's detail
+    field, because the adapter reports a gateway's bearer token under that kind too, and refuse a turn whose detail
+    shows a gateway token. Refuse `account` (any Claude plan, Enterprise included), `gateway`, `none` and no report.
+    Whether the adapter reports a keyless Console sign-in as `api_key` is not confirmed; until it is, the settings text
+    says keyless Console sign-in is not supported, and this rule cannot enforce that exclusion: a keyless Console
+    sign-in reported as `api_key` would pass.
 11. Also spawn the adapter with `--hide-claude-auth`, as a backstop that hides its subscription login and refuses some
-    plan-billed turns. It is never the guarantee; its gaps are listed under The adapters.
+    plan-billed turns. It is never the guarantee; its gaps are listed under The adapters. UniDeX never sends the
+    adapter's `/remote-control` command, which the flag does not guard in either code path.
 12. UniDeX may pass an Anthropic API key that the user entered for this add-on, only in the adapter process's
     environment; usage is billed to the key owner (A1, A4).
 13. Settings text, in substance: uses your Anthropic API key or cloud provider; billed at API rates by Anthropic or your
@@ -402,10 +406,11 @@ Codex add-on:
    - Option C, Sign in with ChatGPT. Requires UniDeX to register as an open-source client and keep a host ID per
      installation (O7), own an OAuth sign-in and store tokens locally under the user's control (O17), drive the app server
      with its own token (O8) within preview limits (O9), show plan use as O10 asks, and accept O17 (own name, no charge
-     for plan use, plan used only for UniDeX, no pooling). This reverses rule 1 and the spec section 5.4 rule that UniDeX
-     never handles a vendor login. For: it is OpenAI's recommended route, and plan usage is open to all open-source
-     partners (O6). Against: a design change; plan usage covers eligible Plus and Pro users only (O6); a paid or remotely
-     hosted UniDeX would need OpenAI's approval (O7).
+     for plan use, plan used only for UniDeX, no pooling). This reverses rule 1 and the product rule stated under
+     Context that UniDeX never handles a vendor login (spec section 5.4 says the app never bundles or installs an
+     add-on, not that it never handles a login). For: it is OpenAI's recommended route, and plan usage is open to all
+     open-source partners (O6). Against: a design change; plan usage covers eligible Plus and Pro users only (O6); a
+     paid or remotely hosted UniDeX would need OpenAI's approval (O7).
 4. Spec wording. Spec section 3 and goal G4 say subscriptions are reached through add-on engines. With these
    conclusions that holds for neither agent until a vendor confirms; when records 0006 to 0014 are folded into the spec,
    that line needs changing.

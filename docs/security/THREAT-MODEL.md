@@ -1,6 +1,7 @@
 # UniDeX Rust Preview: threat model
 
-Status: M0 draft, revision 3 · 2026-11-17 · design draft 2, `docs/design/specs/2026-11-16-unidex-rust-design.md`
+Status: M0 draft, revision 3 · 2026-11-17 · design draft 2, `docs/design/specs/2026-11-16-unidex-rust-design.md` ·
+small corrections at the M0 gate (P14 and section 7)
 
 Most of the code this document describes does not exist yet. It is what builders plan from and what the security
 review at each milestone gate checks against. Revision 2 answered an adversarial review: every attack and every
@@ -397,14 +398,17 @@ the user's data against leaving once content has spoken.
   with a body; agent typing in the browser; a shell command with network; an MCP call, unless the server is a stdio
   server sandboxed without network (P27) and none of the folders it can write is in a synced or shared location (a
   sync client's folder, a network mount, a cloud file provider), which the app checks when the server starts; when it
-  cannot tell, the exception does not apply. Host history never exempts a request, so the injecting origin has no
-  standing. Links taken verbatim from untrusted content are limited three ways, since the choice of link can signal
-  data. A link to an origin not yet contacted in the session asks, as every redirect hop to such an origin does, so
-  links to distinct, never-contacted subdomains cannot spell data through their lookups. Links to an origin that
-  supplied untrusted content this session are capped at a few per turn before asking. And such links are capped in
-  total across all origins, approved ones included, per turn and per session; reaching either total stops the turn
-  with an event. An unattended run reaches only the fixed URL prefixes (scheme, host, port and path prefix) its routine
-  declared (P41); anything else is denied.
+  cannot tell, the exception does not apply. Host history never exempts a request that carries composed data: having
+  contacted a host earlier does not let a composed request to it pass, so the injecting origin has no standing. For
+  verbatim links, history counts only in the one way stated next. Links taken verbatim from untrusted content are
+  limited three ways, since the choice of link can signal data. A link to an origin not yet contacted in the session
+  asks, as every redirect hop to such an origin does, so links to distinct, never-contacted subdomains cannot spell data
+  through their lookups. Links to an origin that supplied untrusted content this session are capped at a few per turn
+  before asking. And such links are capped in total across all origins, approved ones included, per turn and per
+  session, counting every verbatim link followed through any tool (fetch, browser, shell or MCP); reaching either total
+  stops the turn with an event. The caps' default numbers and the names of the settings that change them are chosen in
+  M1 from a measurement of how often the caps make a turn ask. An unattended run reaches only the fixed URL prefixes
+  (scheme, host, port and path prefix) its routine declared (P41); anything else is denied.
 - **Proposed (P15). Rewritten.** The markdown renderer (chat, memory, notes, notifications, proposals) never fetches a
   remote resource by itself: a remote image is a placeholder showing its full decoded URL, and in output from an
   exposed turn loading it asks. Links open only through the app's single opener (P54), on an explicit action that shows
@@ -437,7 +441,8 @@ M7 extend labelling to ACP and the browser.
   `<canary>.attacker.example.com` asks; a redirect from a verbatim URL to a new origin asks; a verbatim link to the
   injecting origin passes, and the link past the per-origin cap asks. A mock page listing links to distinct,
   never-contacted subdomains such as `p03-v0a.attacker.example.com`: each first fetch asks, the stub resolver sees no
-  lookup before the answer, and with every card approved the turn stops when the total cap is reached. An MCP call to a
+  lookup before the answer, and with every card approved the turn stops when the per-turn total is reached; a later
+  turn in the same session that follows more such links stops when the per-session total is reached. An MCP call to a
   networked server asks, while one to a sandboxed stdio server without network passes, and asks once a folder it can
   write is a stand-in sync folder. Unattended, a URL outside the declared prefix is denied.
 - P15: markdown with a remote image makes no request (the HTTP stand-in records none); in exposed output, loading it
@@ -1023,6 +1028,9 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
   covert channels (which verbatim link to an origin already contacted in the session is followed, within P14's
   per-origin and total caps, since a link to a new origin asks; timing), and output that persuades the user to paste
   something or approve a card are not stopped by any control here.
+- **A stdio server's read access to synced folders.** P14's exception for a sandboxed stdio server without network
+  looks only at the folders the server can write. A folder it can only read may still be synced or shared, so what it
+  reads there can come from another device or person, and the exception does not consider that.
 - **Shell network once granted** has no host-level control: no egress proxy is planned. Open: a filtering proxy for
   sandboxed commands in a later milestone.
 - **Shell output in a trusted workspace** does not expose the turn when the command had no network, yet tests run

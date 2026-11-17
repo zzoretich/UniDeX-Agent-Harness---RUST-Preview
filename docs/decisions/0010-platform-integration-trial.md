@@ -52,10 +52,11 @@ The trial answers three questions the design left open.
 
 The snapshot carries the application on macOS with the gaps and rules listed below; Linux and Windows have the same
 platform-layer coverage in source but are unverified beyond compiling (CI) and GPUI-level tests. The tray comes from
-`tray-icon` (decision 0011). Section 8's screen-reader exception narrows to Linux and Windows only once the maintainer has used VoiceOver on the macOS
-app (checklist step 13); until then macOS is verified through the OS accessibility API only. The application
-supplies, itself: link delivery and the single-instance hand-off on Linux and Windows, in-window menus on Linux and
-Windows, a macOS quit gate that also covers the Dock and log-out, and the global display arrangement on macOS.
+`tray-icon` (decision 0011). Section 8's screen-reader exception narrows to Linux and Windows only once the maintainer
+has used VoiceOver on the macOS app (checklist step 13); until then macOS is verified through the OS accessibility API
+only. The application supplies, itself: link delivery and the single-instance hand-off on Linux and Windows, in-window
+menus on Linux and Windows, a macOS quit gate that also covers the Dock and log-out, and the global display arrangement
+on macOS.
 
 ### Results by feature and platform
 
@@ -155,10 +156,10 @@ Linux has two columns because GPUI has a separate backend for each display serve
 - **E17** macOS: `NSOpenPanel` and `NSSavePanel` (`platform.rs` `prompt_for_paths`, `prompt_for_new_path`). Linux:
   the xdg-desktop-portal FileChooser through `ashpd`, with no fallback (`FILE_PICKER_PORTAL_MISSING`). Windows:
   `IFileOpenDialog` and `IFileSaveDialog` (`platform.rs`). Never opened by the self-check.
-- **E18** `spikes/platform/bundle/`: `Info.plist` with `CFBundleURLTypes` (passes `plutil -lint`), a desktop entry
-  with `MimeType=x-scheme-handler/unidex;` and `Exec=... %u`, and the `HKCU\Software\Classes\unidex` keys with
-  `URL Protocol` and `shell\open\command`. Nothing was registered, so whether any OS honours the scheme is not verified. The Windows `.reg` file carries a
-  hard-coded install path and is untested; the Linux desktop entry is untested.
+- **E18** `spikes/platform/bundle/`: `Info.plist` with `CFBundleURLTypes` (passes `plutil -lint`), a desktop entry with
+  `MimeType=x-scheme-handler/unidex;` and `Exec=... %u`, and the `HKCU\Software\Classes\unidex` keys with `URL Protocol`
+  and `shell\open\command`. Nothing was registered, so whether any OS honours the scheme is not verified. The Windows
+  `.reg` file carries a hard-coded install path and is untested; the Linux desktop entry is untested.
 - **E19** Calling the app delegate's `application:openURLs:` delivered `unidex://thread/42?from=selfcheck` to the
   callback registered with `Application::on_open_urls` (which must be registered before `run`).
 - **E20** Linux and Windows store the `on_open_urls` callback and never call it (`linux/platform.rs`
@@ -216,10 +217,11 @@ hands-on checklist confirms or corrects the macOS rows marked (c).
   `aria_label`; every control has an id, a role and a label, and its visible label uses `Text::new_inaccessible` so it
   is not read twice; text fields publish `TextRun` children (the kit's input does); styled text, the markdown view
   included, publishes nodes of its own, because `StyledText` publishes nothing. These belong in the cookbook.
-- **Section 8, other exceptions to add:** the Linux tray is menu-first: a click's position is only a host-supplied hint, so
-  a popover cannot be placed reliably on X11 and not at all on Wayland (decision 0011); Linux file dialogs need xdg-desktop-portal; Linux and Windows have no native menu bar (the
-  app draws one); macOS Quit from the Dock and log-out bypass the quit gate until the app adds
-  `applicationShouldTerminate:` handling; Windows input methods go through IMM32 only.
+- **Section 8, other exceptions to add:** the Linux tray is menu-first: a click's position is only a host-supplied hint,
+  so a popover cannot be placed reliably on X11 and not at all on Wayland (decision 0011); Linux file dialogs need
+  xdg-desktop-portal; Linux and Windows have no native menu bar (the app draws one); macOS Quit from the Dock and
+  log-out bypass the quit gate until the app adds `applicationShouldTerminate:` handling; Windows input methods go
+  through IMM32 only.
 - **Work the app owns:** link delivery from arguments and a single-instance hand-off on Linux and Windows; mapping a
   global point to a display on macOS; storing window state as origin plus content size; calling
   `invalidate_character_coordinates` from text fields; `on_open_urls` registered on the `Application` before `run`.

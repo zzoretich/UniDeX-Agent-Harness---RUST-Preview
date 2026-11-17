@@ -1,8 +1,8 @@
 # UniDeX Rust Preview: design
 
 Status: approved by the maintainer · 2026-11-16 · draft 2, revised after an independent design review · revised at
-the M0 gate, 2026-11-17: sections 5.7, 5.8, 8, 9, 13 updated from decisions 0006 to 0013; open questions in
-docs/build/M0-GATE.md
+the M0 gate, 2026-11-17: sections 5.7, 5.8, 8, 9, 13 updated from decisions 0006 to 0013, and section 7 corrected to
+match the acceptance checklist; open questions in docs/build/M0-GATE.md
 Source product: UniDeX Agent Harness 2.7.0 (Electron), MIT, referred to below as "the Electron app".
 
 ## 1. Intent
@@ -346,6 +346,7 @@ Design calls that change or drop features:
 - Connectors are MCP servers for our engine (M10).
 - The Computer pane is embedded Chromium (M7).
 - The tray popover, command palette, quick capture and tour carry over (M4 to M11).
+- Chief of Staff: carried over; runs on any role's model (M6).
 
 | source section                                         | items | carry | change | drop | milestones         |
 |--------------------------------------------------------|-------|-------|--------|------|--------------------|
@@ -360,7 +361,7 @@ Design calls that change or drop features:
 | Notifications                                          | 9     | 7     | 2      | 0    | M6                 |
 | Agent teams (both hosts)                               | 4     | 1     | 3      | 0    | M10                |
 | Agent Teams tab (both hosts)                           | 11    | 8     | 3      | 0    | M10                |
-| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M6, M10            |
+| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M4, M10            |
 | Spaces / Runs                                          | 23    | 13    | 9      | 1    | M8                 |
 | Brain                                                  | 28    | 20    | 7      | 1    | M9                 |
 | Routines                                               | 11    | 6     | 3      | 2    | M6                 |
@@ -368,9 +369,9 @@ Design calls that change or drop features:
 | Connectors (both hosts)                                | 17    | 4     | 6      | 7    | M10                |
 | Agents (both hosts)                                    | 8     | 0     | 3      | 5    | M10                |
 | Cross-review and handoff (both hosts; each run spends) | 3     | 0     | 3      | 0    | M5                 |
-| Codex host                                             | 22    | 0     | 8      | 14   | M3, M5, M6, M8, M9 |
+| Codex host                                             | 22    | 0     | 8      | 14   | M3, M6, M8, M9     |
 | Vault chat (per provider)                              | 6     | 0     | 6      | 0    | M4                 |
-| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M4, M5             |
+| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M4, M5, M7         |
 | Code                                                   | 27    | 12    | 10     | 5    | M4, M5, M8, M10    |
 | Computer pane (per host; each turn spends)             | 29    | 20    | 7      | 2    | M7                 |
 | Launch sequence                                        | 6     | 0     | 4      | 2    | M6, M11            |
