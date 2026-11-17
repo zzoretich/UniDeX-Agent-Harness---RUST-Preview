@@ -24,6 +24,16 @@ silicon laptop with 16 GB) should become a hands-on step. GPUI is the pinned `gp
 Step 3 of the task (running virtual machines on the development machine) was not run: the maintainer has not approved
 installing virtual machine software. It was researched instead (below).
 
+## Options considered
+
+| Option | Trade-off |
+|---|---|
+| Hosted runners, software rendering, frames captured in the app and from outside (chosen) | Free on a public repository, no hardware, and the same checks on every pull request; proves the window renders and the pixels can be checked, not that real GPUs, desktops or input work. Linux gets two captures (the app's own and `xwd` or `grim`); Windows gets the app's own and a screen capture of the window's client rectangle. |
+| Self-hosted runners or hosted runners with GPUs | Would add hardware drivers; none are offered for public repositories today, and a self-hosted runner on a public repository is a security exposure. Not tried. |
+| Screenshot baselines compared pixel for pixel across platforms | Brittle: fonts and rasterisers differ per platform. Rejected for the structural check in "The frame check"; baselines stay a macOS-first idea (design section 8). |
+| Virtual machines on the development machine, Linux guest (UTM) | Free, and the only way to put hands on a real Linux desktop short of hardware; Arm guest, virtual GPU. Recommended as an optional step, pending approval (below). |
+| Virtual machines, Windows 11 on Arm guest | Needs a Windows licence and, for the one route Microsoft authorizes, a paid product; CI already shows Windows rendering. Deferred to M4. |
+
 ## What was built
 
 Throwaway code in `spikes/render-ci/` (a standalone Cargo workspace, not a member of the repository's workspace) and
@@ -58,7 +68,7 @@ all four round 2 attempts were green on both jobs.
 | Linux, X11 + Vulkan | Xvfb 21.1.22, 1280 x 800 x 24, no window manager, no compositor | wgpu Vulkan on lavapipe: "llvmpipe (LLVM 21.1.8, 256 bits)", Mesa 26.0.8, device type CPU | X11 GetImage: all checks pass | `xwd` of the root window: all checks pass | passes; AccessKit tree with AT-SPI on |
 | Linux, X11 + OpenGL | same | wgpu GL through EGL on llvmpipe, OpenGL 4.5 core (Vulkan drivers hidden with `VK_DRIVER_FILES`) | X11 GetImage: pass | `xwd`: pass | not run here (the socket does not depend on the renderer; the X11 + Vulkan row covers it) |
 | Linux, Wayland | sway 1.11, headless back end, pixman renderer | wgpu Vulkan on lavapipe | not possible (see below) | `grim`: all checks pass | action and tree pass, AccessKit tree with AT-SPI on; frame not possible |
-| Windows | the runner's interactive desktop: console session 2, 1024 x 768, display adapter "Microsoft Hyper-V Video" | Direct3D 11 at feature level 11.1 on "Microsoft Basic Render Driver" (WARP, Microsoft's software rasteriser), with and without DirectComposition | `render_to_image`: pass | screen pixels under the window's client rectangle (.NET `CopyFromScreen`): pass | passes; AccessKit tree |
+| Windows | the runner's interactive session on Windows Server 2025 Datacenter (build 26100), not a client Windows: console session 2, 1024 x 768, display adapter "Microsoft Hyper-V Video" | Direct3D 11 at feature level 11.1 on "Microsoft Basic Render Driver" (WARP, Microsoft's software rasteriser), with and without DirectComposition | `render_to_image`: pass | screen pixels under the window's client rectangle (.NET `CopyFromScreen`): pass | passes; AccessKit tree |
 
 What each row shows, and how it could have been weaker than it looks:
 
@@ -74,17 +84,28 @@ What each row shows, and how it could have been weaker than it looks:
   core pointer but no XInput pointer device). Time to first render on X11: 232 to 466 ms over the round 2 attempts
   (Vulkan and OpenGL alike); 2.17 s once in round 1, when the text system took 1.94 s to parse 53 font faces from a
   cold disk cache (1 to 206 ms in every later launch).
+- **Capture offset (unexplained).** In the Linux display captures the check finds the red block at (402, 240) while
+  the window's logical bounds start at (400, 240). The 2 pixel horizontal offset is not explained (it is the same in
+  all four attempts); the check passes because it derives its origin from the red block, not from the bounds.
 - **Fonts.** On Linux GPUI maps its default UI font (".SystemUIFont") to "IBM Plex Sans", which the runner does not
-  have; GPUI warned and fell back to an installed font (DejaVu was installed for this reason; which face it chose is
-  not logged). The text check passed with the fallback. The app must name fonts it ships on Linux.
-- **Windows.** The session is interactive (`UserInteractive` true; the process's session is the active console
+  have; GPUI warned ("failed to load font ... .SystemUIFont") and the text system then logged a match on "DejaVu Sans",
+  which was installed for this reason; the log does not say whether that match is what GPUI used for drawing. The
+  text check passed. The app must name fonts it ships on Linux.
+- **Windows.** The runner is Windows Server 2025 Datacenter (build 26100, from the diagnostics log), not Windows 10 or 11, so its shell and window manager configuration are the server's. The session is interactive (`UserInteractive` true; the process's session is the active console
   session; not a remote session). DXGI enumerated WARP as an adapter and GPUI took it; GPUI's own description says
   `is_software_emulated: false` for it, so that flag cannot be trusted to detect software rendering on Windows. Time to
-  first render 77 to 124 ms. DirectComposition on and off made no difference here.
-- **Wayland.** The window rendered (render count 5, lavapipe; time to first render 1.2 to 2.2 s) and `grim` captured
+  first render 99 to 124 ms over the round 2 attempts (77 and 78 ms in round 1, run 44128026417). DirectComposition on and off made no difference here.
+- **Wayland.** In the trial this result is advisory: the Wayland step runs under a wrapper that turns any failure into
+  a warning, so a green job does not mean Wayland passed. Read from the logs, it did pass in four of four attempts
+  (the display capture passed its check every time). The compositor is headless sway 1.11 with the pixman software
+  renderer: no real desktop environment, no window decorations, no input devices. The real harness must make
+  the Wayland check a hard one. The window rendered (render count 5, lavapipe; time to first render 1.2 to 2.2 s) and `grim` captured
   it, but the app cannot read its own window back: GPUI's Wayland window does not implement `render_to_image`, and
   Wayland gives a client no way to read the screen. The automation run on Wayland (round 2) clicked the button, saw the
-  state change and read the AccessKit tree; its two frame steps are reported as warnings, by design. sway also logged
+  state change and read the AccessKit tree; its two frame steps are reported as warnings, by design.
+  `scenario.sh` turns the app's non-zero exit into a warning only when the exit code is 1 and `scenario.json` carries
+  the message "no in-app readback on this display server" (every attempt showed exactly that); any other exit code, or
+  exit 1 without that message, fails the step. Before this fix round the script downgraded any non-zero exit. sway also logged
   that it could not start Xwayland (not installed; irrelevant here).
 - **The AccessKit tree did not come from a screen reader.** It came from activating accessibility per platform (below).
   On Linux the AT-SPI bus was told `IsEnabled = true` before the app started; on Windows the app sent itself a UI
@@ -125,7 +146,7 @@ release-build check for nightly artifacts.
 `check_frame` finds the red block in any capture (the bounding box of pixels within 40 per channel of its colour),
 derives the origin and scale from it, then samples a patch at the centre of the green, blue and state blocks, the
 background at an empty spot and the inside of the button, and counts dark pixels in the text line's region (between 2
-and 60 percent ink, at least 120 logical pixels wide). It also requires at least six distinct colours. Six unit tests
+and 60 percent ink, at least 120 logical pixels wide). It also requires at least six distinct colours. Six unit tests (five frame checks and one for the line reader)
 cover correct frames at scales 1, 1.5 and 2 with offsets, and failures for a missing text line, a blank frame, swapped
 red and blue channels and the wrong state colour.
 
@@ -146,7 +167,9 @@ Safety against the threat model:
 
 - Test builds only. The socket is behind the cargo feature `automation`; CI builds the release binary without it,
   checks that the marker string the socket code carries is absent (present in the test build) and that `--automation`
-  is refused with exit code 2. This is a sketch of P37's release check. In round 1 the check itself was faulty: GitHub
+  is refused with exit code 2. This is a sketch of P37's release check. It proves only this trial's feature wiring: it would not catch feature
+  unification in the real workspace (another crate enabling the feature for the whole build), so the real check must
+  run on the packaged artifacts. In round 1 the check itself was faulty: GitHub
   runs bash with `-e`, so `grep -c` returning 1 for a count of zero ended the step before the comparison; locally the
   release binary had 0 occurrences and the test binary 1, and the step now turns `-e` off and checks every result. In
   all four round 2 attempts it reported "test build 1, release build 0" and exit code 2 for `--automation`.
@@ -157,9 +180,18 @@ Safety against the threat model:
   Windows: a named pipe with a protected DACL that grants access to the current user's SID only (not administrators,
   not Everyone), FILE_FLAG_FIRST_PIPE_INSTANCE (creation fails if another process owns the name) and
   PIPE_REJECT_REMOTE_CLIENTS; the client's process id is logged. One client at a time.
+- Known limits of this endpoint code:
+  - `FILE_FLAG_FIRST_PIPE_INSTANCE` protects only the first instance. After the first client disconnects the next
+    instance is created without it, so in that gap another process could create the pipe name (low risk: the client
+    reads the name from the app's output, and the access list protects the original).
+  - The Unix socket is bound under a process-wide umask change (0177), which is a race with other threads creating
+    files at the same moment.
+  - If the runtime directory is not usable the endpoint falls back to the temp directory; that is safe because the
+    directory is created owner-only and verified after creation.
 - Not yet done, and needed in the real harness: a stronger peer check on Windows (compare the client process's token
-  user, not only the DACL), an idle timeout, a per-connection rate limit, and the endpoint's name passed to the test
-  driver through an inherited handle or file rather than stdout.
+  user, not only the DACL), closing the pipe-instance gap and the umask race above, an idle timeout, a per-connection
+  rate limit, and the endpoint's name passed to the test driver through an inherited handle or file rather than
+  stdout.
 
 What the framework lets the app see:
 
@@ -188,8 +220,10 @@ Wording design section 8 can adopt:
 
 | | Linux (x64) | Windows (x64) |
 |---|---|---|
-| Covered | The app builds and its tests pass; its window opens and renders on X11 (a virtual display) through both of GPUI's Linux paths, Vulkan and OpenGL, on Mesa's software rasterisers, and on Wayland under a headless wlroots compositor; a frame is captured and checked automatically for the expected colours, layout and the presence of text; the automation socket clicks a control, reads GPUI's accessibility tree and the app's element list, and captures a frame (on X11; on Wayland action and tree only) | The app builds and its tests pass; its window opens and renders on a real Windows desktop session with Direct3D 11 on Microsoft's software rasteriser (WARP), with and without DirectComposition; the composed window on screen is captured and checked; the automation socket over a user-only named pipe clicks a control, reads GPUI's accessibility tree and captures a frame |
-| Not covered | Real GPU drivers (Intel, AMD, NVIDIA; DRI3, hardware presentation); real desktop compositors and window managers (GNOME, KDE; decorations, focus, tiling); fractional and per-monitor scaling (the runner is at scale 1); input methods and dead keys; input through the display server (actions are dispatched inside GPUI); the system UI font and real font configuration; the tray, notifications and portals; file dialogs; the screen reader itself (Orca); performance and frame pacing; ARM Linux | Real GPU drivers and hardware Direct3D; scaling other than 100 percent and multiple monitors; input methods and dead keys; input through Win32 messages; the tray and notifications; file dialogs; the screen reader itself (Narrator, NVDA); performance and frame pacing; Windows on ARM |
+| Covered | The app builds and its tests pass; its window opens and renders on X11 (a virtual display) through both of GPUI's Linux paths, Vulkan and OpenGL, on Mesa's software rasterisers, and, advisory only in the trial (its failures cannot fail the job), on Wayland under headless sway with a software renderer (no real desktop, decorations or input devices; it passed in four of four attempts); a frame is captured and checked automatically for the expected colours, layout and the presence of text; the automation socket clicks a control, reads GPUI's accessibility tree and the app's element list, and captures a frame (on X11; on Wayland action and tree only) | The app builds and its tests pass; its window opens and renders on a Windows Server 2025 interactive session with a software Direct3D adapter (Direct3D 11 on Microsoft's software rasteriser, WARP), with and without DirectComposition; the composed window on screen is captured and checked; the automation socket over a user-only named pipe clicks a control, reads GPUI's accessibility tree and captures a frame |
+| Not covered | Real GPU drivers (Intel, AMD, NVIDIA; DRI3, hardware presentation); real desktop compositors and window managers (GNOME, KDE; decorations, focus, tiling); fractional and per-monitor scaling (the runner is at scale 1); input methods and dead keys; input through the display server (actions are dispatched inside GPUI); the system UI font and real font configuration; the tray, notifications and portals; file dialogs; the screen reader itself (Orca); performance and frame pacing; ARM Linux | Windows 10 and 11 client shell and window manager configuration (the runner is Windows Server); real GPU drivers and hardware Direct3D; scaling other than 100 percent and multiple monitors; input methods and dead keys; input through Win32 messages; the tray and notifications; file dialogs; the screen reader itself (Narrator, NVDA); performance and frame pacing; Windows on ARM |
+
+For design section 8, the Windows claim should read "rendered on a Windows Server 2025 interactive session with a software Direct3D adapter", and the Wayland claim must not be stated as checked until the real harness makes it a hard check.
 
 A build that passes is still labelled "CI-verified, not yet run on real hardware", as section 8 says.
 
@@ -209,7 +243,9 @@ Verified with `gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2`: the re
 lightweight tag, so there is no tag object to dereference), the `v7` tag points at the same commit, the commit's
 signature is verified, and the v7.0.2 release was published on 2026-10-07. Artifacts hold only the trial's window and
 logs: Linux captures are of virtual displays that hold nothing else, the Windows capture is cut to the window's client
-rectangle, and the pipe's SID is not logged.
+rectangle, and the pipe's SID is not logged by the final code.
+
+Disclosure: round 1's public Windows log (run 44128026417, job 134197065060) prints the pipe's security descriptor, which includes the SID of the hosted runner's built-in administrator account. That account belongs to an ephemeral runner, not to a person. Later runs do not print it (none of the four attempts of run 44132309583 contains one). The SID is not written here; the maintainer may delete that run's logs if preferred.
 
 ## Virtual machines (researched, not run)
 
@@ -220,19 +256,19 @@ Linux has no comparable built-in path.
 
 | Option | Licence and cost | Download | Linux guest graphics | Windows 11 on Arm guest |
 |---|---|---|---|---|
-| UTM 5.0.8 (QEMU and Apple's Hypervisor framework) | Apache-2.0, free from GitHub (a paid Mac App Store copy only adds automatic updates) | 304 MB `.dmg` | OpenGL through VirGL; Vulkan 1.3 through VirtIO Venus, new and experimental (its release notes say Linux desktop rendering in Vulkan does not work yet) | Experimental DirectX driver, first in a stable release with 5.0.8 (October 2026), or display only (then WARP, as on CI); not on Microsoft's list of authorized ways to run Windows on Apple silicon |
+| UTM (QEMU and Apple's Hypervisor framework); latest stable 5.0.9, published 2026-11-16 | Apache-2.0, free from GitHub (a paid Mac App Store copy only adds automatic updates) | `UTM.dmg`, 304,702,085 bytes (about 305 MB) in the 5.0.9 release | OpenGL through VirGL; Vulkan 1.3 through VirtIO Venus, new (the 5.0.9 release notes say Linux desktop rendering in Vulkan does not work yet and advise the older VirGL driver) | Experimental DirectX driver, first in a stable release with 5.0.8 (October 2026), or display only (then WARP, as on CI); not on Microsoft's list of authorized ways to run Windows on Apple silicon |
 | Parallels Desktop | Proprietary; Standard about $99.99 a year or $219.99 one time, Pro $119.99 a year (launch coverage; the vendor's page did not show prices to the fetch); free trial | not checked | not researched | Authorized by Microsoft (Windows 11 Pro and Enterprise on Arm, Parallels 18 to 20); 3D at "DirectX 11.1 and OpenGL 4.3", no DirectX 12, no nested virtualization |
 | VMware Fusion | Proprietary, free for all uses since 2024-11-11 (download needs a Broadcom account) | not checked | OpenGL 4.3 for arm64 Linux guests (kernel 5.19 or later, per secondary sources quoting the release notes) | Supported by Fusion 13; 3D for Arm Windows guests not confirmed; not on Microsoft's authorized list |
 
-Windows needs a licence in any of them (Windows 11 Pro or Enterprise; Microsoft names only Parallels and Windows 365 as
-authorized on Apple silicon). Disk: the app plus an Arm installer image of a few GB per guest and a virtual disk of
+Windows needs a licence in any of them (Windows 11 Pro or Enterprise; Microsoft's page authorizes Parallels for Windows 11
+on Arm, and offers Windows 365 as a streaming option, not a local virtual machine). Disk: the app plus an Arm installer image of a few GB per guest and a virtual disk of
 roughly 25 GB for a Linux desktop and at least 64 GB for Windows 11 (Microsoft's published minimum, with 4 GB of
 memory); a guest wants 4 to 8 GB of memory, so on a 16 GB machine one guest at a time, not alongside heavy builds.
 These sizes are published requirements and estimates, not measured here.
 
 How GPUI would render in each: on Linux, GPUI's adapter sort puts virtual and "other" devices before CPU devices, so
-under UTM or Fusion it would likely pick the accelerated OpenGL device (VirGL or the VMware driver) or the Venus Vulkan device; under a guest without
-3D it falls back to lavapipe, exactly as on CI. On Windows, GPUI's Direct3D 11 renderer would run on Parallels' virtual
+under UTM or Fusion it might pick the accelerated OpenGL device (VirGL or the VMware driver); the Venus Vulkan device is not
+expected to work for a desktop (UTM's own notes). Under a guest without 3D it falls back to lavapipe, exactly as on CI. On Windows, GPUI's Direct3D 11 renderer would run on Parallels' virtual
 GPU (DirectX 11.1, translated to Metal) or UTM's experimental driver; otherwise on WARP, as on CI. None of this was
 tried.
 
@@ -242,20 +278,43 @@ notifications, file dialogs and portals, fractional scaling, real fonts, and the
 NVDA). It does not close the hardware gap: the GPU is virtual (translated to Metal), not an Intel, AMD or NVIDIA
 driver; the CPU architecture is Arm, not the x64 Tier 2 targets; performance says nothing about real machines.
 
-**Recommendation: approve UTM for a Linux guest now; defer Windows.** UTM is free and Apache-2.0, needs about 300 MB
-plus a guest disk, and an Ubuntu or Fedora arm64 desktop guest covers the Linux desktop items above with an accelerated
-OpenGL device, which GPUI's wgpu path can use. Use it at milestone gates for the hands-on Linux items of section 8, as
-a check on the aarch64 build, labelled as such. For Windows, decide at M4, when the tray, dialogs and input screens
-exist: Parallels is the only route Microsoft authorizes and has a stable DirectX 11.1 driver but costs a yearly
-licence plus Windows 11 Pro; UTM's DirectX driver is a month old and experimental. CI already shows the Windows window
-rendering on a real desktop session, so a Windows guest adds interaction checks, not rendering evidence. What the
-maintainer would approve: installing UTM 5.0.8 (or newer), downloading an arm64 Linux desktop image, about 30 GB of
-disk, and running one guest at a time during gate checks.
+**Recommendation: approve UTM for a Linux guest now, as a trial; defer Windows.** UTM is free and Apache-2.0. An Ubuntu
+or Fedora arm64 guest might cover the Linux desktop items above (a real desktop environment, input methods, tray and
+notifications, dialogs, portals, scaling, real fonts, Orca) with an accelerated OpenGL device, which GPUI's wgpu path
+might be able to use; that is untested. What would have to be tried first: start the app in the guest and read the
+adapter GPUI logs (the scenario's `scenario.json` records it) to see whether it picked the guest's OpenGL device and
+rendered correctly. If GPUI cannot use it, the fallback is software rendering in the guest (lavapipe or llvmpipe, as
+on CI), which still gives the real desktop environment and input items but adds little over CI for rendering. Use it at
+milestone gates for the hands-on Linux items of section 8, as a check on the aarch64 build, labelled as such. For
+Windows, decide at M4, when the tray, dialogs and input screens exist: Parallels is the only route Microsoft
+authorizes and has a stable DirectX 11.1 driver but costs a yearly licence plus Windows 11 Pro; UTM's DirectX driver
+is a month old and experimental. CI already shows the Windows window rendering on a Windows Server interactive
+session, so a Windows guest adds interaction checks (and the client shell), not rendering evidence.
+
+What the maintainer would be approving, from primary sources checked on 2026-11-17 (UTM's GitHub release page and
+documentation):
+
+- Download source: the `UTM.dmg` asset of the project's GitHub release (github.com/utmapp/UTM/releases), latest
+  stable 5.0.9 of 2026-11-16. The Mac App Store copy is the same application, paid, with automatic updates.
+- Size: the download is 304,702,085 bytes. A guest's disk use is the virtual disk size chosen at setup, roughly 25 GB
+  for a Linux desktop (an estimate, not measured); the installer image is a further download (see below).
+- What it installs: an application dragged into the Applications folder from the disk image (UTM's installation
+  page). No kernel extension is mentioned in the documentation; whether any is needed is not verified. Whether
+  administrator rights are needed: not verified (the documentation lists none).
+- Signing and notarization: not verified. Neither the release notes nor the installation page says; it can be checked
+  after download with `codesign` and `spctl` before the first run.
+- The Linux guest image: UTM's Ubuntu guide points to "Ubuntu Server for ARM" at ubuntu.com/download/server/arm (its
+  desktop download is for Intel). An arm64 desktop environment would be installed inside the guest from packages (or
+  from another distribution's arm64 desktop image); the exact image and its size are not verified.
+- Removing everything afterwards: delete the application, delete each virtual machine from UTM's window, and delete
+  the downloaded `.dmg` and installer image. UTM's documentation does not cover uninstalling or where machines are
+  stored; that location is not verified, so check it before the first guest is created.
+- About 30 GB of disk in all (a guest disk of about 25 GB plus the downloads: an estimate), one guest at a time.
 
 ## Decision
 
 CI is the rendering bench for Tier 2. GPUI windows render on the hosted Linux runner (X11 on Xvfb with Mesa's software
-Vulkan and OpenGL, and Wayland under headless sway) and on the hosted Windows runner (a real desktop session, Direct3D
+Vulkan and OpenGL, and Wayland under headless sway, advisory only in the trial) and on the hosted Windows runner (a Windows Server 2025 interactive session, Direct3D
 11 on WARP), frames can be captured and checked, and an automation socket of the shape above drives the app on both.
 "CI-verified" in section 8 should mean what the table above lists, and no more. The real test harness keeps the
 patterns below. Virtual machines are recommended as an optional hands-on step for Linux (UTM), pending the
@@ -301,7 +360,7 @@ External facts, checked on 2026-11-17: Microsoft's "Options for using Windows 11
 and M3 chips" (authorized products and editions); Microsoft Learn's WARP guide (WARP and the Basic Render Adapter,
 feature levels) and "How emulation works on Arm" (Prism, x64 emulation, user-mode only); Parallels KB 129497
 (limitations, DirectX 11.1 and OpenGL 4.3); UTM's display settings documentation and its GitHub releases (licence,
-5.0.8 and 5.0.9 notes, `.dmg` size); the VMware blog post of 2024-11-11 (Fusion free for all users); GitHub's Actions
+5.0.8 and 5.0.9 notes, `.dmg` size from the releases API; UTM's installation and Ubuntu guest pages); the VMware blog post of 2024-11-11 (Fusion free for all users); GitHub's Actions
 billing documentation (free on public repositories, per-minute rates); `gh api` for the upload-artifact tag. Parallels
 prices come from launch coverage, and VMware Fusion's Linux 3D support from secondary sources quoting its release notes;
 both are marked as such above.
@@ -309,12 +368,12 @@ both are marked as such above.
 ## What remains unverified
 
 - The flake rate beyond five runs, and behaviour on other runner image versions (Mesa, Xvfb and Windows images change).
-- Which fallback font GPUI used on the Linux runner.
+- Whether the DejaVu Sans match logged after the default UI font failed to load is the face GPUI drew with on the Linux runner.
 - Whether the automation socket's Windows peer handling holds against a second local user (only the DACL was relied
   on; not tested with another account).
 - Input through the operating system (XTEST on Xvfb, `SendInput` on Windows) rather than `dispatch_event`; not tried.
 - Scale factors other than 1 on CI (Xvfb and the Windows runner both ran at 1).
-- Everything in the virtual machine section that says "likely", "not checked" or "not confirmed": no virtual machine
+- Everything in the virtual machine section that says "might", "not checked" or "not confirmed": no virtual machine
   was run.
 - Whether `test-support` changes GPUI's runtime behaviour on the real platforms beyond adding APIs (the runs here
   showed nothing, but it was not audited).
