@@ -160,18 +160,33 @@ jobs:
         shell: bash
         run: |
           set -eu
-          # Exit 0: every mutant caught. 2: a mutant was missed. 3: the only
-          # problem is mutants that timed out (a hang counts as detected).
+          # The result is decided from the report files, not only the exit
+          # code. Exit 3 means at least one mutant timed out (a hang counts
+          # as detected) and can also hide missed mutants, because cargo-mutants
+          # checks timeouts before misses; that is why missed.txt is read.
           rc=0
           cargo mutants -p udx-core -p xtask --no-shuffle -j 2 || rc=$?
+          if [ -s mutants.out/missed.txt ]; then
+            echo "Missed mutants:"
+            cat mutants.out/missed.txt
+            echo "::error::$(wc -l < mutants.out/missed.txt | tr -d ' ') mutant(s) missed"
+            exit 2
+          fi
           case "$rc" in
-            0) ;;
-            3)
-              n=0
-              if [ -f mutants.out/timeout.txt ]; then
-                n="$(wc -l < mutants.out/timeout.txt | tr -d ' ')"
+            0|3)
+              if [ ! -d mutants.out ]; then
+                echo "::error::cargo mutants exited ${rc} but wrote no mutants.out" >&2
+                exit 1
               fi
-              echo "::warning::${n} mutant(s) timed out; see mutants.out/timeout.txt"
+              if [ "$rc" = 3 ]; then
+                n=0
+                if [ -f mutants.out/timeout.txt ]; then
+                  echo "Mutants that timed out:"
+                  cat mutants.out/timeout.txt
+                  n="$(wc -l < mutants.out/timeout.txt | tr -d ' ')"
+                fi
+                echo "::warning::${n} mutant(s) timed out; listed above"
+              fi
               ;;
             *) echo "cargo mutants failed with exit code ${rc}" >&2; exit "$rc" ;;
           esac
