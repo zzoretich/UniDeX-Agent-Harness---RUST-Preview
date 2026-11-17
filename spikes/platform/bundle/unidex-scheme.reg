@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\unidex]
+@="URL:UniDeX link"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\unidex\DefaultIcon]
+@="\"C:\\Program Files\\UniDeX Platform Trial\\platform-trial.exe\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\unidex\shell\open\command]
+@="\"C:\\Program Files\\UniDeX Platform Trial\\platform-trial.exe\" \"%1\""
