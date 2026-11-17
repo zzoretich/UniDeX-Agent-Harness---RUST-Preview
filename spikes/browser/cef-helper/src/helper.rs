@@ -56,6 +56,30 @@ const NO_RANGE: Range = Range {
     to: u32::MAX,
 };
 
+/// The native cursor handle `OnCursorChange` passes, typed per platform by the bindings
+/// (`cef_cursor_handle_t`). The helper reads only the cursor type.
+#[cfg(target_os = "macos")]
+type CursorHandle = *mut u8;
+#[cfg(target_os = "linux")]
+type CursorHandle = std::os::raw::c_ulong;
+#[cfg(windows)]
+type CursorHandle = sys::HCURSOR;
+
+/// Whether a shared-texture frame carried a handle: an IOSurface on macOS, a D3D11 shared handle
+/// on Windows, dmabuf planes on Linux (CEF's `cef_accelerated_paint_info_t` per platform).
+#[cfg(target_os = "macos")]
+fn shared_texture_present(info: &AcceleratedPaintInfo) -> bool {
+    !info.shared_texture_io_surface.is_null()
+}
+#[cfg(windows)]
+fn shared_texture_present(info: &AcceleratedPaintInfo) -> bool {
+    !info.shared_texture_handle.is_null()
+}
+#[cfg(target_os = "linux")]
+fn shared_texture_present(info: &AcceleratedPaintInfo) -> bool {
+    info.plane_count > 0
+}
+
 /// State shared between CEF's UI thread and the thread reading the app's messages.
 struct Shared {
     shm: SharedFrames,
@@ -605,7 +629,7 @@ fn forward_input(browser: &Browser, host: &BrowserHost, event: InputEvent) {
                 type_: KeyEventType::RAWKEYDOWN,
                 modifiers: flags,
                 windows_key_code: codes.windows,
-                native_key_code: codes.mac,
+                native_key_code: codes.native_down,
                 is_system_key: 0,
                 character,
                 unmodified_character: character,
@@ -633,7 +657,7 @@ fn forward_input(browser: &Browser, host: &BrowserHost, event: InputEvent) {
                 type_: KeyEventType::KEYUP,
                 modifiers: modifier_flags(&modifiers),
                 windows_key_code: codes.windows,
-                native_key_code: codes.mac,
+                native_key_code: codes.native_up,
                 is_system_key: 0,
                 character: 0,
                 unmodified_character: 0,
@@ -1117,7 +1141,7 @@ wrap_display_handler! {
         fn on_cursor_change(
             &self,
             browser: Option<&mut Browser>,
-            _cursor: *mut u8,
+            _cursor: CursorHandle,
             type_: CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> ::std::os::raw::c_int {
@@ -1269,7 +1293,7 @@ wrap_render_handler! {
                     Some(info) => format!(
                         "shared-texture frame {n} type {type_:?} format {:?} handle_present={}",
                         info.format,
-                        !info.shared_texture_io_surface.is_null(),
+                        shared_texture_present(info),
                     ),
                     None => format!("shared-texture frame {n} without info"),
                 };

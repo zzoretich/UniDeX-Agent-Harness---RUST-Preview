@@ -72,8 +72,8 @@ Chromium 156.0.8078.96).
   (`mac_ime.rs`); results are read back from the page with DevTools.
 - `pages/`: local test pages (a form at fixed positions, a long page, an animation, a content-heavy page with 21,012 DOM
   nodes and 300 generated images).
-- `unpack-cef.sh`, `build-cef-macos.sh`, `measure-macos.sh`, `ci-while-holding.sh`, and the temporary workflow
-  `.github/workflows/spike-browser.yml`.
+- `unpack-cef.sh`, `build-cef-macos.sh`, `measure-macos.sh`, the CI scripts `ci-while-holding.sh`, `ci-linux-run.sh`
+  and `ci-windows-tree.ps1`, and the temporary workflow `.github/workflows/spike-browser.yml`.
 
 The CEF distribution for macOS (`cef_binary_156.0.30+g6028375+chromium-156.0.8078.96_macosarm64_minimal.tar.bz2`,
 134,874,408 bytes) was downloaded once to the development machine with the maintainer's agreement, its SHA-256 and SHA-1
@@ -228,9 +228,24 @@ surface path (a format branch and a shader), an IOSurface hand-off by Mach port,
 The workflow `spike-browser.yml` builds the real helper on all three runners with CEF downloaded and checked on the
 runner, then runs a headless smoke check: the helper starts off-screen, loads a page, produces at least one frame into
 the shared-memory transport, answers a DevTools evaluate, reports each sub-process's sandbox state, and exits by itself
-with success; while it runs, listening TCP sockets are listed (P32). The outcome of the socket check and of the Linux
-tarball-style run is read from the job log; from this fix round on, each also appears as a warning annotation and in
-the step summary.
+with success; while it runs, the trial's processes and listening TCP sockets are listed (P32). The outcome of the
+socket check and of the Linux tarball-style run is read from the job log; from this fix round on, each also appears as
+a warning annotation and in the step summary. No step passes a switch that turns Chromium's sandbox off or weakens it.
+
+What the sandbox check tests, per platform:
+- macOS: every process but CEF's browser process reports itself sandboxed (`sandbox_check`), and a renderer exists.
+- Linux: every process but CEF's browser process reports a seccomp-bpf filter (`Seccomp: 2` in `/proc/<pid>/status`),
+  and a renderer exists, except the processes that only launch sandboxed ones (the setuid `chrome-sandbox` helper and
+  the zygotes, whose forked children install the filter themselves), Chromium's crash handler, and any process Chromium
+  itself starts with `--service-sandbox-type=none`. Each exempt process is still listed with its state, and every
+  process's namespaces are printed (where the kernel shows them). Phase B's check required the filter of every process
+  but the browser, which the zygotes would fail although Chromium's design gives them none. It runs three ways: as a
+  tarball would install it (no setuid helper, no AppArmor profile); installed as a `.deb` with `chrome-sandbox` setuid
+  root; and with an AppArmor profile that lets the helper create user namespaces. The last two are the two ways Chromium
+  documents to have its sandbox on Ubuntu 23.10 and later.
+- Windows: the process tree is not read by the smoke check; while it holds the helper, a script reads each process's
+  integrity level, whether its token is restricted, and whether it runs in an AppContainer and a job, and requires at
+  least one renderer and every renderer at Untrusted or Low integrity with a restricted token.
 
 Not exercisable in CI on either platform: frame pacing, the overlay drawn in a window, input and input methods (shared
 runners have no GPU, no desktop session and no person). They are not judged from macOS: the key mapping, the Command

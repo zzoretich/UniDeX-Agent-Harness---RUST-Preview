@@ -8,8 +8,10 @@
 //! `--hold-s` keeps the helper running that long after the checks, so a CI step can inspect its
 //! sub-processes. Before shutting the helper down, the smoke check prints its process tree with
 //! each process's sandbox state as the OS reports it (macOS: `sandbox_check`; Linux: the seccomp
-//! mode and namespaces; Windows: not read). `--expect-sandbox` fails the check unless every
-//! process other than CEF's browser process reports itself sandboxed (macOS and Linux). The
+//! mode, filters and namespaces; Windows: not read). `--expect-sandbox` fails the check unless
+//! at least one renderer exists and every process the sandbox rule requires reports itself
+//! sandboxed (macOS: every process but CEF's browser process; Linux: the same, less the
+//! launchers and Chromium's own unsandboxed processes, see `tree::ProcSample::exemption`). The
 //! helper must also exit by itself within 3 s of `Shutdown` with status 0.
 //!
 //! Starts the helper the way the app does (piped stdin and stdout, inherited shared memory),
@@ -113,24 +115,40 @@ fn main() -> ExitCode {
     }
     let tree = spike_protocol::tree::ProcessTree::default().sample(browser.pid() as i32);
     for p in &tree {
+        let rule = match p.exemption() {
+            Some(reason) => format!("not required: {reason}"),
+            None => "required".to_string(),
+        };
+        let sandbox_type = p
+            .sandbox_type
+            .as_deref()
+            .map(|t| format!(" sandbox-type={t}"))
+            .unwrap_or_default();
         eprintln!(
-            "smoke: process {} {} sandboxed={:?} ({})",
+            "smoke: process {} {}{sandbox_type} sandboxed={:?} [{rule}] ({})",
             p.pid, p.kind, p.sandboxed, p.sandbox_detail
         );
     }
-    let others: Vec<_> = tree.iter().filter(|p| p.kind != "browser").collect();
     let sandbox_ok = if tree.is_empty() {
-        eprintln!(
-            "smoke: the process tree is not read on this platform; sandbox state not inspected"
-        );
+        eprintln!("smoke: sandbox: not inspected (the process tree is not read on this platform)");
         !expect_sandbox
     } else {
-        !others.is_empty() && others.iter().all(|p| p.sandboxed == Some(true))
+        let required: Vec<_> = tree.iter().filter(|p| p.exemption().is_none()).collect();
+        let sandboxed = required
+            .iter()
+            .filter(|p| p.sandboxed == Some(true))
+            .count();
+        let renderers = tree.iter().filter(|p| p.kind == "renderer").count();
+        let ok = renderers > 0 && sandboxed == required.len();
+        eprintln!(
+            "smoke: sandbox: {} processes, {} required to be sandboxed, {sandboxed} of them \
+             sandboxed, {renderers} renderers, {} not required; all required sandboxed: {ok}",
+            tree.len(),
+            required.len(),
+            tree.len() - required.len()
+        );
+        ok
     };
-    eprintln!(
-        "smoke: sub-processes {} , all sandboxed: {sandbox_ok}",
-        others.len()
-    );
     browser.shutdown();
     let (clean_exit, exit) = browser
         .exit()

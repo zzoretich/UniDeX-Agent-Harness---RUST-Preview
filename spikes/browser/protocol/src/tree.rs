@@ -3,10 +3,17 @@
 //!
 //! - macOS: `proc_pid_rusage` (the numbers Activity Monitor shows) and `sandbox_check` (the
 //!   libSystem call behind Activity Monitor's "Sandbox" column).
-//! - Linux: `/proc/<pid>/stat`, `statm` and `status` (the seccomp mode), and whether the
-//!   process's PID and user namespaces differ from the caller's (Chromium's namespace or setuid
-//!   sandbox gives renderers their own).
+//! - Linux: `/proc/<pid>/stat`, `statm` and `status` (the seccomp mode, the number of seccomp
+//!   filters and `NoNewPrivs`), and whether the process's PID, user and network namespaces
+//!   differ from the caller's (Chromium's namespace or setuid sandbox gives the processes it
+//!   sandboxes their own; "unknown" when the kernel refuses to show another process's namespaces).
 //! - Windows: not read; the tree is empty.
+//!
+//! Which processes must be sandboxed is [`ProcSample::exemption`]: everything but CEF's browser
+//! process on macOS; on Linux also not the processes that only launch sandboxed ones (the setuid
+//! `chrome-sandbox` helper and the zygotes, whose forked children install seccomp-bpf
+//! themselves), the crash handler, and a process Chromium starts with
+//! `--service-sandbox-type=none`. Each exempt process is still listed with its state.
 
 use std::collections::HashMap;
 
@@ -14,8 +21,11 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub struct ProcSample {
     pub pid: i32,
-    /// "browser", "renderer", "gpu-process", "utility:network.mojom.NetworkService", ...
+    /// "browser", "renderer", "gpu-process", "utility:network.mojom.NetworkService", "zygote",
+    /// "zygote:unsandboxed", "setuid-helper", ...
     pub kind: String,
+    /// Chromium's `--service-sandbox-type=` for a utility process, if given.
+    pub sandbox_type: Option<String>,
     pub cpu_ns: u64,
     /// macOS: the physical footprint. Linux: the resident size.
     pub footprint: u64,
@@ -27,10 +37,35 @@ pub struct ProcSample {
     pub sandbox_detail: String,
 }
 
+impl ProcSample {
+    /// Why this process need not be sandboxed, or `None` when it must be.
+    pub fn exemption(&self) -> Option<&'static str> {
+        if self.kind == "browser" {
+            return Some("CEF's browser process, outside Chromium's sandbox by design");
+        }
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
+        if self.kind == "setuid-helper" {
+            Some("the setuid sandbox helper, which sets up the sandbox for the zygote")
+        } else if self.kind.starts_with("zygote") {
+            Some(
+                "a zygote: Chromium installs seccomp-bpf in each process it forks, not in the zygote",
+            )
+        } else if self.kind == "crashpad-handler" {
+            Some("Chromium's crash handler, outside the sandbox by design")
+        } else if self.sandbox_type.as_deref() == Some("none") {
+            Some("Chromium starts it unsandboxed (--service-sandbox-type=none)")
+        } else {
+            None
+        }
+    }
+}
+
 /// Reads the helper's process tree; remembers what kind each process is.
 #[derive(Default)]
 pub struct ProcessTree {
-    kinds: HashMap<i32, String>,
+    kinds: HashMap<i32, (String, Option<String>)>,
 }
 
 impl ProcessTree {
@@ -50,7 +85,7 @@ impl ProcessTree {
 
     fn one(&mut self, pid: i32) -> Option<ProcSample> {
         let (cpu_ns, footprint, resident) = os::rusage(pid)?;
-        let kind = self
+        let (kind, sandbox_type) = self
             .kinds
             .entry(pid)
             .or_insert_with(|| kind_from_command(&os::command(pid)))
@@ -59,6 +94,7 @@ impl ProcessTree {
         Some(ProcSample {
             pid,
             kind,
+            sandbox_type,
             cpu_ns,
             footprint,
             resident,
@@ -68,20 +104,32 @@ impl ProcessTree {
     }
 }
 
-fn kind_from_command(command: &str) -> String {
+/// The process's role from its command line, and its `--service-sandbox-type=` if any.
+fn kind_from_command(command: &str) -> (String, Option<String>) {
     let switch = |name: &str| {
         command
             .split_whitespace()
             .find_map(|a| a.strip_prefix(name))
             .map(str::to_string)
     };
-    match switch("--type=") {
-        None => "browser".into(),
-        Some(kind) => match switch("--utility-sub-type=") {
-            Some(sub) => format!("{kind}:{sub}"),
-            None => kind,
-        },
-    }
+    let has = |name: &str| command.split_whitespace().any(|a| a == name);
+    let program = command.split_whitespace().next().unwrap_or("");
+    let program = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let kind = if program == "chrome-sandbox" {
+        "setuid-helper".into()
+    } else {
+        match switch("--type=") {
+            None => "browser".into(),
+            Some(kind) if kind == "zygote" && has("--no-zygote-sandbox") => {
+                "zygote:unsandboxed".into()
+            }
+            Some(kind) => match switch("--utility-sub-type=") {
+                Some(sub) => format!("{kind}:{sub}"),
+                None => kind,
+            },
+        }
+    };
+    (kind, switch("--service-sandbox-type="))
 }
 
 /// CPU use of each process between two samples, in percent of one core, with the later
@@ -216,11 +264,18 @@ mod os {
     }
 
     pub fn sandboxed(pid: i32) -> (Option<bool>, String) {
-        let seccomp = read(pid, "status").and_then(|s| {
-            s.lines()
-                .find_map(|l| l.strip_prefix("Seccomp:"))
-                .map(|v| v.trim().to_string())
-        });
+        let status = read(pid, "status");
+        let field = |name: &str| {
+            status.as_deref().and_then(|s| {
+                s.lines()
+                    .find_map(|l| l.strip_prefix(name))
+                    .map(|v| v.trim().to_string())
+            })
+        };
+        // Seccomp: 0 none, 1 strict, 2 filter (seccomp-bpf, what Chromium's sandbox installs).
+        let seccomp = field("Seccomp:");
+        let filters = field("Seccomp_filters:");
+        let no_new_privs = field("NoNewPrivs:");
         let ns = |name: &str| {
             let theirs = std::fs::read_link(format!("/proc/{pid}/ns/{name}")).ok();
             let ours = std::fs::read_link(format!("/proc/self/ns/{name}")).ok();
@@ -231,8 +286,10 @@ mod os {
             }
         };
         let detail = format!(
-            "seccomp={} pid_ns={} user_ns={} net_ns={}",
+            "seccomp={} filters={} no_new_privs={} pid_ns={} user_ns={} net_ns={}",
             seccomp.as_deref().unwrap_or("?"),
+            filters.as_deref().unwrap_or("?"),
+            no_new_privs.as_deref().unwrap_or("?"),
             ns("pid"),
             ns("user"),
             ns("net")
