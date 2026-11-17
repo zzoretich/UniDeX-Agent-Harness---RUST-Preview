@@ -71,10 +71,13 @@ An upgrade is its own change, on its own branch, never mixed with feature work.
 2. Change the version in both lines of `[workspace.dependencies]` in the root `Cargo.toml`, keeping the exact `=x.y.z`
    form, then run `cargo update -p gpui-pre -p gpui-pre-platform` so `Cargo.lock` follows (every other `gpui-pre-*`
    crate moves with them). Read the lockfile diff.
-3. Check the snapshot against upstream: check out upstream at the recorded commit, `diff -r` each upstream crate's `src`
-   against its `gpui-pre-*` copy in the cargo registry, and read every "Modified for gpui-pre" notice. Any change without
-   a notice stops the upgrade.
-4. Build and run the cookbook (`cargo build -p udx-cookbook --examples --locked`, then
+3. Check the snapshot against upstream: check out upstream at the recorded commit and `diff -r` each whole upstream
+   crate folder (sources, `build.rs`, `vendor/`) against its `gpui-pre-*` copy in the cargo registry, and read every
+   "Modified for gpui-pre" notice. Then compare each manifest's dependency tables (names, versions, features, and any
+   swap from a git source to a registry release) with upstream's manifest and workspace `Cargo.toml`, including
+   `[patch.crates-io]`. Any change that has no notice, or that decision 0007 does not document, stops the upgrade until it
+   is understood and recorded.
+4. Build and run the cookbook (`cargo build --workspace --examples --locked`, then
    `cargo run -p udx-cookbook --example hello_window`) and fix every example and UI crate the new snapshot breaks. Then
    run the full local gate: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    `cargo test --workspace --locked`, `cargo deny --locked check`, `cargo audit`. List every advisory the new tree
@@ -89,4 +92,5 @@ An upgrade is its own change, on its own branch, never mixed with feature work.
 GPUI and the `gpui-pre-*` snapshot crates are Apache-2.0. Much of the editor GPUI comes from is not permissively
 licensed, including its terminal view. Read permissively licensed code (GPUI itself, its examples and docs, GPUI Kit) as
 reference, and write the examples here in your own words. Never copy code from any crate or file that is not
-permissively licensed. Reviewers check where code came from, and `cargo deny` checks every dependency's licence.
+permissively licensed. Reviewers check where code came from, and `cargo deny` checks every dependency's licence, including GPUI's, which the cookbook takes as a dev-dependency
+(`include-dev = true` in `deny.toml`).
