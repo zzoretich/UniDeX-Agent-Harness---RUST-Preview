@@ -1,0 +1,212 @@
+name: spike-render-ci
+
+# Temporary workflow for the Task 13 trial (spikes/render-ci, decision 0013): can a GPUI window render on the hosted
+# Linux and Windows runners, which have no GPU; can a frame be captured as evidence; and can the automation socket
+# drive the app and read back what is on screen. Linux runs the window on a virtual X display (Xvfb) with Mesa's
+# software rasterisers (lavapipe for Vulkan, llvmpipe for OpenGL), then tries Wayland under a headless compositor.
+# Windows runs it on the runner's own desktop. Remove this file with the spike.
+
+on:
+  pull_request:
+    paths:
+      - "spikes/render-ci/**"
+      - ".github/workflows/spike-render-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-render-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Same hardening as ci.yml: read-only token, no persisted credentials, actions pinned to full commit SHAs, fixed
+# runner labels, no secrets, and no event text in any script (the scripts receive only fixed values).
+#
+# No build cache: ci.yml saves caches only from pushes to main (a pull request never writes one), and this workflow
+# runs only for pull requests, so a cache step could never be filled. Every run is a cold build; that is the cost the
+# record reports.
+#
+# actions/upload-artifact v7.0.2 is commit cf430e030ddbb5b0abf93d22962f4752f3646cd9: `gh api
+# repos/actions/upload-artifact/git/ref/tags/v7.0.2` returns that commit directly (a lightweight tag, no tag object),
+# the v7 tag points at the same commit, and the commit carries a verified signature. Artifacts in this public
+# repository can be downloaded by anyone signed in, so they hold only the trial's own window (captures are cut to
+# the window, or taken of a virtual display that holds nothing else) and its logs.
+#
+# Linux packages (run time, on top of ci.yml's build packages):
+#   xvfb                 the virtual X display
+#   x11-apps, netpbm     xwd and xwdtopnm/pnmtopng, to capture the virtual display as PNG
+#   x11-utils            xdpyinfo, for diagnostics
+#   mesa-vulkan-drivers  lavapipe, Mesa's software Vulkan driver (wgpu's first choice)
+#   libvulkan1           the Vulkan loader
+#   vulkan-tools         vulkaninfo, for diagnostics
+#   libgl1-mesa-dri, libegl1, libegl-mesa0   llvmpipe through EGL, wgpu's OpenGL fallback
+#   mesa-utils           glxinfo and eglinfo, for diagnostics
+#   fonts-dejavu-core    a known font, so the text line has glyphs to draw
+#   dbus, at-spi2-core   a session bus and the AT-SPI bus, so AccessKit builds GPUI's accessibility tree
+#   sway, grim           a headless Wayland compositor and its screen capture, for the Wayland attempt
+
+jobs:
+  linux:
+    name: render-ci (linux)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/render-ci
+    steps:
+      # Before checkout, so line endings never change file contents.
+      - name: Keep line endings as committed
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install the Linux packages (build, virtual display, software rasterisers, capture, accessibility)
+        run: |
+          set -eu
+          started=$SECONDS
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev \
+            xvfb x11-apps x11-utils netpbm \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools libgl1-mesa-dri libegl1 libegl-mesa0 mesa-utils \
+            fonts-dejavu-core dbus at-spi2-core sway grim
+          echo "packages installed in $((SECONDS - started)) s"
+      - name: Build (release, with the automation socket)
+        run: |
+          set -eu
+          started=$SECONDS
+          cargo build --release --locked --features automation
+          echo "build took $((SECONDS - started)) s"
+      - name: Unit tests of the frame check
+        run: cargo test --release --locked --features automation --lib
+      - name: Start the virtual X display
+        run: |
+          set -eu
+          mkdir -p out
+          Xvfb :99 -screen 0 1280x800x24 -nolisten tcp > out/xvfb.log 2>&1 &
+          for _ in $(seq 1 100); do
+            [ -S /tmp/.X11-unix/X99 ] && break
+            sleep 0.1
+          done
+          [ -S /tmp/.X11-unix/X99 ] || { echo "Xvfb did not start"; cat out/xvfb.log; exit 1; }
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          echo "Xvfb is up"
+      - name: Diagnostics (display, Vulkan, OpenGL)
+        run: bash ci/linux-diagnostics.sh
+      - name: Scenario, X11 with Vulkan (lavapipe)
+        run: bash ci/scenario.sh linux-x11-vulkan x11
+      - name: Automation round trip, X11 with Vulkan, AT-SPI on
+        if: ${{ !cancelled() }}
+        run: bash ci/automation.sh linux-x11-automation atspi
+      - name: Scenario, X11 with OpenGL (llvmpipe; Vulkan drivers hidden)
+        if: ${{ !cancelled() }}
+        env:
+          VK_DRIVER_FILES: /nonexistent/none.json
+          VK_ICD_FILENAMES: /nonexistent/none.json
+        run: bash ci/scenario.sh linux-x11-gl x11
+      - name: Wayland under headless sway, scenario and automation (exploratory)
+        if: ${{ !cancelled() }}
+        run: |
+          # Exploratory: a failure here is reported as a warning and does not fail the job, because the question is
+          # whether Wayland can be covered at all; the log above the warning says why it failed.
+          rc=0
+          bash ci/wayland.sh || rc=$?
+          if [ "$rc" != 0 ]; then
+            echo "::warning title=Wayland trial::the Wayland scenario failed with exit code ${rc}; see this step's log"
+          fi
+      - name: Release build has no automation socket
+        if: ${{ !cancelled() }}
+        run: |
+          # GitHub runs bash with -e; turn it off so a zero count from grep (exit 1) is checked below instead of
+          # ending the step early. Every command's result is checked explicitly.
+          set +e
+          set -u
+          started=$SECONDS
+          cargo build --release --locked --bin render-ci --target-dir target/plain || exit 1
+          echo "build without the feature took $((SECONDS - started)) s"
+          marker=udx-automation-socket-v1
+          # grep -c prints the count; its exit code is 1 when the count is 0, which is checked below, and 2 on error.
+          with=$(grep -a -c "$marker" target/release/render-ci)
+          [ $? -le 1 ] || { echo "::error::grep failed on the test build"; exit 1; }
+          without=$(grep -a -c "$marker" target/plain/release/render-ci)
+          [ $? -le 1 ] || { echo "::error::grep failed on the release build"; exit 1; }
+          echo "marker occurrences: test build ${with}, release build ${without}"
+          [ "$with" -ge 1 ] || { echo "::error::the test build lacks the marker, so the check proves nothing"; exit 1; }
+          [ "$without" -eq 0 ] || { echo "::error::the release build contains the automation socket"; exit 1; }
+          rc=0
+          ./target/plain/release/render-ci --automation || rc=$?
+          echo "release build given --automation exited ${rc}"
+          [ "$rc" -eq 2 ] || { echo "::error::the release build did not refuse --automation"; exit 1; }
+      - name: Stop the virtual X display
+        if: ${{ always() }}
+        run: pkill -x Xvfb || echo "Xvfb was not running"
+      - name: Upload frames and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: render-ci-linux
+          path: spikes/render-ci/out/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: render-ci (windows)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/render-ci
+    steps:
+      # Before checkout, so line endings never change file contents.
+      - name: Keep line endings as committed
+        working-directory: .
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Diagnostics (session, display adapters, DirectX)
+        shell: pwsh
+        run: ./ci/windows-diagnostics.ps1
+      - name: Build (release, with the automation socket)
+        run: |
+          set -eu
+          started=$SECONDS
+          cargo build --release --locked --features automation
+          echo "build took $((SECONDS - started)) s"
+      - name: Unit tests of the frame check
+        run: cargo test --release --locked --features automation --lib
+      - name: Scenario, Direct3D 11 with DirectComposition (GPUI's default)
+        run: bash ci/scenario.sh windows-dcomp windows
+      - name: Automation round trip
+        if: ${{ !cancelled() }}
+        run: bash ci/automation.sh windows-automation
+      - name: Scenario, Direct3D 11 without DirectComposition
+        if: ${{ !cancelled() }}
+        env:
+          GPUI_DISABLE_DIRECT_COMPOSITION: "1"
+        run: bash ci/scenario.sh windows-no-dcomp windows
+      - name: Upload frames and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: render-ci-windows
+          path: spikes/render-ci/out/
+          if-no-files-found: error
+          retention-days: 14
