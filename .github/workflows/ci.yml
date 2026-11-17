@@ -134,11 +134,13 @@ jobs:
       - name: Test
         shell: bash
         run: cargo test --workspace --locked
-      # `cargo test` already builds every example; this step keeps the cookbook
-      # built even if the test command or an example's settings change.
+      # `cargo test` does not produce the examples' final binaries (a build with
+      # `--examples` compiled the cookbook again after it), so build them here.
+      # `--workspace` keeps the feature set the test step used; `-p udx-cookbook`
+      # unified features differently and rebuilt GPUI on every runner.
       - name: Build the cookbook examples
         shell: bash
-        run: cargo build -p udx-cookbook --examples --locked
+        run: cargo build --workspace --examples --locked
       - name: Save the build cache
         if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
