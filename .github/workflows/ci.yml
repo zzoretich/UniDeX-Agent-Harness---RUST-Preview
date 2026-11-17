@@ -120,8 +120,10 @@ jobs:
     # it skips the work when the diff does not touch the mutated crates.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
-    # Generous: a full local run did not finish in over an hour on 2 jobs.
-    timeout-minutes: 300
+    # A full local run (237 mutants, 2 jobs) took 8 minutes 44 seconds. Three
+    # times that, rounded up to 15 minutes, covers slower runners and the
+    # cargo-mutants install; see .cargo/mutants.toml for the per-mutant timeout.
+    timeout-minutes: 30
     env:
       BASE_REF: ${{ github.base_ref }}
     steps:
