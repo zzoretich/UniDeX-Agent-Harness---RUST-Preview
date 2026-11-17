@@ -261,47 +261,139 @@ fn allow_file_exempts_one_rule_on_one_path_only() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let start = stdout.find('[').expect("json array in stdout");
     let end = stdout.rfind(']').expect("json array end");
-    let v: serde_json_lite::Value = serde_json_lite::parse(&stdout[start..=end]);
-    assert_eq!(v.len, 3, "{stdout}");
+    let v: Vec<serde_json::Value> =
+        serde_json::from_str(&stdout[start..=end]).expect("valid json array");
+    assert_eq!(v.len(), 3, "{stdout}");
+    for f in &v {
+        for field in ["path", "line", "rule", "excerpt"] {
+            assert!(f.get(field).is_some(), "field {field} in {f}");
+        }
+    }
 }
 
-/// Tiny JSON array counter so the tests need no extra dependency: counts
-/// top-level objects in an array and checks each has the four fields.
-mod serde_json_lite {
-    pub struct Value {
-        pub len: usize,
-    }
-    pub fn parse(s: &str) -> Value {
-        let mut depth = 0;
-        let mut len = 0;
-        let mut in_str = false;
-        let mut esc = false;
-        for c in s.chars() {
-            if in_str {
-                if esc {
-                    esc = false;
-                } else if c == '\\' {
-                    esc = true;
-                } else if c == '"' {
-                    in_str = false;
-                }
-                continue;
-            }
-            match c {
-                '"' => in_str = true,
-                '{' => {
-                    depth += 1;
-                    if depth == 1 {
-                        len += 1;
-                    }
-                }
-                '}' => depth -= 1,
-                _ => {}
-            }
+#[test]
+fn allow_file_glob_matches_nested_paths() {
+    let repo = new_repo();
+    fs::create_dir_all(repo.path().join("fixtures/deep")).unwrap();
+    fs::create_dir_all(repo.path().join("other")).unwrap();
+    let body = "path /Users/jroe/x\n";
+    write(repo.path(), "fixtures/deep/x.md", body);
+    write(repo.path(), "other/x.md", body);
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        "[[allow]]\npath = \"fixtures/**\"\nrule = \"HomePath\"\nreason = \"test\"\n",
+    );
+    commit_all(repo.path(), "add files");
+    let out = xtask(repo.path())
+        .args(["privacy", "--all"])
+        .assert()
+        .code(1)
+        .get_output()
+        .clone();
+    let text = output_text(&out);
+    assert!(text.contains("other/x.md"), "{text}");
+    assert!(!text.contains("fixtures/deep/x.md"), "{text}");
+}
+
+#[test]
+fn hooks_install_writes_both_hooks() {
+    let repo = new_repo();
+    xtask(repo.path())
+        .args(["hooks", "install"])
+        .assert()
+        .code(0);
+    for name in ["pre-commit", "commit-msg"] {
+        let p = repo.path().join(".git/hooks").join(name);
+        let body = fs::read_to_string(&p).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(body.contains("xtask privacy"), "{name}: {body}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&p).unwrap().permissions().mode();
+            assert!(mode & 0o111 != 0, "{name} not executable");
         }
-        for field in ["\"path\"", "\"line\"", "\"rule\"", "\"excerpt\""] {
-            assert_eq!(s.matches(field).count(), len, "field {field} in {s}");
-        }
-        Value { len }
     }
+}
+
+#[test]
+fn staged_mode_scans_the_staged_version() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "clean\n");
+    commit_all(repo.path(), "add a");
+    write(repo.path(), "a.md", "see /Users/jroe/x\n");
+    git(repo.path(), &["add", "a.md"]);
+    write(repo.path(), "a.md", "clean again\n"); // working tree is clean, index is not
+    xtask(repo.path())
+        .args(["privacy", "--staged"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn allowing_a_local_term_is_a_usage_error() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        "[[allow]]\npath = \"a.md\"\nrule = \"LocalTerm\"\nreason = \"test\"\n",
+    );
+    commit_all(repo.path(), "add files");
+    xtask(repo.path())
+        .args(["privacy", "--all"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn an_allow_entry_without_a_reason_is_a_usage_error() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nreason = \"\"\n",
+    );
+    commit_all(repo.path(), "add files");
+    xtask(repo.path())
+        .args(["privacy", "--all"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn ci_does_not_echo_a_local_term() {
+    let repo = new_repo();
+    write(repo.path(), "privacy-terms.local.txt", "Zebracorp\n");
+    write(repo.path(), ".gitignore", "privacy-terms.local.txt\n");
+    write(repo.path(), "a.md", "about zebracorp here\n");
+    commit_all(repo.path(), "add a");
+    let out = xtask(repo.path())
+        .env("CI", "true")
+        .args(["privacy", "--all"])
+        .assert()
+        .code(1)
+        .get_output()
+        .clone();
+    let text = output_text(&out).to_lowercase();
+    assert!(text.contains("a.md:1"), "{text}");
+    assert!(!text.contains("zebracorp"), "{text}");
+}
+
+#[test]
+fn hooks_install_refuses_to_replace_a_foreign_hook() {
+    let repo = new_repo();
+    let hooks = repo.path().join(".git/hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    fs::write(hooks.join("pre-commit"), "#!/bin/sh\necho mine\n").unwrap();
+    xtask(repo.path())
+        .args(["hooks", "install"])
+        .assert()
+        .code(1);
+    assert_eq!(
+        fs::read_to_string(hooks.join("pre-commit")).unwrap(),
+        "#!/bin/sh\necho mine\n"
+    );
+    assert!(!hooks.join("commit-msg").exists());
 }

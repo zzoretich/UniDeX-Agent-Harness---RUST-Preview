@@ -1,7 +1,7 @@
 # UniDeX Agent Harness (Rust)
 
-A Rust rebuild of the UniDeX Agent Harness: its own agent engine that works with any hosted or local model, and a
-native GPUI interface. It targets macOS, Linux and Windows.
+A Rust rebuild of the UniDeX Agent Harness. It aims to provide its own agent engine that works with any hosted or
+local model, and a native GPUI interface. It is planned to target macOS, Linux and Windows.
 
 **Status: pre-release and not yet usable.** There is nothing to install or run yet.
 
