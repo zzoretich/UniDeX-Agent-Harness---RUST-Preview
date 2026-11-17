@@ -18,10 +18,11 @@ licence outside the allow list, crates.io only unless a git source is allowed by
 on macOS, Linux and Windows, and a build cost a 16 GB Apple silicon Mac can carry for several worktrees.
 
 Method: every fact below was checked on 2026-11-17 against crates.io's API, the projects' repositories (read with the
-GitHub API) and their documentation sites, and each serious candidate was built here (Apple M4, 10 cores, 16 GB,
-Xcode 27.1) as a minimal window program in a scratch project, then run through `cargo deny --locked check` with this
-repository's `deny.toml`. Leads from an earlier look were treated as unverified; how each turned out is noted. The advisory counts for options A, B
-and D were taken before the notice for `chrono` (RUSTSEC-2026-0543) appeared later the same day; they were not retaken.
+GitHub API) and their documentation sites, and each serious candidate was built here (an Apple silicon desktop with
+16 GB of memory, Xcode 27.1) as a minimal window program in a scratch project, then run through `cargo deny --locked
+check` with this repository's `deny.toml`. Leads from an earlier look were treated as unverified; how each turned out is
+noted. The advisory counts for options A, B and D were taken before the notice for `chrono` (RUSTSEC-2026-0543) appeared
+later the same day; they were not retaken.
 
 ## Options considered
 
@@ -32,9 +33,10 @@ and D were taken before the notice for `chrono` (RUSTSEC-2026-0543) appeared lat
 | C. The kit's snapshot crates directly: `gpui-pre` and `gpui-pre-platform`, `=0.3.12` (chosen) | crates.io only, checksummed, the exact snapshot `gpui-kit 0.10.0` requires, weekly upgrades by changing two version strings; published by the kit's maintainers, not Zed, with a few files adapted and four of Zed's patched or git dependencies replaced by crates.io releases. |
 | D. A git dependency on `zed-industries/zed` at a full commit hash | Byte-for-byte upstream, but seven git sources to allow, a 672 MB fetch for every fresh cargo home or runner, and no way to add the kit later. Rejected. |
 
-Also seen and not compared in depth: `gpui-ce` (a community fork, crates.io 0.3.0 of 2026-10-20, github.com/gpui-ce/gpui-ce)
-and GPUI Fast (a reworked fork by the kit's maintainers, github.com/longbridge/gpui-fast, an opt-in backend of the kit).
-Both are forks with their own changes; the design names the kit's snapshot of upstream GPUI.
+Also seen and not compared in depth: `gpui-ce` (a community fork, crates.io 0.3.0 of 2026-10-20,
+github.com/gpui-ce/gpui-ce) and GPUI Fast (a reworked fork by the kit's maintainers, github.com/longbridge/gpui-fast, an
+opt-in backend of the kit). Both are forks with their own changes; the design names the kit's snapshot of upstream
+GPUI.
 
 ### A. The `gpui` crate on crates.io
 
@@ -211,9 +213,10 @@ the maintainer.
   project at each upgrade, which is why the upgrade comparison exists. If the republisher stops, or a yank removes the
   pinned version (which turns `yanked = "deny"` red), the fallbacks are candidate D (a git dependency on Zed, with its
   costs above) or republishing the crates ourselves.
-- Keeping `cargo deny` green. About 610 pinned crates can still receive vulnerability advisories or yanks, either of
-  which fails `main` and every pull request. `cargo update -p <crate>` often fixes a deep crate without moving GPUI; a
-  fix that needs a major version needs a new snapshot.
+- Keeping `cargo deny` green. About 680 pinned crates (`Cargo.lock` had 686 entries at the M0 gate, five of them this
+  workspace's own crates) can still receive vulnerability advisories or yanks, either of which fails `main` and every
+  pull request. `cargo update -p <crate>` often fixes a deep crate without moving GPUI; a fix that needs a major version
+  needs a new snapshot.
 - Shaders are compiled at app start (`runtime_shaders`). Packaging (Task 14) may prefer shaders compiled at build time,
   which needs Apple's Metal Toolchain on the build machine; that is its own choice.
 - `crates/udx-cookbook` holds the examples later tasks copy from, starting with `hello_window`; CI builds them on all
@@ -289,6 +292,6 @@ Xcode). Windows needs the MSVC toolchain and Windows SDK, which the runner image
 
 A newer `gpui-kit` release pins a newer snapshot and an upgrade is planned; the kit's maintainers stop publishing
 snapshots, or a snapshot is found to differ from upstream in an undocumented way; Zed starts publishing `gpui` to
-crates.io regularly; a trial (Tasks 10 to 13) shows the snapshot failing on a platform; a notice for a crate this workspace depends on directly
-fails the check, or a deeper notice is found to matter; or a second crate depends on GPUI, which brings `cargo-hakari` back into
-view.
+crates.io regularly; a trial (Tasks 10 to 13) shows the snapshot failing on a platform; a notice for a crate this
+workspace depends on directly fails the check, or a deeper notice is found to matter; or a second crate depends on
+GPUI, which brings `cargo-hakari` back into view.

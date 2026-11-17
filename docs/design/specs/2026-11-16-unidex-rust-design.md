@@ -1,6 +1,8 @@
 # UniDeX Rust Preview: design
 
-Status: approved by the maintainer · 2026-11-16 · draft 2, revised after an independent design review
+Status: approved by the maintainer · 2026-11-16 · draft 2, revised after an independent design review · revised at
+the M0 gate, 2026-11-17: sections 5.7, 5.8, 8, 9, 13 updated from decisions 0006 to 0014, and section 7 corrected to
+match the acceptance checklist; open questions in docs/build/M0-GATE.md
 Source product: UniDeX Agent Harness 2.7.0 (Electron), MIT, referred to below as "the Electron app".
 
 ## 1. Intent
@@ -24,7 +26,7 @@ its features, its data formats, its design tokens, its security lessons and its 
   LM Studio, vLLM), assignable per role so one setup can mix them.
 - G3. Engine quality is measured, not assumed: an evaluation suite runs across a matrix of models (section 10.2).
 - G4. Claude Code, Codex and other agents usable as optional add-on engines through the Agent Client Protocol (ACP).
-  Removing them breaks nothing.
+  Removing them breaks nothing. Open at the M0 gate: see `docs/build/M0-GATE.md`, question 6.
 - G5. A native Rust UI on GPUI. No web view for the app's own screens.
 - G6. Chromium embedded inside the app window for the Computer screen (section 5.8).
 - G7. One codebase for macOS, Linux and Windows. A feature works on all three or is listed as an exception in section 8.
@@ -228,8 +230,14 @@ The server speaks over standard input and output only by default; any network tr
 ### 5.7 Terminals
 
 A PTY layer (ConPTY on Windows), `alacritty_terminal` for emulation, and our own GPUI element that draws the grid. The
-PTY crate is chosen in the M0 trial. The "chat over a live terminal" view of the Electron app is not rebuilt: add-on
-engines speak ACP, so their turns are structured events already.
+PTY is `alacritty_terminal`'s own `tty` module and event loop on all three platforms, pinned exactly with the emulator,
+behind a session type of our own in `udx-term` so the backend can be replaced; `portable-pty` is the fallback (decision
+0009; design call). Each terminal gets an I/O thread owned by `alacritty_terminal`, whose events the core forwards to
+GPUI. On Unix that crate installs a process-wide SIGCHLD handler, so the engine's own child processes are waited on by
+their process ids, and dropping a session blocks until the child is reaped, so it happens off the UI thread. In the M0
+trial the grid element drew a 200,000-line burst on macOS with no slow frame (decision 0008). Two checks are open on
+Linux and Windows: see `docs/build/M0-GATE.md`, question 9. The "chat over a live terminal" view of the Electron app is
+not rebuilt: add-on engines speak ACP, so their turns are structured events already.
 
 ### 5.8 Embedded browser
 
@@ -237,17 +245,30 @@ The Computer screen shows Chromium inside the app window and offers the same `co
 
 - A `BrowserView` trait hides the engine. The first implementation is CEF (the Chromium Embedded Framework) rendering
   off-screen in a helper process. The app draws each frame as an element, forwards pointer, keyboard, text entry,
-  cursor and popup events, and drives pages over the Chrome DevTools Protocol.
+  cursor and popup events, and drives pages over the Chrome DevTools Protocol. The M0 trial settled how frames travel
+  (decision 0012; design call): the app drives the helper over the helper's inherited standard input and output, the
+  helper writes each frame as CPU pixels into shared memory that the app creates and the helper inherits, and the app
+  draws the newest frame as a GPUI image. In the trial DevTools ran through CEF's in-process interface, with no port.
+  On macOS this showed real Chromium in a GPUI window at about 60 frames a second, with typing, input methods and an
+  app card drawn above a live page (scripted checks on the development Mac; the maintainer's hands-on check is owed).
 - The helper process keeps web content out of the app's own process, survives a page crash, and avoids the conflict
   between CEF's and GPUI's application objects on macOS.
 - Chromium is large. It is not in the installer: it is fetched the first time the Computer screen is opened, as a
-  version-pinned component checked against a known hash. The app works fully without it.
+  version-pinned component checked against a known hash. The app works fully without it. Open at the M0 gate: see
+  `docs/build/M0-GATE.md`, questions 18 and 19.
 - Chromium's own sandbox stays on, on every platform. A package format that cannot run it (AppImage has known trouble
-  here) does not ship the browser.
+  here) does not ship the browser. Open at the M0 gate: see `docs/build/M0-GATE.md`, questions 19, 20 and 22.
+- Open at the M0 gate: in the trial Chromium contacted its vendor's servers by itself; see `docs/build/M0-GATE.md`,
+  question 21.
 - A bundled browser must be kept current. The app shows the engine version, warns when it is more than 60 days old, and
-  browser updates follow the release policy written in M4.
-- On Windows the OS-provided, OS-patched Chromium web view may sit behind the same trait if the M0 trial shows it is
-  the better fit.
+  browser updates follow the release policy written in M4. CEF follows Chromium's stable releases about every four
+  weeks, so each update is a recurring release task: new pins and hashes, a rebuilt and signed helper on every platform,
+  and the checks run again (decision 0012).
+- On Windows the M0 trial chose CEF as well, run by CEF's bootstrap executable with the helper built as a library, the
+  arrangement Chromium's Windows sandbox needs. The evidence is headless CI runs under an elevated account, with nothing
+  drawn and no input tried (decision 0012; see `docs/build/M0-GATE.md`, question 20). The OS-provided web view can sit
+  under app-drawn UI only after a GPUI change, so it is a fallback before an external window, not the first choice
+  (decision 0012; design call).
 - If embedding fails on a platform in the M0 trial, that platform falls back to an external browser window and is
   listed as an exception in section 8. The other platforms are not held back.
 
@@ -260,7 +281,8 @@ this app and the Electron app.
 
 ### 5.10 Application
 
-- GPUI with the pinned widget kit; the Electron app's `--udx-*` tokens become a Rust theme, light and dark.
+- GPUI with the pinned widget kit; the Electron app's `--udx-*` tokens become a Rust theme, light and dark. Open at the
+  M0 gate: see `docs/build/M0-GATE.md`, question 23.
 - Screen state and actions live in `udx-ui-model`, which has no GPUI types. Screens in `udx-app` render that state and
   send actions. Most screen behaviour can therefore be tested on every platform without drawing anything, and less of
   the app is tied to the framework.
@@ -327,6 +349,7 @@ Design calls that change or drop features:
 - Connectors are MCP servers for our engine (M10).
 - The Computer pane is embedded Chromium (M7).
 - The tray popover, command palette, quick capture and tour carry over (M4 to M11).
+- Chief of Staff: carried over; runs on any role's model (M6).
 
 | source section                                         | items | carry | change | drop | milestones         |
 |--------------------------------------------------------|-------|-------|--------|------|--------------------|
@@ -341,7 +364,7 @@ Design calls that change or drop features:
 | Notifications                                          | 9     | 7     | 2      | 0    | M6                 |
 | Agent teams (both hosts)                               | 4     | 1     | 3      | 0    | M10                |
 | Agent Teams tab (both hosts)                           | 11    | 8     | 3      | 0    | M10                |
-| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M6, M10            |
+| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M4, M10            |
 | Spaces / Runs                                          | 23    | 13    | 9      | 1    | M8                 |
 | Brain                                                  | 28    | 20    | 7      | 1    | M9                 |
 | Routines                                               | 11    | 6     | 3      | 2    | M6                 |
@@ -349,9 +372,9 @@ Design calls that change or drop features:
 | Connectors (both hosts)                                | 17    | 4     | 6      | 7    | M10                |
 | Agents (both hosts)                                    | 8     | 0     | 3      | 5    | M10                |
 | Cross-review and handoff (both hosts; each run spends) | 3     | 0     | 3      | 0    | M5                 |
-| Codex host                                             | 22    | 0     | 8      | 14   | M3, M5, M6, M8, M9 |
+| Codex host                                             | 22    | 0     | 8      | 14   | M3, M6, M8, M9     |
 | Vault chat (per provider)                              | 6     | 0     | 6      | 0    | M4                 |
-| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M4, M5             |
+| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M4, M5, M7         |
 | Code                                                   | 27    | 12    | 10     | 5    | M4, M5, M8, M10    |
 | Computer pane (per host; each turn spends)             | 29    | 20    | 7      | 2    | M7                 |
 | Launch sequence                                        | 6     | 0     | 4      | 2    | M6, M11            |
@@ -371,44 +394,78 @@ Support is stated in tiers, so a claim never outruns its evidence.
 What "CI-verified" means is made as strong as it can be without hardware: the build, the unit tests, the view-model
 tests, and end-to-end tests that drive the real app through its automation socket (section 10.3). M0 also checks whether
 virtual machines on the development machine can render the app; if they can, they become a hands-on step for Tier 2.
+Open at the M0 gate: see `docs/build/M0-GATE.md`, question 24 (virtual machines were researched, not run).
+
+The M0 trial showed what "CI-verified" covers on the hosted runners, which have no GPU, and the label claims this and no
+more (decision 0013; design call):
+
+- **Linux (x64):** the app builds and its tests pass; its window opens and renders on X11 under a virtual display
+  through both of GPUI's Linux paths, Vulkan and OpenGL, on Mesa's software rasterisers; a frame is captured and
+  checked automatically for the expected colours, layout and the presence of text; the automation socket clicks a
+  control, reads GPUI's accessibility tree and the app's element list, and captures a frame (on X11). Wayland rendered
+  under a headless compositor in the trial, but that check could not fail the job, so Wayland is not stated as checked
+  until the real harness makes it a hard check.
+- **Windows (x64):** the app builds and its tests pass; its window renders on a Windows Server 2025 interactive session
+  with a software Direct3D adapter (Direct3D 11 on Microsoft's software rasteriser, WARP); the composed window on
+  screen is captured and checked; the automation socket, over a named pipe whose access list names only the current
+  user (not verified against a second local user), clicks a control, reads GPUI's accessibility tree and captures a
+  frame.
+- **Not covered on either:** real GPU drivers; real desktop environments and window managers, and on Windows the
+  client editions' shell; scaling other than 100 percent and multiple monitors; input methods and dead keys; input
+  through the operating system rather than inside GPUI; real font configuration; the tray, notifications, file
+  dialogs and portals; the screen readers themselves; performance and frame pacing; ARM.
 
 | Concern | macOS | Linux | Windows |
 |---|---|---|---|
 | Rendering | GPUI | GPUI (X11 and Wayland) | GPUI |
-| PTY | chosen in M0 | chosen in M0 | ConPTY |
+| PTY | `alacritty_terminal`'s own PTY (decision 0009) | `alacritty_terminal`'s own PTY (decision 0009) | ConPTY, through `alacritty_terminal` (decision 0009) |
 | Secrets | Keychain | Secret Service | Credential Manager |
 | Wake-up for routines | launchd | systemd user timer | Task Scheduler |
-| Tray | separate crate | separate crate | separate crate |
-| Browser | CEF, off-screen | CEF, off-screen | CEF or the OS web view |
-| Package | signed, notarized `.dmg` | `.deb` and a tarball; AppImage only without the browser | installer, signed if a certificate is supplied |
+| Tray | `tray-icon` (decision 0011) | separate crate; the backend is open at the M0 gate (`docs/build/M0-GATE.md`, question 11) | `tray-icon` (decision 0011); chosen, never run on Windows |
+| Browser | CEF, off-screen (decision 0012) | CEF, off-screen; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | CEF, off-screen, under CEF's bootstrap; the OS web view as a fallback (decision 0012); chosen on headless CI evidence, nothing drawn (`docs/build/M0-GATE.md`, question 20) |
+| Package | signed, notarized `.dmg`, built with cargo-packager (decision 0014, proposed) | `.deb` (cargo-packager, then cargo-deb once the browser's setuid helper arrives; decision 0014) and a tarball made separately; AppImage only without the browser; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | NSIS installer built with cargo-packager (decision 0014), signed if a certificate is supplied |
 
 Known exceptions at design time:
 
 - Screen readers: GPUI's support is unconfirmed. M0 tests it; until it works, this is an exception on all platforms.
+  Open at the M0 gate: see `docs/build/M0-GATE.md`, question 12.
 - Screenshot-based UI tests run on macOS first; GPUI's visual testing elsewhere is still in flux.
 - Signing identities are supplied by the maintainer as CI secrets. Without them a platform's builds are unsigned and
   say so.
+- The packaging tool is cargo-packager for the `.dmg`, the Windows installer and the `.deb`; the tarball is made
+  separately; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (decision 0014, proposed). The
+  application identifier, display name, publisher, the nightly schedule and the signing identities are open at the M0
+  gate: see `docs/build/M0-GATE.md`, question 5.
+- Open at the M0 gate: further exceptions proposed by the M0 trials and the threat model; see
+  `docs/build/M0-GATE.md`, questions 1, 2, 10 and 11.
 
 ## 9. Performance targets
 
-Initial targets, to be confirmed against the Electron baseline measured in M0. They are measured in two places, because
-shared CI runners have no GPU and cannot time frames reliably:
+Initial targets, to be confirmed against the Electron baseline measured in M0 (`docs/baseline/electron-2.7.0.md`, which
+also proposes how each target is defined and measured). They are measured in two places, because shared CI runners have
+no GPU and cannot time frames reliably:
 
 - In CI, on every change: benchmarks of the core, download size, and a count of idle wake-ups. A regression fails the
   change.
 - At each milestone gate, on the reference machine (an Apple silicon laptop with 16 GB): cold start, frame pacing and
-  token latency. A miss blocks the gate.
+  token latency. A miss blocks the gate. M0's measurements, the Electron baseline and the trials, were taken on an
+  Apple silicon desktop with 16 GB and external displays at 100 Hz and 60 Hz, not on that laptop.
+
+Open at the M0 gate: which machine is the reference, and how each target is defined; see `docs/build/M0-GATE.md`,
+question 3.
 
 The app, without the browser component:
 
 - Cold start to first frame: under 400 ms.
 - Idle CPU: no periodic wake-ups from our code. Idle memory: under 150 MB.
-- Scrolling a 5,000-message thread: no dropped frames at the display's refresh rate.
+- Scrolling a 5,000-message thread: no dropped frames at the display's refresh rate. Open at the M0 gate: see
+  `docs/build/M0-GATE.md`, question 4.
 - First streamed token on screen: within 50 ms of arrival.
 - Download size: under 40 MB.
 
 The browser component is measured on its own (download size, memory per tab, frame rate of the embedded view), with
-targets set from the M0 trial. Its memory does not count against the app's 150 MB.
+targets set from the M0 trial. Its memory does not count against the app's 150 MB. Open at the M0 gate: see
+`docs/build/M0-GATE.md`, question 18.
 
 ## 10. Testing
 
@@ -492,6 +549,8 @@ is available if the maintainer turns it on.
 
 - A privacy gate (`cargo xtask privacy`) runs before every commit and in CI: a secret scanner over each commit, plus a
   scan for personal terms (email addresses, home-folder paths, host names, private network addresses).
+- Recorded for M1 at the M0 gate: locally only the privacy scan runs; the secret scanner runs in CI only, which on a
+  public repository is after publication. See `docs/build/M0-GATE.md`, section g, "The first task of M1".
 - The personal term list is a local file that is never committed. CI uses generic patterns only.
 - Fixtures use `example.com` hosts and invented names. No real session, vault or transcript content is ever a fixture.
 - Commits use a no-reply address. Local instruction and workspace files are excluded from git.
@@ -502,8 +561,16 @@ is available if the maintainer turns it on.
 - Which HTTP, SSE and provider client crates sit behind `Provider`.
 - The SQLite schema and the embeddings store.
 - Module layout inside each crate.
-- The PTY crate and the tray crate, chosen from the M0 trials.
-- Screen layouts follow the Electron app's design unless section 7 says otherwise.
+- Screen layouts follow the Electron app's design unless section 7 or `docs/acceptance/CHECKLIST.md` says otherwise.
+
+Settled in M0, so no longer left open: the GPUI source and pin (the `gpui-pre` 0.3.12 snapshot, set once in the
+workspace manifest; decision 0007), the PTY crate (`alacritty_terminal`'s own PTY; decision 0009) and the tray crate on
+macOS and Windows (`tray-icon`; decision 0011). The packaging tool (cargo-packager, with cargo-deb for a `.deb` that
+needs a setuid file; decision 0014) is proposed: it stands unless the maintainer reopens it, pending the maintainer's
+confirmation of the application identity. The Linux tray backend is open
+at the M0 gate: see `docs/build/M0-GATE.md`, question 11. Decision 0007 pinned the GPUI snapshot the widget kit requires
+and deferred the kit itself; whether it is adopted is open at the M0 gate: see `docs/build/M0-GATE.md`, question 23.
+The application identity and signing are open at the M0 gate: see `docs/build/M0-GATE.md`, question 5.
 
 ## 14. Main risks
 

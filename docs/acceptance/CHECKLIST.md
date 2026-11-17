@@ -13,7 +13,7 @@ Columns:
 - `source section`: the section of the source list the item belongs to.
 - `behaviour`: what the user can do or see in this app, in one sentence. A `Change:` or `Drop:` tail gives the reason.
 - `fate`: `carry` (kept as is), `change` (kept in a different form, with the reason) or `drop` (removed by the design's
-  non-goals or by a design call listed in section 7, with the reason).
+  non-goals, a design call in section 7, or another named design section, with the reason).
 - `milestone`: the design milestone (M0 to M11) that delivers it, or `none` for a drop. A trailing `?` marks a
   milestone that the design does not state and that was chosen by judgement, for the reviewer to confirm.
 - `how verified`: `automated` (a test can assert it through the CLI, the view-model layer or the automation socket,
@@ -39,11 +39,11 @@ not rows here and are not counted in the 346.
 | M1 | 2 |
 | M2 | 0 |
 | M3 | 1 |
-| M4 | 47 |
+| M4 | 45 |
 | M5 | 20 |
 | M6 | 49 |
-| M7 | 27 |
-| M8 | 60 |
+| M7 | 28 |
+| M8 | 61 |
 | M9 | 33 |
 | M10 | 36 |
 | M11 | 10 |
@@ -54,7 +54,7 @@ not rows here and are not counted in the 346.
 
 | id | source section | behaviour | fate | milestone | how verified |
 |---|---|---|---|---|---|
-| I1 | Install paths | The app opens a vault on its home screen with no error logged (the home screen is Pulse once M6 lands). | carry | M6 | automated |
+| I1 | Install paths | The app opens a vault on its home screen with no error logged. | carry | M6 | automated |
 | I2 | Install paths | Settings shows the vault folder and the paths of any add-on engine programs as pickers, with a Probe button that re-resolves them. Change: The app needs no Node binary or Claude config folder; only the vault and add-on engine paths remain. | change | M5 | automated |
 | I3 | Install paths | Settings shows which provider and model each role resolves to, with the reason, and a refresh button that re-reads it. Change: The source reads a runtime state file; the app reads its own role configuration. | change | M4 | automated |
 
@@ -123,7 +123,7 @@ not rows here and are not counted in the 346.
 | S10 | Settings | A vault whose runtime predates the config command shows a prompt to upgrade it while the app's own settings keep working. Drop: There is no older runtime to support; the app is one binary. | drop | none | not applicable |
 | S11 | Settings | The plugin settings section and the settings window's runtime tab show the same rows, and a change in one appears in the other. Drop: The app has one configuration store and one Settings screen, with no plugin and runtime split. | drop | none | not applicable |
 | S12 | Settings | The vault picker shows a notice and keeps the saved vault when the chosen one is missing, and explains once when a different vault is picked. | carry | M4 | automated |
-| S13 | Settings | The rail shows three sections divided by light lines, with Pulse in its own colour in each theme. Change: The older link ids for Code and Brain are not carried; the app never had them. | change | M4 | manual |
+| S13 | Settings | The rail shows three sections divided by light lines, with Pulse in its own colour in each theme. Change: The older link ids for Code and Brain are not carried; the app never had them. | change | M6 | manual |
 | ST-LOCAL | Settings | Settings shows the local engine, its address and state, the model and embedder, today's local calls and queued wraps, and can pull the model. Change: The app talks to the local server directly and has no `aos local` terminal button. | change | M4 | automated |
 | ST-HOSTS | Settings | Settings lists each add-on engine with its detected state, sign-in help, the exact install steps when missing, and a re-check button. Change: The app only detects and explains; it never installs or edits an add-on (section 5.4). | change | M5 | automated |
 | ST-IMPORT | Settings | Settings shows the last import from an existing vault with its counts and can import again. Change: Only `unidex import <path>` of a vault is carried; host history import is a non-goal. | change | M4? | automated |
@@ -236,7 +236,7 @@ not rows here and are not counted in the 346.
 | SL4 | Status line (both hosts) | Codex's status line is set in its config file. Drop: A status line set up in a host is a non-goal. | drop | none | not applicable |
 | SL5 | Status line (both hosts) | Uninstalling restores both host files. Drop: Nothing is installed into hosts, so nothing is restored. | drop | none | not applicable |
 | SL6 | Status line (both hosts) | The status bar shows live state and gate counts, a gate jumps to Agent Teams, a flag to the state file, "all clear" when quiet, and idle dimmed. | carry | M10 | automated |
-| SL7 | Status line (both hosts) | A `unidex://` link opens the named tab, also when the app was not running, and an unknown tab keeps the current one. Change: The link scheme is `unidex://` rather than the older scheme. | change | M6 | automated |
+| SL7 | Status line (both hosts) | A `unidex://` link opens the named tab, also when the app was not running, and an unknown tab keeps the current one. Change: The link scheme is `unidex://` rather than the older scheme. | change | M4 | automated |
 
 ## Spaces / Runs
 
@@ -309,8 +309,8 @@ not rows here and are not counted in the 346.
 | RT4 | Routines | The on and off switch rewrites the routine's enabled flag. | carry | M6 | automated |
 | RT5 | Routines | Run on a command routine runs it. | carry | M6 | automated |
 | RT6 | Routines | An "outside the app" section lists externally labelled jobs from configuration, read-only. Change: The source also listed an Obsidian Git timer, which no longer exists. | change | M6 | automated |
-| RT7 | Routines | Codex Automations appear with their pills and chips, with a refresh, and without the app one dim line says why. Drop: Only this app's own routines are scheduled (section 5.9). | drop | none | not applicable |
-| RT8 | Routines | Claude cloud routines appear after the cloud command, with a pill, link, schedule and ran-once state. Drop: Only this app's own routines are scheduled (section 5.9). | drop | none | not applicable |
+| RT7 | Routines | Codex Automations appear with their pills and chips, with a refresh, and without the app one dim line says why. Drop: The design includes no reading of another tool's scheduler or cloud routines. | drop | none | not applicable |
+| RT8 | Routines | Claude cloud routines appear after the cloud command, with a pill, link, schedule and ran-once state. Drop: The design includes no reading of another tool's scheduler or cloud routines. | drop | none | not applicable |
 | RT9 | Routines | A duty run made outside the open app, by the OS wake-up or the command line, shows in the routine's last run with its trigger. Change: The trigger is the app's own run-due record, not a duty-log shell script. | change | M6 | automated |
 | RT10 | Routines | A prompt routine has an engine select (default, a native role, or a detected add-on) with a model list, the local model's fields, and the engine shown on each prompt row. Change: The source offers its two CLIs and a local option; the app offers native roles and add-on engines. | change | M6 | automated |
 | RT11 | Routines | A routine on a local model runs, writes only inside its writes list, logs its tool calls at no cost, and when the local server is down is skipped with a local-down reason. | carry | M6 | automated |
@@ -392,7 +392,7 @@ not rows here and are not counted in the 346.
 | CX13 | Codex host | With no Claude, the semantic graph build names Codex in its consent line, runs through it, and records graph spend rows. Drop: The external graph builder is not carried (section 7). | drop | none | not applicable |
 | CX14 | Codex host | With cost on, a Codex run missed at session end is costed later by a backfill command and counted in the Pulse fix queue. Drop: Parsing host transcripts for cost is a non-goal. | drop | none | not applicable |
 | CX15 | Codex host | Uninstalling the host removes the plugin and marketplace and its hook entries from Codex. Drop: The app installs nothing into Codex, so nothing is removed. | drop | none | not applicable |
-| CX16 | Codex host | Resuming an add-on engine's thread from Spaces or History reopens it in its workspace folder, and the end bar's Resume returns the same thread. Change: The thread is reloaded through ACP rather than a typed resume command. | change | M5 | automated |
+| CX16 | Codex host | Resuming an add-on engine's thread from Spaces or History reopens it in its workspace folder, and the end bar's Resume returns the same thread. Change: The thread is reloaded through ACP rather than a typed resume command. | change | M8 | automated |
 | CX17 | Codex host | A Codex thread shows its name from the host's index file in the pick-up and History after a scan. Drop: History covers sessions run in this app (section 2), so host index files are not read. | drop | none | not applicable |
 | CX18 | Codex host | Codex skills for to-do, propose and project tag the workspace from inside a workspace or worktree and ask to approve out-of-folder writes. Drop: Host plugin skills are a non-goal; the own-engine equivalent is SMR24. | drop | none | not applicable |
 | CX19 | Codex host | Brain's Review lists a batch for each session run on an add-on engine, titled by its thread and marked with a violet dot, and keep, archive and restore from outside appear in the hub. Change: Batches come from sessions in this app, and outside access is through `unidex serve`. | change | M9 | automated |
@@ -427,11 +427,11 @@ not rows here and are not counted in the 346.
 | SE10 | Sessions (per host; each turn spends) | The access menu offers each engine's levels and what they run as (plan, accept edits, shell, read-only, workspace-write), with notes. Change: Levels are the app's permission modes for the native engine and mapped ACP modes for add-ons. | change | M5 | automated |
 | SE11 | Sessions (per host; each turn spends) | Typing a slash lists the engine's commands and skills, filtered as you type, Enter inserts the name when it matches or was highlighted, Escape closes, and the prompt reaches the engine unchanged. Change: One slash list serves the app's skills and an add-on engine's advertised commands; there is no separate dollar list. | change | M4 | automated |
 | SE12 | Sessions (per host; each turn spends) | Sessions shows the list (New session, Vault, workspaces, engine dots, running mark, age, spend), tool lines, the plan card, the working line, and a top bar with branch, change counts, Stop and status. | carry | M4 | manual |
-| SE13 | Sessions (per host; each turn spends) | Vault chat's picker on each ready engine shows a fixed read-only chip and a header that follows the pick, passes the model and effort through, shows the footer, and is off while a question runs. Change: There are no per-CLI invocation details; the call goes through the provider or ACP. | change | M4 | automated |
+| SE13 | Sessions (per host; each turn spends) | Vault chat's picker on each ready engine shows a fixed read-only chip and a header that follows the pick, passes the model and effort through, shows the footer, and is off while a question runs. Change: There are no per-CLI invocation details; the call goes through the provider or ACP. | change | M5 | automated |
 | SE14 | Sessions (per host; each turn spends) | History lists past sessions of this app by day newest first with engine dot, title, time, engine and workspace, filters keeping focus, and Show 100 more, leaving out headless runs, team seats and sub-agents. Change: It covers sessions run in this app only (non-goal on host transcripts). | change | M4 | automated |
 | SE15 | Sessions (per host; each turn spends) | History's Resume reopens a thread in its workspace, native threads in-app and add-on threads over ACP, and is disabled with the reason when its engine is off or signed out. Change: The source types per-CLI resume commands. | change | M5 | automated |
 | SE16 | Sessions (per host; each turn spends) | With no engine usable, Sessions shows History alone with a no-engine line, and is not on the rail with no past sessions. Change: The condition is no provider and no add-on. | change | M4 | automated |
-| SE17 | Sessions (per host; each turn spends) | Delete thread asks first, Cancel keeps it, Delete removes it, shows New session and forgets the thread's browser. | carry | M4 | automated |
+| SE17 | Sessions (per host; each turn spends) | Delete thread asks first, Cancel keeps it, Delete removes it, shows New session and forgets the thread's browser. | carry | M7 | automated |
 
 ## Code
 
