@@ -14,9 +14,12 @@ pub struct TestEnv {
 impl TestEnv {
     /// Panics if `UNIDEX_TEST_ROOT` is missing: run the tests through cargo.
     pub fn new() -> TestEnv {
-        let root = std::env::var("UNIDEX_TEST_ROOT").unwrap_or_else(|_| {
-            panic!("UNIDEX_TEST_ROOT is not set: run the tests through cargo (cargo test)")
-        });
+        let root = std::env::var("UNIDEX_TEST_ROOT")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                panic!("UNIDEX_TEST_ROOT is not set: run the tests through cargo (cargo test)")
+            });
         std::fs::create_dir_all(&root).expect("create the test root");
         let dir = tempfile::Builder::new()
             .prefix("udx-")

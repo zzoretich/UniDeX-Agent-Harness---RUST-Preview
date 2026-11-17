@@ -91,8 +91,13 @@ fn without_a_test_root_the_os_folders_are_used() {
 
 #[test]
 fn cargo_gives_every_test_process_a_test_root() {
-    assert!(std::env::var("UNIDEX_TEST_ROOT").is_ok());
-    assert!(AppPaths::resolve(&ProcessEnv).is_ok());
+    let root = std::env::var("UNIDEX_TEST_ROOT").unwrap();
+    assert!(!root.is_empty());
+    let real_root = std::fs::canonicalize(&root).unwrap_or_else(|_| PathBuf::from(&root));
+    let p = AppPaths::resolve(&ProcessEnv).unwrap();
+    assert!(p.config_dir.starts_with(&real_root));
+    assert!(p.data_dir.starts_with(&real_root));
+    assert!(p.cache_dir.starts_with(&real_root));
 }
 
 #[test]
@@ -194,4 +199,107 @@ fn a_dangling_symlink_that_points_outside_is_refused() {
         ("UNIDEX_DATA_DIR", via.as_path()),
     ]));
     assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })));
+}
+
+#[cfg(unix)]
+fn data_via(root: &Path, via: &Path) -> Result<AppPaths, PathError> {
+    AppPaths::resolve(&MapEnv::of([
+        ("UNIDEX_TEST_ROOT", root),
+        ("UNIDEX_DATA_DIR", via),
+    ]))
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dot_dot_then_a_symlink_that_escapes_is_refused() {
+    let (root, other) = (tmp(), tmp());
+    std::os::unix::fs::symlink(other.path(), root.path().join("link")).unwrap();
+    let via = root.path().join("missing/../link/data");
+    assert!(matches!(
+        data_via(root.path(), &via),
+        Err(PathError::OutsideTestRoot { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dot_dot_then_a_symlink_itself_is_refused() {
+    let (root, other) = (tmp(), tmp());
+    std::os::unix::fs::symlink(other.path(), root.path().join("link")).unwrap();
+    let via = root.path().join("missing/../link");
+    assert!(matches!(
+        data_via(root.path(), &via),
+        Err(PathError::OutsideTestRoot { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dot_dot_then_a_dangling_symlink_is_refused() {
+    let (root, other) = (tmp(), tmp());
+    std::os::unix::fs::symlink(other.path().join("nope"), root.path().join("dang")).unwrap();
+    let via = root.path().join("missing/../dang/x");
+    assert!(matches!(
+        data_via(root.path(), &via),
+        Err(PathError::OutsideTestRoot { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_loop_is_refused() {
+    let root = tmp();
+    std::os::unix::fs::symlink(root.path().join("b"), root.path().join("a")).unwrap();
+    std::os::unix::fs::symlink(root.path().join("a"), root.path().join("b")).unwrap();
+    let via = root.path().join("a").join("data");
+    assert!(matches!(
+        data_via(root.path(), &via),
+        Err(PathError::OutsideTestRoot { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_reached_through_a_symlink_returns_resolved_folders() {
+    let (holder, target) = (tmp(), tmp());
+    let alias = holder.path().join("alias");
+    std::os::unix::fs::symlink(target.path(), &alias).unwrap();
+    let p = AppPaths::resolve(&MapEnv::of([("UNIDEX_TEST_ROOT", alias.as_path())])).unwrap();
+    assert_eq!(p.data_dir, real(target.path()).join("data"));
+}
+
+#[test]
+fn under_cargo_a_missing_test_root_is_an_error() {
+    let env = MapEnv::of([("CARGO_MANIFEST_DIR", Path::new("/some/crate"))]);
+    assert!(matches!(
+        AppPaths::resolve(&env),
+        Err(PathError::CargoWithoutTestRoot)
+    ));
+}
+
+#[test]
+fn under_cargo_an_empty_test_root_is_an_error() {
+    let env = MapEnv::of([
+        ("CARGO_MANIFEST_DIR", Path::new("/some/crate")),
+        ("UNIDEX_TEST_ROOT", Path::new("")),
+    ]);
+    assert!(matches!(
+        AppPaths::resolve(&env),
+        Err(PathError::CargoWithoutTestRoot)
+    ));
+}
+
+#[test]
+fn under_cargo_overrides_do_not_lift_the_requirement() {
+    let root = tmp();
+    let env = MapEnv::of([
+        ("CARGO_MANIFEST_DIR", Path::new("/some/crate")),
+        ("UNIDEX_CONFIG_DIR", root.path()),
+        ("UNIDEX_DATA_DIR", root.path()),
+        ("UNIDEX_CACHE_DIR", root.path()),
+    ]);
+    assert!(matches!(
+        AppPaths::resolve(&env),
+        Err(PathError::CargoWithoutTestRoot)
+    ));
 }

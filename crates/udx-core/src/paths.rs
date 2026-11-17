@@ -28,7 +28,13 @@ pub struct ProcessEnv;
 
 impl Env for ProcessEnv {
     fn var(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
+        use std::env::VarError;
+        match std::env::var(key) {
+            Ok(v) => Some(v),
+            // A set variable is never read as unset.
+            Err(VarError::NotUnicode(v)) => Some(v.to_string_lossy().into_owned()),
+            Err(VarError::NotPresent) => None,
+        }
     }
 }
 
@@ -47,12 +53,19 @@ pub enum PathError {
     NoHome,
     #[error("{dir} is outside the test root {root}")]
     OutsideTestRoot { dir: PathBuf, root: PathBuf },
+    #[error("started by cargo without UNIDEX_TEST_ROOT")]
+    CargoWithoutTestRoot,
 }
 
 impl AppPaths {
     /// Decide the folders from `env`. Reads no folder contents and creates nothing.
     pub fn resolve(env: &dyn Env) -> Result<AppPaths, PathError> {
         let get = |key: &str| env.var(key).filter(|v| !v.is_empty());
+        // Cargo sets CARGO_MANIFEST_DIR for everything it runs; such a process
+        // must have a test root and never falls through to the OS folders.
+        if get(TEST_ROOT).is_none() && get("CARGO_MANIFEST_DIR").is_some() {
+            return Err(PathError::CargoWithoutTestRoot);
+        }
         let over = [get(CONFIG_DIR), get(DATA_DIR), get(CACHE_DIR)];
 
         let [config_dir, data_dir, cache_dir] = match get(TEST_ROOT) {
@@ -108,45 +121,47 @@ fn outside(dir: &Path, root: &Path) -> PathError {
     }
 }
 
-/// Resolve an absolute path without creating anything: symlinks of the longest
-/// existing ancestor are followed, a dangling symlink is followed to its
-/// target, and the remaining components are applied lexically (`..` pops one
-/// component, `.` is dropped). `None` means it could not be resolved safely.
+/// Resolve an absolute path without creating anything, walking its components
+/// forward from the root and keeping the base symlink-free at every step.
+/// `.` is dropped; `..` pops one component of the resolved base; a normal
+/// component is pushed and, if it is a symlink (dangling or not), replaced by
+/// its target, whose own components are then walked. A component that does not
+/// exist is kept and the walk continues, so a later `..` or symlink is still
+/// handled. `None` means a loop, an exhausted hop budget, or an unreadable
+/// link: the caller refuses.
 fn resolve_path(path: &Path) -> Option<PathBuf> {
-    resolve_hops(path, MAX_LINK_HOPS)
-}
-
-fn resolve_hops(path: &Path, hops: u32) -> Option<PathBuf> {
-    let mut cur = path.to_path_buf();
-    let mut tail: Vec<OsString> = Vec::new(); // innermost component first
-    let mut base = loop {
-        if let Ok(real) = std::fs::canonicalize(&cur) {
-            break real;
-        }
-        if std::fs::symlink_metadata(&cur).is_ok_and(|m| m.file_type().is_symlink()) {
-            // A dangling link: continue from where it points.
-            let target = std::fs::read_link(&cur).ok()?;
-            let mut next = cur.parent()?.join(target);
-            for part in tail.iter().rev() {
-                next.push(part);
+    let mut hops = MAX_LINK_HOPS;
+    let mut base = PathBuf::new();
+    // Components still to walk, next one last.
+    let mut todo: Vec<OsString> = Vec::new();
+    push_components(&mut todo, path);
+    while let Some(part) = todo.pop() {
+        match Path::new(&part).components().next() {
+            Some(Component::CurDir) | None => {}
+            Some(Component::ParentDir) => {
+                base.pop();
             }
-            return resolve_hops(&next, hops.checked_sub(1)?);
-        }
-        match cur.components().next_back() {
-            Some(Component::Normal(n)) => tail.push(n.to_os_string()),
-            Some(Component::ParentDir) => tail.push(OsString::from("..")),
-            Some(Component::CurDir) => {}
-            // Nothing left to pop: no ancestor exists, use what is left.
-            _ => break cur,
-        }
-        cur.pop();
-    };
-    for part in tail.iter().rev() {
-        if part == ".." {
-            base.pop();
-        } else {
-            base.push(part);
+            Some(Component::RootDir | Component::Prefix(_)) => base.push(&part),
+            Some(Component::Normal(_)) => {
+                base.push(&part);
+                if std::fs::symlink_metadata(&base).is_ok_and(|m| m.file_type().is_symlink()) {
+                    hops = hops.checked_sub(1)?;
+                    let target = std::fs::read_link(&base).ok()?;
+                    base.pop();
+                    if target.has_root() {
+                        base = PathBuf::new();
+                    }
+                    push_components(&mut todo, &target);
+                }
+            }
         }
     }
     Some(base)
+}
+
+/// Queue the components of `path` so the first is walked next.
+fn push_components(todo: &mut Vec<OsString>, path: &Path) {
+    for c in path.components().rev() {
+        todo.push(c.as_os_str().to_os_string());
+    }
 }
