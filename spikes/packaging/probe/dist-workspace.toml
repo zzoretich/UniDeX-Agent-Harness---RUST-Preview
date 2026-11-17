@@ -1,0 +1,8 @@
+# cargo-dist settings for the packaging trial (Task 14). Throwaway, with the rest of this folder.
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.34.0"
+installers = ["msi"]
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]

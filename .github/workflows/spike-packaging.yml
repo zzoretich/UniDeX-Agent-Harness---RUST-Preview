@@ -1,0 +1,443 @@
+name: spike-packaging
+
+# TEMPORARY, to be deleted at the milestone gate together with spikes/packaging/ (Task 14, decision 0014).
+# The packaging trial: each candidate packages the repository's cookbook window (the example target
+# `hello_window` of the crate udx-cookbook), unsigned, on all three platforms, as far as the tool can:
+#   cargo-packager 0.11.8   app, dmg | deb, appimage, pacman | nsis, wix   (the nightly workflow uses it)
+#   cargo-deb 3.8.0         deb with a setuid file and a maintainer script (Linux only)
+#   cargo-dist 0.34.0       archives and an MSI, from a placeholder Cargo binary target (it packages no examples)
+#   Velopack vpk 1.2.161    .pkg and portable zip | Setup.exe | AppImage
+# A step that fails is a result, not a defect of this file: each candidate step has continue-on-error, and the
+# last step prints every outcome. Tools are installed only here, on the runners, at exact versions
+# (`cargo install --locked --version`, `dotnet tool install --version`).
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/spike-packaging.yml"
+      - "spikes/packaging/**"
+      - "packaging/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Same hardening as ci.yml: read-only token, no persisted credentials, actions pinned to full commit SHAs, fixed
+# runner labels, no secrets, and no event text in any script. Linux packages: ci.yml's list for GPUI.
+
+jobs:
+  spike:
+    name: spike packaging (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install the Linux packages GPUI builds against
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Runner facts
+        run: |
+          set -eu
+          uname -a
+          dotnet --list-sdks || true
+          python3 --version || true
+          git --version
+          if [ "$RUNNER_OS" = Linux ]; then dpkg --version | head -n 1; fi
+      - name: Build the cookbook window in release mode
+        run: cargo build --release --locked -p udx-cookbook --example hello_window
+      - name: Stage the program
+        run: |
+          set -eu
+          ext=""
+          if [ "$RUNNER_OS" = Windows ]; then ext=".exe"; fi
+          mkdir -p target/packaging/bin
+          cp "target/release/examples/hello_window${ext}" "target/packaging/bin/unidex-rust-preview${ext}"
+          sh spikes/packaging/diag.sh target/packaging/bin
+      - name: Linux program facts (libraries it needs, and which Debian package owns each)
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          ldd target/packaging/bin/unidex-rust-preview
+          ldd target/packaging/bin/unidex-rust-preview | awk '/=> \//{print $3}' | sort -u | while read -r lib; do
+            real=$(readlink -f "$lib")
+            printf '%s -> ' "$lib"
+            dpkg -S "$real" 2>/dev/null | head -n 1 || echo "(no owner)"
+          done
+      - name: Make the placeholder icons and the setuid probe file
+        run: |
+          set -eu
+          if [ "$RUNNER_OS" != Windows ]; then sh spikes/packaging/make-icons.sh; fi
+          if [ "$RUNNER_OS" = Linux ]; then
+            mkdir -p target/packaging/setuid-probe
+            printf '#!/bin/sh\nexit 0\n' > target/packaging/setuid-probe/helper
+            chmod 4755 target/packaging/setuid-probe/helper
+            ls -l target/packaging/setuid-probe/helper
+          fi
+
+      # ---- cargo-packager ----
+      - name: Install cargo-packager
+        timeout-minutes: 30
+        id: pk_install
+        continue-on-error: true
+        run: |
+          set -eu
+          cargo install --locked --version 0.11.8 cargo-packager
+          cargo packager --version
+      - name: cargo-packager, macOS app and dmg
+        timeout-minutes: 20
+        id: pk_mac
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        env:
+          CI: "1"
+        run: cargo packager --release -c packaging/Packager.toml --formats app,dmg -vv
+      - name: cargo-packager, Linux deb
+        timeout-minutes: 15
+        id: pk_deb
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: cargo packager --release -c packaging/Packager.toml --formats deb -vv
+      - name: cargo-packager, Linux deb with a setuid file
+        timeout-minutes: 15
+        id: pk_setuid
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: cargo packager --release -c spikes/packaging/packager-setuid.toml --formats deb -vv
+      - name: cargo-packager, Linux AppImage
+        timeout-minutes: 15
+        id: pk_appimage
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo packager --release -c packaging/Packager.toml --formats appimage -vv
+      - name: cargo-packager, Linux pacman
+        timeout-minutes: 15
+        id: pk_pacman
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: cargo packager --release -c packaging/Packager.toml --formats pacman -vv
+      - name: cargo-packager, Linux AppImage with an icon
+        timeout-minutes: 15
+        id: pk_appimage2
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo packager --release -c spikes/packaging/packager-appimage.toml --formats appimage -vv
+      - name: cargo-packager, Windows NSIS
+        timeout-minutes: 15
+        id: pk_nsis
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: cargo packager --release -c packaging/Packager.toml --formats nsis -vv
+      - name: cargo-packager, Windows WiX
+        timeout-minutes: 15
+        id: pk_wix
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: cargo packager --release -c packaging/Packager.toml --formats wix -vv
+      - name: cargo-packager outputs
+        timeout-minutes: 5
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -eu
+          for d in target/packaging/out target/packaging/out-setuid target/packaging/out-appimage; do
+            if [ -d "$d" ]; then sh spikes/packaging/diag.sh "$d"; else echo "(no $d on this platform or it failed)"; fi
+          done
+      - name: cargo-packager, macOS dmg inspection
+        timeout-minutes: 10
+        if: ${{ !cancelled() && runner.os == 'macOS' }}
+        continue-on-error: true
+        run: |
+          set -eu
+          dmg=$(find target/packaging/out -name '*.dmg' | head -n 1)
+          echo "dmg: $dmg"
+          hdiutil imageinfo "$dmg" | head -n 30
+          mnt="$RUNNER_TEMP/dmg-mount"
+          mkdir -p "$mnt"
+          hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$dmg" <<< "Y"
+          ls -la "$mnt"
+          app=$(find "$mnt" -maxdepth 1 -name '*.app' | head -n 1)
+          echo "app: $app"
+          find "$app" | sort
+          plutil -p "$app/Contents/Info.plist"
+          echo "--- codesign"
+          codesign -dvvv "$app" 2>&1 || true
+          codesign --verify --deep --strict -vv "$app" 2>&1 || true
+          echo "--- spctl"
+          spctl --assess --type execute -vv "$app" 2>&1 || true
+          hdiutil detach "$mnt"
+      - name: cargo-packager, Linux deb inspection, install and removal
+        timeout-minutes: 10
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        continue-on-error: true
+        run: |
+          set -eu
+          deb=$(find target/packaging/out -name '*.deb' | head -n 1)
+          echo "deb: $deb"
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          mkdir -p "$RUNNER_TEMP/pk-ctl"
+          dpkg-deb --control "$deb" "$RUNNER_TEMP/pk-ctl"
+          echo "control members:"; ls -l "$RUNNER_TEMP/pk-ctl"
+          sudo apt-get install -y --no-install-recommends "./$deb"
+          dpkg -L unidex-rust-preview
+          ldd /usr/bin/unidex-rust-preview | grep 'not found' && { echo "MISSING LIBRARIES"; exit 1; } || echo "no missing libraries"
+          sudo dpkg --purge unidex-rust-preview
+          echo "--- setuid probe (cargo-packager)"
+          sdeb=$(find target/packaging/out-setuid -name '*.deb' | head -n 1)
+          echo "deb: $sdeb"
+          dpkg-deb --contents "$sdeb"
+      - name: cargo-packager, Windows NSIS install and uninstall (silent)
+        timeout-minutes: 8
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Round 1 hung here for two hours: the installer, started from bash with /S, never returned. Each
+          # process is now waited for with a limit and killed, so a hang is reported as this step's result.
+          $ErrorActionPreference = 'Stop'
+          function Run-Limited($file, $argList, $seconds) {
+            $p = Start-Process -FilePath $file -ArgumentList $argList -PassThru
+            if (-not $p.WaitForExit($seconds * 1000)) {
+              Write-Output "STILL RUNNING after $seconds s: $file $argList"
+              Get-Process | Where-Object { $_.ProcessName -match 'unidex|setup|uninstall|Au_' } | Format-Table Id, ProcessName, MainWindowTitle, Responding
+              $p.Kill()
+              return -1
+            }
+            Write-Output "exit code $($p.ExitCode): $file $argList"
+            return $p.ExitCode
+          }
+          $exe = (Get-ChildItem target/packaging/out -Filter '*setup*.exe' -File | Select-Object -First 1).FullName
+          Write-Output "installer: $exe"
+          $rc = Run-Limited $exe '/S' 120
+          Start-Sleep -Seconds 3
+          Get-ChildItem $env:LOCALAPPDATA, 'C:\Program Files' -Filter '*unidex*' -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Output "found: $($_.FullName)"; Get-ChildItem $_.FullName -Recurse | Format-Table FullName, Length }
+          Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match 'UniDeX' } | Format-List DisplayName, DisplayVersion, Publisher, InstallLocation, UninstallString
+          $dir = (Get-ChildItem $env:LOCALAPPDATA -Filter '*unidex*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if ($dir -and (Test-Path (Join-Path $dir.FullName 'uninstall.exe'))) {
+            $null = Run-Limited (Join-Path $dir.FullName 'uninstall.exe') '/S' 120
+            Start-Sleep -Seconds 3
+            if (Test-Path $dir.FullName) { Get-ChildItem $dir.FullName -Recurse | Format-Table FullName, Length } else { Write-Output 'folder removed' }
+          }
+          if ($rc -ne 0) { exit 1 }
+      - name: cargo-packager, Windows MSI contents
+        timeout-minutes: 5
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        continue-on-error: true
+        run: |
+          set -eu
+          msi=$(find target/packaging/out -name '*.msi' | head -n 1)
+          echo "msi: $msi"
+          7z l "$msi" | tail -n 30
+
+      # ---- cargo-deb (Linux) ----
+      - name: Install cargo-deb
+        timeout-minutes: 30
+        id: cd_install
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          set -eu
+          cargo install --locked --version 3.8.0 cargo-deb
+          cargo deb --version
+      - name: cargo-deb, build, inspect, install
+        timeout-minutes: 10
+        id: cd_run
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          set -eu
+          mkdir -p target/packaging/out-cargo-deb
+          (cd spikes/packaging/probe && cargo deb --no-build --no-strip -o "$GITHUB_WORKSPACE/target/packaging/out-cargo-deb/")
+          deb=$(find target/packaging/out-cargo-deb -name '*.deb' | head -n 1)
+          echo "deb: $deb"
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          mkdir -p "$RUNNER_TEMP/cd-ctl"
+          dpkg-deb --control "$deb" "$RUNNER_TEMP/cd-ctl"
+          echo "control members:"; ls -l "$RUNNER_TEMP/cd-ctl"
+          sudo apt-get install -y --no-install-recommends "./$deb"
+          stat -c '%A %U:%G %n' /usr/lib/unidex-rust-preview/helper /usr/bin/unidex-rust-preview
+          sudo dpkg --purge unidex-rust-preview
+          sh spikes/packaging/diag.sh target/packaging/out-cargo-deb
+
+      # ---- cargo-dist ----
+      - name: Install cargo-dist
+        timeout-minutes: 30
+        id: dist_install
+        continue-on-error: true
+        run: |
+          set -eu
+          cargo install --locked --version 0.34.0 cargo-dist
+          dist --version
+      - name: Install cargo-wix (Windows, for cargo-dist's MSI)
+        timeout-minutes: 30
+        id: wix_install
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          set -eu
+          cargo install --locked --version 0.3.9 cargo-wix
+          cargo wix --version
+          ls "/c/Program Files (x86)" | grep -i wix || echo "no WiX folder under Program Files (x86)"
+      - name: cargo-dist, plan and build
+        timeout-minutes: 15
+        id: dist_run
+        continue-on-error: true
+        run: |
+          set -eu
+          if [ "$RUNNER_OS" = Windows ]; then
+            for d in "/c/Program Files (x86)/WiX Toolset v3.14/bin" "/c/Program Files (x86)/WiX Toolset v3.11/bin"; do
+              if [ -d "$d" ]; then export PATH="$PATH:$d"; echo "WiX on PATH: $d"; fi
+            done
+          fi
+          host=$(rustc -vV | sed -n 's/^host: //p')
+          echo "host triple: $host"
+          cd spikes/packaging/probe
+          dist plan --output-format=human
+          dist build --artifacts=local --target "$host" --output-format=human
+          sh ../diag.sh target/distrib
+      - name: cargo-dist, archive contents
+        timeout-minutes: 5
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -eu
+          cd spikes/packaging/probe/target/distrib
+          for a in *.tar.xz *.tar.gz *.zip; do
+            [ -e "$a" ] || continue
+            echo "== $a"
+            case "$a" in
+              *.zip) (unzip -l "$a" 2>&1 || 7z l "$a" 2>&1) | tail -n 15 ;;
+              *) tar -tvf "$a" ;;
+            esac
+          done
+
+      # ---- Velopack ----
+      - name: Install .NET for Velopack (the macOS image has no .NET 10 runtime)
+        if: runner.os == 'macOS'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: "10.0.x"
+      - name: Install Velopack vpk
+        timeout-minutes: 10
+        id: vpk_install
+        continue-on-error: true
+        run: |
+          set -eu
+          dotnet tool install vpk --tool-path "$RUNNER_TEMP/vpk-tool" --version 1.2.161
+          "$RUNNER_TEMP/vpk-tool/vpk" --version
+      - name: Velopack, pack
+        timeout-minutes: 10
+        id: vpk_run
+        continue-on-error: true
+        run: |
+          set -eu
+          vpk="$RUNNER_TEMP/vpk-tool/vpk"
+          case "$RUNNER_OS" in
+            macOS)
+              exe=unidex-rust-preview
+              extra="--icon target/packaging/icon/icon.icns --bundleId example.unidex.rust-preview.trial" ;;
+            Linux)
+              exe=unidex-rust-preview
+              extra="--icon target/packaging/icon/icon.png" ;;
+            *)
+              exe=unidex-rust-preview.exe
+              extra="" ;;
+          esac
+          # shellcheck disable=SC2086
+          "$vpk" pack --packId UniDeXRustPreviewTrial --packVersion 0.0.1 --packTitle "UniDeX Rust Preview" \
+            --packDir target/packaging/bin --mainExe "$exe" --outputDir target/packaging/velopack $extra
+          sh spikes/packaging/diag.sh target/packaging/velopack
+      - name: Velopack, output contents
+        timeout-minutes: 5
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -eu
+          cd target/packaging/velopack
+          for f in *; do
+            case "$f" in
+              *.zip|*.nupkg) echo "== $f"; (unzip -l "$f" 2>&1 || 7z l "$f" 2>&1) | tail -n 25 ;;
+              *.exe) echo "== $f"; 7z l "$f" | tail -n 25 ;;
+              *.AppImage) echo "== $f"; file "$f" ;;
+              *.pkg) echo "== $f"; pkgutil --payload-files "$f" | head -n 30 ;;
+              *.json|RELEASES*) echo "== $f"; head -c 1500 "$f"; echo ;;
+            esac
+          done
+
+      - name: Upload the trial outputs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: spike-packaging-unsigned-${{ matrix.name }}
+          path: |
+            target/packaging/out
+            target/packaging/out-setuid
+            target/packaging/out-appimage
+            target/packaging/out-cargo-deb
+            target/packaging/velopack
+            spikes/packaging/probe/target/distrib
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Outcomes
+        if: ${{ !cancelled() }}
+        env:
+          PK_INSTALL: ${{ steps.pk_install.outcome }}
+          PK_MAC: ${{ steps.pk_mac.outcome }}
+          PK_DEB: ${{ steps.pk_deb.outcome }}
+          PK_SETUID: ${{ steps.pk_setuid.outcome }}
+          PK_APPIMAGE: ${{ steps.pk_appimage.outcome }}
+          PK_PACMAN: ${{ steps.pk_pacman.outcome }}
+          PK_APPIMAGE2: ${{ steps.pk_appimage2.outcome }}
+          PK_NSIS: ${{ steps.pk_nsis.outcome }}
+          PK_WIX: ${{ steps.pk_wix.outcome }}
+          CD_INSTALL: ${{ steps.cd_install.outcome }}
+          CD_RUN: ${{ steps.cd_run.outcome }}
+          DIST_INSTALL: ${{ steps.dist_install.outcome }}
+          WIX_INSTALL: ${{ steps.wix_install.outcome }}
+          DIST_RUN: ${{ steps.dist_run.outcome }}
+          VPK_INSTALL: ${{ steps.vpk_install.outcome }}
+          VPK_RUN: ${{ steps.vpk_run.outcome }}
+        run: |
+          set -eu
+          {
+            echo "### Packaging trial outcomes (${RUNNER_OS})"
+            env | grep -E '^(PK|CD|DIST|WIX|VPK)_' | sort
+          } | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Trial only: shows that cargo-deb installs a maintainer script. The real one would fix the browser sandbox
+# helper's owner and mode; here it only writes a marker line so the workflow can see it ran.
+set -e
+echo "unidex-rust-preview postinst ran" >&2
+exit 0
