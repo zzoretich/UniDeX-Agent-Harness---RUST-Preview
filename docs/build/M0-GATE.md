@@ -88,7 +88,7 @@ ran); **not verified**.
 | Rendering in CI | Can CI render the app and check frames without a GPU? | Yes: Linux X11 on software Vulkan and OpenGL, Windows Server on software Direct3D; frames checked automatically; an automation socket drives the app. Wayland passed but its check could not fail the job | CI on Linux and Windows, five runs; the socket also run by program on the dev Mac. Virtual machines: researched, not run | 0013 |
 | Vendor terms (study, not a trial) | May UniDeX drive Claude Code and Codex through ACP, and who pays? | Both only with API-key credentials until a vendor confirms otherwise | Primary sources read on 2026-11-16; a reviewer fetched every cited page. Not legal advice | 0006 |
 | Electron baseline (study) | How fast is the Electron app 2.7.0? | Warm start 724 ms (a lower bound for the shipped app), 625 idle wake-ups a minute, 239 MiB idle, scrolls at the display's rate, 304 to 641 ms to show a reply in a long thread | Program, dev Mac, development Electron binary with a mock keychain | baseline |
-| Packaging | Which tool makes the `.dmg`, the Windows installer and the `.deb`, and can CI build them nightly? | cargo-packager 0.11.8 for the `.dmg`, the Windows NSIS installer and, for now, the `.deb`; the tarball is a plain `tar`; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (cargo-packager cannot keep a setuid file or run an install script). Velopack (no `.dmg`, AppImage only on Linux) and cargo-dist (no `.dmg` or `.deb`) rejected. The record is "proposed": the tool stands unless you reopen it, and the identity awaits you (question 5) | CI, three platforms: the `.dmg`, `.deb`, tarball and Windows installer built unsigned from the cookbook window. The `.deb` was installed and removed on a Linux runner, and the Windows installer installed and removed on a Windows runner (file, library and registry checks). Nothing was opened on a display and nothing was run by a person; signing, notarization, the updater, the browser's nested bundles and the Windows `.msi` were not tried | 0014 |
+| Packaging | Which tool makes the `.dmg`, the Windows installer and the `.deb`, and can CI build them nightly? | cargo-packager 0.11.8 for the `.dmg`, the Windows NSIS installer and, for now, the `.deb`; the tarball is a plain `tar`; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (cargo-packager cannot keep a setuid file or run an install script). Velopack (no `.dmg`, AppImage only on Linux) and cargo-dist (no `.dmg` or `.deb`) rejected. The record is "proposed": the tool stands unless you reopen it, and the identity awaits you (question 5) | CI, three platforms: the `.dmg`, `.deb`, tarball and Windows installer built unsigned from the cookbook window. The `.deb` was installed and removed on a Linux runner, and the Windows installer installed and removed on a Windows runner (file, library and registry checks). Nothing was opened on a display and nothing was run by a person; signing, notarization, the updater and the browser's nested bundles were not tried, and the Windows `.msi` was built and its contents listed but not installed | 0014 |
 
 ## c. Decisions for the maintainer
 
@@ -228,9 +228,9 @@ did.
 The record is "proposed": the tool is a design call from the trial and stands unless you reopen it, and the identity is
 yours to confirm. The trial uses placeholders: the identifier `example.unidex.rust-preview.trial`, the display name
 "UniDeX Rust Preview", and "UniDeX contributors" as publisher, author, copyright and Debian maintainer. None carries a
-personal name, handle or domain. Five parts need you. The first four have no deadline stronger than "before a build is
-released or signed"; part (v) is needed before M1's first signed nightly (design 6), so the whole question sits before
-M1 is planned.
+personal name, handle or domain. Five parts need you. Parts (i), (iii) and (iv) have no deadline stronger than "before a build is
+released"; part (ii), the identifier, must be settled before the first signed preview, and part (v) before M1's first
+signed nightly (design 6), so the whole question sits before M1 is planned.
 
 **(i) The display name.** This is the value that sticks. On Windows it names the install folder and the uninstall
 entry (the CI install confirmed both); on macOS it is the app bundle's name. Renaming it after a release leaves the old
@@ -268,8 +268,8 @@ was exercised on the pull request path only when the record was written (decisio
 
 - A. Keep the daily schedule. Cost: hosted runner time on three platforms each day that has a commit; hosted macOS
   runners were often unavailable in M0, so a scheduled run can fail or wait for that reason. Risk: unattended red runs.
-- B. Run only on demand and on pull requests. Turning the schedule off takes a change to one entry in the workflow's
-  triggers. Cost: nobody sees a break until someone starts a run. M1 promises nightly builds (design 6).
+- B. Run only on demand and on pull requests. Turning the schedule off means removing the `schedule:` key and its cron line from the workflow's
+  triggers; the `decide` job's schedule branch is then dead code. Cost: nobody sees a break until someone starts a run. M1 promises nightly builds (design 6).
 
 **(v) Signing identities.** Needed before the first signed nightly, which M1 delivers on macOS (design 6). Decision 0014
 lists what you would supply as repository secrets: for macOS a Developer ID Application certificate (a base64 `.p12`)
@@ -756,7 +756,7 @@ written joined, hyphenated or underscored, so a two-word term whose joined form 
 | Check | What to do | Instructions | About how long |
 |---|---|---|---|
 | The cookbook window | Run `cargo run -p udx-cookbook --example hello_window`; expect a window titled "UniDeX cookbook" with a label and a button that counts clicks | `crates/udx-cookbook/README.md`, "Run an example" | A few minutes, most of it the first build |
-| The trial package | Take a green `nightly` run on the default branch (scheduled or started by hand), or this gate's pull request run, not a run from a fork. Download the artifact `unidex-rust-preview-nightly-unsigned-macos` (about 3.2 MB), unzip it, open the `.dmg`, and drag the app to a scratch folder, not Applications. macOS will refuse to open an unsigned download: it will say it cannot verify the app is free of malware or that it is damaged. If it offers a choice, use System Settings, Privacy & Security, "Open Anyway". A window titled "UniDeX cookbook" with a Count button should open. Afterwards quit it, drag the app to the Trash, eject the disk image and delete the download. Report what macOS said: it is the one result CI cannot give | Decision 0014, "Maintainer's step". Two fallbacks if it only says "damaged" were never tried: `xattr -dr com.apple.quarantine` on your copy, then, if it still refuses, `codesign --force --deep --sign -` on your copy | The record gives none; the build team's guess is about 10 minutes (not measured) |
+| The trial package | Take a green `nightly` run on the default branch (scheduled or started by hand), not a run from a fork. The latest artifacts from Task 14's pull request (13) exist until 2026-11-24; after that, if no scheduled run has built, start one by hand from the workflow's page (manual dispatch). Download the artifact `unidex-rust-preview-nightly-unsigned-macos` (about 3.2 MB), unzip it, open the `.dmg`, and drag the app to a scratch folder, not Applications. macOS will refuse to open an unsigned download: it will say it cannot verify the app is free of malware or that it is damaged. If it offers a choice, use System Settings, Privacy & Security, "Open Anyway". A window titled "UniDeX cookbook" with a Count button should open. Afterwards quit it, drag the app to the Trash, eject the disk image and delete the download. Report what macOS said: it is the one result CI cannot give | Decision 0014, "Maintainer's step". Two fallbacks if it only says "damaged" were never tried: `xattr -dr com.apple.quarantine` on your copy, then, if it still refuses, `codesign --force --deep --sign -` on your copy | The record gives none; the build team's guess is about 10 minutes (not measured) |
 | The platform trial's 14 steps | Input methods, dead keys, press-and-hold, the tray, menus, a second window, open and save dialogs, VoiceOver, quit | `docs/acceptance/hands-on/platform-trial.md`; it needs a separate checkout of commit c6880ec, as that file explains | About 15 minutes plus a first build of a few minutes |
 | The embedded browser | Run the trial app with the real browser on a test page, then type in a form, use an input method, scroll a long page and watch the app's overlay card draw over the page | `docs/acceptance/hands-on/browser-trial.md`; it also needs a separate checkout of commit c6880ec, as that file explains | The build team's earlier guess was 10 to 15 minutes of looking once the app is built, plus a build time that was not estimated |
 
@@ -874,7 +874,8 @@ Each of these would otherwise have shipped (working notes; the first is also a n
 - The Electron start-up figure from a development binary was framed as the shipped app's, and "cold start" was measured
   with a warm cache (Task 15).
 - The nightly workflow fetches two tools at build time without a hash check (an installer plugin and a disk-image
-  script), and the record did not say so until the review (Task 14).
+  script), and the record did not say so until the review; the record also called the identifier the permanent value
+  on Windows although the product name keys the install folder, and one size in it cited the wrong CI job (Task 14).
 
 ### Where effort was wasted
 
@@ -922,7 +923,8 @@ the evaluation harness (8 x 1.0M = 8.0M); two CI tasks, signed nightlies and the
 (0.5M). Total 0.5 + 9.1 + 8.0 + 2.6 + 1.2 + 0.5 = 21.9M, called 22M. It is a cap: M0's sixteen tasks used about 12.9M
 recorded (a lower bound), and the earlier draft of these figures gave 18.3M. If you prefer a lower cap, the earlier
 figures (700k for a code unit, 400k for a document, 900k for a research document and for a CI task) are below the
-highest recorded M0 totals by 125k, 94k, 106k and 167k respectively, so tasks as large as those would stop and report.
+highest recorded M0 totals by 125k, 94k, 106k and 167k respectively, so tasks as large as those would stop and report. The 22M total is also short if a gate report costs what this one's
+first stage did (about 1.15M against the 0.6M allowed): by about 0.5M or more.
 
 ### Pacing
 

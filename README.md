@@ -6,8 +6,8 @@ Windows.
 
 **Status: pre-release, and not usable as an application.** Milestone M0, the foundations, is complete and awaiting the
 maintainer's decisions. It produced a workspace skeleton, CI on three platforms, a privacy gate, a threat model, an
-acceptance checklist, a set of trials with written decisions, and a small cookbook of GPUI examples. The only program
-that exists is `unidex --version` and the example windows. Nothing here chats, runs an agent or edits anything yet.
+acceptance checklist, a set of trials with written decisions, and a small cookbook of GPUI examples. The only user-facing
+programs are `unidex --version` and the example windows. Nothing here chats, runs an agent or edits anything yet.
 
 ## Where to read
 
@@ -21,8 +21,9 @@ that exists is `unidex --version` and the example windows. Nothing here chats, r
 
 ## Build and check
 
-The Rust toolchain is pinned in `rust-toolchain.toml` (1.100.0); `rustup` selects it on its own. These are the checks CI
-runs on macOS, Linux and Windows:
+The Rust toolchain is pinned in `rust-toolchain.toml` (1.100.0); `rustup` selects it on its own. CI runs the tests and the
+examples build on macOS, Linux and Windows, and the other checks on Linux only. The list is the part a contributor
+runs locally; CI also runs a mutation-testing check (on Linux, on the crates it mutates) that is not listed:
 
 ```sh
 cargo fmt --all --check

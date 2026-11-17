@@ -423,7 +423,7 @@ more (decision 0013; design call):
 | Wake-up for routines | launchd | systemd user timer | Task Scheduler |
 | Tray | `tray-icon` (decision 0011) | separate crate; the backend is open at the M0 gate (`docs/build/M0-GATE.md`, question 11) | `tray-icon` (decision 0011); chosen, never run on Windows |
 | Browser | CEF, off-screen (decision 0012) | CEF, off-screen; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | CEF, off-screen, under CEF's bootstrap; the OS web view as a fallback (decision 0012); chosen on headless CI evidence, nothing drawn (`docs/build/M0-GATE.md`, question 20) |
-| Package | signed, notarized `.dmg`, built with cargo-packager (decision 0014) | `.deb` (cargo-packager, then cargo-deb once the browser's setuid helper arrives; decision 0014) and a tarball made separately; AppImage only without the browser; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | NSIS installer built with cargo-packager (decision 0014), signed if a certificate is supplied |
+| Package | signed, notarized `.dmg`, built with cargo-packager (decision 0014, proposed) | `.deb` (cargo-packager, then cargo-deb once the browser's setuid helper arrives; decision 0014) and a tarball made separately; AppImage only without the browser; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | NSIS installer built with cargo-packager (decision 0014), signed if a certificate is supplied |
 
 Known exceptions at design time:
 
@@ -562,9 +562,10 @@ is available if the maintainer turns it on.
 - Screen layouts follow the Electron app's design unless section 7 or `docs/acceptance/CHECKLIST.md` says otherwise.
 
 Settled in M0, so no longer left open: the GPUI source and pin (the `gpui-pre` 0.3.12 snapshot, set once in the
-workspace manifest; decision 0007), the PTY crate (`alacritty_terminal`'s own PTY; decision 0009), the tray crate on
-macOS and Windows (`tray-icon`; decision 0011), and the packaging tool (cargo-packager, with cargo-deb for a `.deb`
-that needs a setuid file; decision 0014, proposed, its identity awaiting confirmation). The Linux tray backend is open
+workspace manifest; decision 0007), the PTY crate (`alacritty_terminal`'s own PTY; decision 0009) and the tray crate on
+macOS and Windows (`tray-icon`; decision 0011). The packaging tool (cargo-packager, with cargo-deb for a `.deb` that
+needs a setuid file; decision 0014) is proposed: it stands unless the maintainer reopens it, pending the maintainer's
+confirmation of the application identity. The Linux tray backend is open
 at the M0 gate: see `docs/build/M0-GATE.md`, question 11. Decision 0007 pinned the GPUI snapshot the widget kit requires
 and deferred the kit itself; whether it is adopted is open at the M0 gate: see `docs/build/M0-GATE.md`, question 23.
 The application identity and signing are open at the M0 gate: see `docs/build/M0-GATE.md`, question 5.
