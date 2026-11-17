@@ -1,0 +1,16 @@
+[package]
+name = "udx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "unidex"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "derive", "error-context", "usage", "help"] }
+udx-core = { path = "../udx-core" }
+
+[dev-dependencies]
+assert_cmd = "2"
