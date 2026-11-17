@@ -23,7 +23,7 @@ dependency graph was run here from `cargo metadata` against the allow list; carg
 | Option | Trade-off |
 |---|---|
 | A. `tray-icon` 0.26.1 (chosen) | One API on all three; maintained (Tauri), widely used; native on macOS and Windows; on Linux either AppIndicator (GTK 3, LGPL system libraries, no click events, an unsound advisory in its tree) or KSNI (no GTK, but the `ksni` crate is Unlicense). |
-| B. `ksni` 0.3.7 directly | Linux only, pure Rust over D-Bus, click events; licence Unlicense, not on the allow list. Still needs a macOS and a Windows crate. |
+| B. `ksni` 0.3.7 directly | Linux only, pure Rust over D-Bus, click events; licence Unlicense, not on the allow list. 0.3.7 was released 2026-10-20 (crates.io API, checked 2026-11-17); the previous releases were 2026-07-15, 2026-06-10, 2026-04-10 and 2025-12-19, so it is actively maintained, with about 2.4 million downloads. Still needs a macOS and a Windows crate. |
 | C. `tray-item` 0.10.0 | Last release 2024-04-07; old Objective-C bindings (`cocoa`, `objc`); GTK or KSNI on Linux. |
 | D. `trayicon` 0.4.1, `tray-indicator` 0.4.2 | Windows only. |
 | E. `system_status_bar_macos` 0.1.3 | macOS only, last release 2023-07-20. |
@@ -53,10 +53,16 @@ dependency graph was run here from `cargo metadata` against the allow list; carg
   emits no click events at all (tray-icon documents it on `TrayIconEvent`): the icon shows its menu and nothing else,
   so there is no popover. Building needs `libgtk-3-dev` (CI installs it). (b): compiled in CI only.
 - Linux, KSNI backend: `ksni` 0.3.7 publishes a StatusNotifierItem over D-Bus (`zbus` 5) on a worker thread, with no
-  GTK; it emits left- and middle-click activation, without the icon's position (the protocol has none), and the host
-  handles right clicks itself. It needs a StatusNotifierItem host: KDE Plasma and most other desktops have one; GNOME
+  GTK; it emits left- and middle-click activation. `tray-icon`'s backend implements `activate(x, y)` and
+  `secondary_activate(x, y)` and passes the host's x and y on as the click's `position`
+  (`tray-icon-0.26.1/src/platform_impl/ksni/mod.rs` lines 171 to 192), but it sets the icon rectangle to the default,
+  so there is a position hint and no rectangle. Some hosts, and Wayland sessions, may pass 0,0; reliability across
+  hosts is not verified. The host handles right clicks itself. It needs a StatusNotifierItem host: KDE Plasma and most other desktops have one; GNOME
   shows these icons only with the AppIndicator extension (Ubuntu enables it by default). Not verified here.
   (b): type-checked in CI only.
+  With no status-notifier host running, the trial did not check what the icon or the crate does (not verified).
+  Proposal, not tested: the application detects that no host owns the `org.kde.StatusNotifierWatcher` D-Bus name (or
+  that creating the icon fails) and falls back to a normal window, so the app never depends on the tray being visible.
 - Licences and advisories of the trial's graph against `deny.toml`:
   - Default (AppIndicator) backend: every crate's licence is allowed (the new ones are MIT, Apache-2.0, ISC and
     combinations). But it brings `glib` 0.18.5, which has **RUSTSEC-2024-0429** (unsound, `glib::VariantStrIter`;
@@ -82,7 +88,7 @@ DBusMenu part is the largest. Not written in the trial.
 ## Decision
 
 Use `tray-icon` 0.26.1, pinned exactly, for macOS and Windows. On Linux use its **KSNI backend** (pure Rust, no GTK,
-click events), which needs the maintainer to add `Unlicense` to the allow list in `deny.toml`. If the maintainer
+click events with a position hint), which needs the maintainer to add `Unlicense` to the allow list in `deny.toml`. If the maintainer
 declines, the Linux tray is written as a small StatusNotifierItem over `zbus` (option F) rather than taking the
 AppIndicator backend, whose `glib` 0.18.5 fails `unsound = "all"` and which brings GTK 3 and LGPL system libraries
 for an icon that cannot report a click. Until one of the two lands, the Linux tray is a section 8 exception.
@@ -96,8 +102,10 @@ allow list is.
 
 - One tray API across platforms; the popover is a GPUI `WindowKind::PopUp` window the app positions from the icon's
   rectangle on macOS and Windows (on macOS through AppKit's display arrangement, decision 0010).
-- On Linux the tray cannot place a popover: KSNI gives no position, and on Wayland no client can place a window. The
-  Linux design is the icon's menu, or a click that opens a normal window.
+- On Linux the tray cannot place a popover reliably: KSNI gives a position hint from the host (possibly 0,0, and no
+  icon rectangle), and on Wayland no client can place a window. Treat the Linux tray as menu-first: the icon's menu,
+  or a click that opens a normal window. This still follows, because a hint that may be 0,0 cannot anchor a window,
+  though a window placed from the hint on X11 hosts that fill it in is possible and untried.
 - GNOME users need the AppIndicator extension to see any tray icon; the app must work without one.
 - `tray-icon`'s Linux backends are crate features that can change between releases; every upgrade rechecks the
   backend, its licence and its advisories.
@@ -111,7 +119,8 @@ allow list is.
 
 - Windows: the icon, the click and its rectangle were not run anywhere (CI has no visible notification area and does
   not open windows).
-- Linux: neither backend was run; which desktops show a KSNI icon, and how either backend behaves with no tray host.
+- Linux: neither backend was run; which desktops show a KSNI icon, whether hosts pass real click coordinates, and how
+  either backend behaves with no tray host (proposed fallback above, untested).
 - macOS: a person clicking the icon and the right-click menu (checklist step 8), and whether GPUI's timers keep running
   while that menu is open.
 - Whether the AppIndicator backend's code paths reach the unsound `glib` function.

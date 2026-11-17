@@ -52,7 +52,8 @@ The trial answers three questions the design left open.
 
 The snapshot carries the application on macOS with the gaps and rules listed below; Linux and Windows have the same
 platform-layer coverage in source but are unverified beyond compiling (CI) and GPUI-level tests. The tray comes from
-`tray-icon` (decision 0011). Section 8's screen-reader exception narrows to Linux and Windows. The application
+`tray-icon` (decision 0011). Section 8's screen-reader exception narrows to Linux and Windows only once the maintainer has used VoiceOver on the macOS
+app (checklist step 13); until then macOS is verified through the OS accessibility API only. The application
 supplies, itself: link delivery and the single-instance hand-off on Linux and Windows, in-window menus on Linux and
 Windows, a macOS quit gate that also covers the Dock and log-out, and the global display arrangement on macOS.
 
@@ -68,21 +69,21 @@ Linux has two columns because GPUI has a separate backend for each display serve
 | Dead keys | works at the text-input level (a/os) [E4]; on the keyboard (c) step 6 | (b) xkb compose [E8] | (b) xkb compose [E9] | (b) [E7] |
 | Cancelled composition | works (a/os) [E5]; Escape in an input method (c) step 5 | (b) [E8] | (b) [E9] | (b) [E7] |
 | Key repeat, press-and-hold | (b), (c) step 7 [E7a] | (b) X server autorepeat [E8] | (b) GPUI's own repeat [E9] | (b) [E7] |
-| Bound shortcuts consume keys, unbound keys become text | works (a/gpui) [E1] | (b) same GPUI core | (b) same GPUI core | (b) same GPUI core |
-| Tab and Shift-Tab between fields | works (a/gpui) [E10] | (b) same GPUI core | (b) same GPUI core | (b) same GPUI core |
+| Bound shortcuts consume keys, unbound keys become text | works (a/gpui) [E1] | (b) same GPUI core: `Window::dispatch_keystroke` and the key bindings are platform independent (`gpui-pre-0.3.12/src/window.rs`) | (b) same | (b) same |
+| Tab and Shift-Tab between fields | works (a/gpui) [E10] | (b) same GPUI core: `Window::focus_next` and `focus_prev` (`gpui-pre-0.3.12/src/window.rs`) | (b) same | (b) same |
 | Tray icon created and removed | works (a/os), decision 0011 | (b) AppIndicator or KSNI | (b) same | (b) |
-| Tray click reaches the app, with the icon's position | works (a/os) | missing with AppIndicator (no click events); KSNI: click, no position | same as X11 | (b), click and position (a self-check exists for a Windows tester) |
+| Tray click reaches the app, with the icon's position | works (a/os): a synthetic mouse event sent to the tray crate's own view, not a click by a person (checklist step 8) | missing with AppIndicator (no click events); KSNI: click with a host-supplied position hint and no icon rectangle, reliability across hosts not verified [E24] | same as X11; the hint may be 0,0 [E24] | (b), click and position (a self-check exists for a Windows tester) |
 | Popover window placed under the icon | works (a/os) [E15]; seen by a person (c) step 8 | (b) override-redirect window [E15] | missing: a client cannot place a window [E15] | (b) [E15] |
 | Native application menu with shortcuts | works (a/os) [E11]; seen by a person (c) step 9 | missing natively: the app draws it [E12] | missing natively [E12] | missing natively [E12] |
-| Shortcuts through the keymap | works (a/gpui) | (b) same GPUI core | (b) same GPUI core | (b) same GPUI core |
-| Second window: open, list, activate, close | works (a/gpui) [E13] | (b) | (b) | (b) |
-| Window on a chosen display | works (a/gpui) [E13] | (b) | missing (compositor decides) | (b) |
-| Global position of displays | missing in GPUI: every display's origin is 0,0 [E13] | (b) not checked | n/a | (b) not checked |
-| Window state for restoring | broken if used naively, works with a correction (a/gpui) [E14] | (b) | (b) | (b) |
+| Shortcuts through the keymap | works (a/gpui) | (b) same GPUI core (`Window::dispatch_keystroke`) | (b) same | (b) same |
+| Second window: open, list, activate, close | works (a/gpui) [E13] | (b) `open_window`, `active_window`, `window_stack` (`gpui-pre-linux-0.3.12/src/linux/x11/client.rs`) | (b) the same three (`wayland/client.rs`) | (b) `open_window` and `active_window` (`gpui-pre-windows-0.3.12/src/platform.rs`); no `window_stack` found there, not checked |
+| Window on a chosen display | works (a/gpui) [E13] | (b) `display_id` handled in `x11/window.rs` (line 484) | missing (compositor decides) | (b) `display_id` handled at window creation in `gpui-pre-windows-0.3.12/src/window.rs` (line 520) |
+| Global position of displays | missing in GPUI: every display's origin is 0,0 [E13] | not checked | n/a | not checked |
+| Window state for restoring | broken if used naively, works with a correction (a/gpui) [E14] | (b) `window_bounds` in `x11/window.rs`; nothing else checked | (b) `window_bounds` in `wayland/window.rs`; nothing else checked | (b) `window_bounds` in `gpui-pre-windows-0.3.12/src/window.rs`; nothing else checked |
 | Last window closed, quit, quit gate | (b) gate gaps [E16] | (b) [E16] | (b) [E16] | (b) [E16] |
 | Open and save dialogs | (b) native panels [E17], (c) steps 11-12 | (b) portal only [E17] | (b) portal only [E17] | (b) shell dialogs [E17] |
-| `unidex://` declared | works: Info.plist valid (`plutil -lint`) [E18] | desktop entry (CI runs `desktop-file-validate`) [E18] | same | registry keys documented [E18] |
-| A link reaches the running app | works at the delegate entry (a/os) [E19]; real link (c) optional | missing in GPUI: the app reads its arguments [E20] | same | same |
+| `unidex://` declared | metadata built and linted, not registered (`plutil -lint` shows only that the property list parses); registration is optional checklist step (c) [E18] | desktop entry written, untested (CI runs `desktop-file-validate`, a syntax check) [E18] | same | `.reg` file written with a hard-coded install path, untested [E18] |
+| A link reaches the running app | works at the app delegate's `application:openURLs:` entry (a/os), not through the OS's launch services [E19]; real link (c) optional | missing in GPUI: the app reads its arguments [E20] | same | same |
 | Second launch hands the link over | (b) LaunchServices does it for a bundle; (c) optional | missing [E20] | missing [E20] | missing [E20] |
 | Accessibility tree: roles and labels | works (a/os) [E21]; VoiceOver itself (c) step 13 | (b) AT-SPI [E23] | (b) AT-SPI [E23] | (b) UI Automation [E22] |
 | A text field's contents | works (a/os): value always; characters and caret only with text runs [E21] | (b) | (b) | (b) |
@@ -156,7 +157,8 @@ Linux has two columns because GPUI has a separate backend for each display serve
   `IFileOpenDialog` and `IFileSaveDialog` (`platform.rs`). Never opened by the self-check.
 - **E18** `spikes/platform/bundle/`: `Info.plist` with `CFBundleURLTypes` (passes `plutil -lint`), a desktop entry
   with `MimeType=x-scheme-handler/unidex;` and `Exec=... %u`, and the `HKCU\Software\Classes\unidex` keys with
-  `URL Protocol` and `shell\open\command`. Nothing was registered.
+  `URL Protocol` and `shell\open\command`. Nothing was registered, so whether any OS honours the scheme is not verified. The Windows `.reg` file carries a
+  hard-coded install path and is untested; the Linux desktop entry is untested.
 - **E19** Calling the app delegate's `application:openURLs:` delivered `unidex://thread/42?from=selfcheck` to the
   callback registered with `Application::on_open_urls` (which must be registered before `run`).
 - **E20** Linux and Windows store the `on_open_urls` callback and never call it (`linux/platform.rs`
@@ -177,6 +179,11 @@ Linux has two columns because GPUI has a separate backend for each display serve
   `WM_GETOBJECT` (`events.rs` `handle_wm_getobject`) as a UI Automation provider.
 - **E23** Linux: `accesskit_unix::Adapter` for both X11 and Wayland windows (`x11/window.rs`, `wayland/window.rs`
   `a11y_init`), over AT-SPI on D-Bus, active when the AT-SPI bus reports it is enabled (`accesskit_unix` `context.rs`).
+- **E24** Tray position on Linux, `tray-icon-0.26.1/src/platform_impl/ksni/mod.rs`: the KSNI backend implements
+  `activate(x, y)` and `secondary_activate(x, y)` (lines 171 to 192), and `emit_click` sends the host's x and y as
+  `position` in `TrayIconEvent::Click`, with `rect: Rect::default()`. So a click carries a position hint from the
+  host but no icon rectangle. Whether hosts fill the hint in reliably, and whether Wayland sessions pass 0,0, was not
+  verified.
 
 ### Other platform features (item 8, all (b) unless said)
 
@@ -200,16 +207,17 @@ hands-on checklist confirms or corrects the macOS rows marked (c).
 ## Consequences
 
 - **Section 8, screen readers.** Replace "GPUI's support is unconfirmed ... an exception on all platforms" with: on
-  macOS GPUI publishes an accessibility tree through AccessKit (roles, labels, values, focus) and the app is
-  responsible for it; on Linux (AT-SPI) and Windows (UI Automation) the same code is implemented but unverified, and
-  stays an exception until a person runs Orca and Narrator. If the maintainer's VoiceOver step fails, macOS goes back
-  into the exception with the failure noted.
+  macOS the tree is verified through the OS accessibility API (named window, labelled button, text fields with
+  contents when text runs are published; plain strings and styled text are not published); use with a screen reader
+  is pending checklist step 13, and the exception narrows only once that step passes. On Linux (AT-SPI) and Windows
+  (UI Automation) the same code is implemented but unverified, and stays an exception until a person runs Orca and
+  Narrator. If the VoiceOver step fails, macOS stays in the exception with the failure noted.
 - **Rules the app takes on for accessibility:** all visible text goes through `text!` (or `Text::new`) or an
   `aria_label`; every control has an id, a role and a label, and its visible label uses `Text::new_inaccessible` so it
   is not read twice; text fields publish `TextRun` children (the kit's input does); styled text, the markdown view
   included, publishes nodes of its own, because `StyledText` publishes nothing. These belong in the cookbook.
-- **Section 8, other exceptions to add:** the Linux tray shows a menu, not a popover, and no popover at all on
-  Wayland (decision 0011); Linux file dialogs need xdg-desktop-portal; Linux and Windows have no native menu bar (the
+- **Section 8, other exceptions to add:** the Linux tray is menu-first: a click's position is only a host-supplied hint, so
+  a popover cannot be placed reliably on X11 and not at all on Wayland (decision 0011); Linux file dialogs need xdg-desktop-portal; Linux and Windows have no native menu bar (the
   app draws one); macOS Quit from the Dock and log-out bypass the quit gate until the app adds
   `applicationShouldTerminate:` handling; Windows input methods go through IMM32 only.
 - **Work the app owns:** link delivery from arguments and a single-instance hand-off on Linux and Windows; mapping a
