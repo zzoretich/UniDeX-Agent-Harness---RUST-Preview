@@ -314,37 +314,51 @@ early: every unproven technology is tried in M0, and a real window exists from M
 `docs/acceptance/CHECKLIST.md` decides the fate of each of the Electron app's 346 acceptance items; the table below
 sums it per source section.
 
+Design calls that change or drop features:
+
+- The setup wizard that downloads Node, uv and the CLIs is dropped: the app is one binary, and onboarding offers a
+  provider, a key or a local model (M11).
+- Host plugins, hooks, the status line and edits to host instruction files are dropped (non-goal; none).
+- The "chat over a live terminal" view is replaced by ACP sessions (M5).
+- Cost tracking comes from provider usage data, not from host transcripts (M2).
+- The Brain Map is drawn from links our own index finds; the external graph builder is not carried (M9). (Design call.)
+- Agents, skills and teams are UniDeX's own; they can be imported from other tools' folders and are never mirrored
+  back (M10).
+- Connectors are MCP servers for our engine (M10).
+- The Computer pane is embedded Chromium (M7).
+- The tray popover, command palette, quick capture and tour carry over (M4 to M11).
+
 | source section                                         | items | carry | change | drop | milestones         |
 |--------------------------------------------------------|-------|-------|--------|------|--------------------|
-| Install paths                                          | 3     | 1     | 2      | 0    | M4                 |
+| Install paths                                          | 3     | 1     | 2      | 0    | M4, M5, M6         |
 | The app                                                | 12    | 4     | 3      | 5    | M4, M11            |
 | Files                                                  | 27    | 25    | 2      | 0    | M8                 |
-| Settings                                               | 16    | 5     | 9      | 2    | M4, M5, M6         |
+| Settings                                               | 16    | 4     | 10     | 2    | M4, M5, M6, M10    |
 | Config (both hosts)                                    | 5     | 0     | 3      | 2    | M1, M6             |
-| Pulse                                                  | 17    | 9     | 7      | 1    | M4, M6             |
+| Pulse                                                  | 17    | 9     | 7      | 1    | M4, M6, M9         |
 | To-Do                                                  | 8     | 8     | 0      | 0    | M8                 |
-| Proposals                                              | 9     | 7     | 2      | 0    | M6                 |
+| Proposals                                              | 9     | 6     | 3      | 0    | M6                 |
 | Notifications                                          | 9     | 7     | 2      | 0    | M6                 |
 | Agent teams (both hosts)                               | 4     | 1     | 3      | 0    | M10                |
 | Agent Teams tab (both hosts)                           | 11    | 8     | 3      | 0    | M10                |
-| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M4                 |
+| Status line (both hosts)                               | 7     | 1     | 1      | 5    | M6, M10            |
 | Spaces / Runs                                          | 23    | 13    | 9      | 1    | M8                 |
-| Brain                                                  | 28    | 20    | 7      | 1    | M3, M9             |
+| Brain                                                  | 28    | 20    | 7      | 1    | M9                 |
 | Routines                                               | 11    | 6     | 3      | 2    | M6                 |
 | Skills (both hosts)                                    | 10    | 2     | 3      | 5    | M10                |
-| Connectors (both hosts)                                | 17    | 5     | 5      | 7    | M10                |
+| Connectors (both hosts)                                | 17    | 4     | 6      | 7    | M10                |
 | Agents (both hosts)                                    | 8     | 0     | 3      | 5    | M10                |
 | Cross-review and handoff (both hosts; each run spends) | 3     | 0     | 3      | 0    | M5                 |
 | Codex host                                             | 22    | 0     | 8      | 14   | M3, M5, M6, M8, M9 |
 | Vault chat (per provider)                              | 6     | 0     | 6      | 0    | M4                 |
-| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M2, M4, M5, M10    |
-| Code                                                   | 27    | 12    | 9      | 6    | M4, M5, M8         |
+| Sessions (per host; each turn spends)                  | 17    | 7     | 10     | 0    | M4, M5             |
+| Code                                                   | 27    | 12    | 10     | 5    | M4, M5, M8, M10    |
 | Computer pane (per host; each turn spends)             | 29    | 20    | 7      | 2    | M7                 |
 | Launch sequence                                        | 6     | 0     | 4      | 2    | M6, M11            |
 | Guided tour                                            | 6     | 5     | 1      | 0    | M11                |
 | Telemetry switch                                       | 2     | 0     | 0      | 2    | none               |
-| Review readiness                                       | 3     | 2     | 1      | 0    | M4, M6             |
-| **total**                                              | 346   | 168   | 116    | 62   |                    |
+| Review readiness                                       | 3     | 1     | 2      | 0    | M4, M6             |
+| **total**                                              | 346   | 164   | 121    | 61   |                    |
 
 ## 8. Platforms
 
