@@ -1,0 +1,26 @@
+# Task 10 trial: a streaming chat view and a terminal on the pinned GPUI snapshot.
+# Throwaway code. This is its own workspace, NOT a member of the repository's workspace,
+# and it has its own Cargo.lock. See docs/decisions/0008-chat-and-terminal-trial.md and
+# docs/decisions/0009-pty-crate.md.
+#
+#   core/  no GPUI: message generator, incremental markdown, statistics, key encoding,
+#          the two PTY backends, a terminal session, and the `headless-check` binary CI runs.
+#   app/   GPUI: the `chat` and `term` binaries with their scripted scenarios.
+
+[workspace]
+resolver = "3"
+members = ["core", "app"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+# Copied exactly from the repository's root Cargo.toml (decision 0007).
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+
+[profile.release]
+debug = "line-tables-only"
