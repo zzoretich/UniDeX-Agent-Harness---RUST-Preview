@@ -1,3 +1,0 @@
-# Local build output and the frames and logs the CI scripts write.
-target/
-out/
