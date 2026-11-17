@@ -2,12 +2,8 @@
 //!
 //! ```sh
 //! spike-smoke [--frames N] [--timeout-s S] [--hold-s S] [--expect-marker] [--expect-sandbox]
-//!             [--gpu-info] -- <helper program> [helper args...]
+//!             -- <helper program> [helper args...]
 //! ```
-//!
-//! `--gpu-info` asks the engine, after the process tree is read, for its own account of the GPU
-//! process (DevTools `SystemInfo.getInfo`: whether it reports itself sandboxed, the GL in use)
-//! and prints it; it is reported, not checked.
 //!
 //! `--hold-s` keeps the helper running that long after the checks, so a CI step can inspect its
 //! sub-processes. Before shutting the helper down, the smoke check prints its process tree with
@@ -45,7 +41,6 @@ fn main() -> ExitCode {
     let expect_marker = own.iter().any(|a| a == "--expect-marker");
     let hold = Duration::from_secs(value("--hold-s").unwrap_or(0));
     let expect_sandbox = own.iter().any(|a| a == "--expect-sandbox");
-    let gpu_info = own.iter().any(|a| a == "--gpu-info");
     let Some(program) = rest.get(1) else {
         eprintln!("smoke: usage: spike-smoke [options] -- <helper program> [helper args...]");
         return ExitCode::from(2);
@@ -158,6 +153,16 @@ fn main() -> ExitCode {
             .count();
         let renderers = tree.iter().filter(|p| p.kind == "renderer").count();
         let ok = renderers > 0 && sandboxed == required.len();
+        // Name what failed, so the job's failure says it without reading the whole list.
+        for p in required.iter().filter(|p| p.sandboxed != Some(true)) {
+            eprintln!(
+                "smoke: required but not sandboxed: {} {} ({})",
+                p.kind, p.pid, p.sandbox_detail
+            );
+        }
+        if renderers == 0 && exited.is_none() {
+            eprintln!("smoke: required but not sandboxed: no renderer was found");
+        }
         eprintln!(
             "smoke: sandbox: {} processes, {} required to be sandboxed, {sandboxed} of them \
              sandboxed, {renderers} renderers, {} not required; all required sandboxed: {ok}",
@@ -167,43 +172,6 @@ fn main() -> ExitCode {
         );
         ok
     };
-    if gpu_info && exited.is_none() {
-        // Chromium's own account of its GPU process (`SystemInfo.getInfo`), asked only after the
-        // tree was read, so the sandbox check sees the processes the page needed and no more.
-        let id = browser.devtools("SystemInfo.getInfo", serde_json::json!({}));
-        let until = Instant::now() + Duration::from_secs(10);
-        let mut reply = None;
-        while let Some(left) = until.checked_duration_since(Instant::now()) {
-            match rx.recv_timeout(left) {
-                Ok(BrowserEvent::DevTools(message)) if message["id"].as_u64() == Some(id) => {
-                    reply = Some(message);
-                    break;
-                }
-                Ok(_) => {}
-                Err(_) => break,
-            }
-        }
-        match reply {
-            Some(m) if m.get("error").is_some() => {
-                eprintln!("smoke: gpu (SystemInfo.getInfo): error {}", m["error"])
-            }
-            Some(m) => {
-                let aux = &m["result"]["gpu"]["auxAttributes"];
-                let status = &m["result"]["gpu"]["featureStatus"];
-                eprintln!(
-                    "smoke: gpu (SystemInfo.getInfo): sandboxed={} in_process_gpu={} gl_renderer={} \
-                     gl_implementation={} gpu_compositing={} webgl={}",
-                    aux["sandboxed"],
-                    aux["inProcessGpu"],
-                    aux["glRenderer"],
-                    aux["glImplementationParts"],
-                    status["gpu_compositing"],
-                    status["webgl"]
-                );
-            }
-            None => eprintln!("smoke: gpu (SystemInfo.getInfo): no reply within 10 s"),
-        }
-    }
     browser.shutdown();
     let (clean_exit, exit) = browser
         .exit()
