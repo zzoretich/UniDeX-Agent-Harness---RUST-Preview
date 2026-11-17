@@ -90,8 +90,14 @@ ran); **not verified**.
 ## c. Decisions for the maintainer
 
 27 decisions, in three groups. Each entry gives the question, why it arises, the options with their cost and risk, the
-build team's recommendation, and what happens if there is no answer. The design carries a one-line pointer to each
-question where it would change.
+build team's recommendation, and what happens if there is no answer. Where a question would change one of the design
+sections this gate updated (5.7, 5.8, 8, 9 and 13), the design carries a one-line pointer to it.
+
+| Group | Questions |
+|---|---|
+| Before M1 is planned | 1 to 5 |
+| Before the milestone that needs it | 6 to 22 |
+| Whenever convenient | 23 to 27 |
 
 Changes the design already took (they settle what it left open and contradict nothing): the PTY crate (5.7), how
 browser frames travel and CEF on Windows (5.8), what "CI-verified" covers in decision 0013's words (8), the tray
