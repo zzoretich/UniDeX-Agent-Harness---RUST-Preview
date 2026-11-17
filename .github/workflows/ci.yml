@@ -1,0 +1,245 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Pushes to main are never cancelled: the privacy range of a later push
+  # starts where the earlier one ended.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Caching is added when GPUI arrives; the workspace is small until then.
+#
+# Runner labels are fixed (never -latest). Source: the runner-images README
+# (github.com/actions/runner-images), general-availability table:
+#   ubuntu-26.04 (Ubuntu LTS), macos-26 (Apple silicon), windows-2025.
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    steps:
+      # Before checkout, so line endings never change file contents.
+      - name: Keep line endings as committed
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: Test
+        shell: bash
+        run: cargo test --workspace --locked
+
+  deny:
+    name: deny
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny@0.21.0
+      - name: Check licences, bans, advisories and sources
+        run: cargo deny check
+
+  audit:
+    name: audit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit@0.23.0
+      - name: Audit the lockfile
+        run: cargo audit
+
+  mutants:
+    name: mutants
+    # Pull requests only. The job always runs so the required check reports;
+    # it skips the work when the diff does not touch the mutated crates.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    # Generous: a full local run did not finish in over an hour on 2 jobs.
+    timeout-minutes: 300
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide whether the diff touches the mutated crates
+        id: changed
+        shell: bash
+        run: |
+          set -eu
+          files="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          run=false
+          while IFS= read -r f; do
+            case "$f" in
+              crates/udx-core/*|xtask/*) run=true ;;
+            esac
+          done <<EOF
+          $files
+          EOF
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          echo "touches udx-core or xtask: ${run}"
+      - name: Install the pinned toolchain
+        if: steps.changed.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -eu
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: Install cargo-mutants
+        if: steps.changed.outputs.run == 'true'
+        run: cargo install --locked cargo-mutants@27.1.0
+      - name: Mutation tests
+        if: steps.changed.outputs.run == 'true'
+        run: cargo mutants -p udx-core -p xtask --no-shuffle -j 2
+
+  privacy:
+    name: privacy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      BASE_REF: ${{ github.base_ref }}
+      PUSH_BEFORE: ${{ github.event.before }}
+      HEAD_SHA: ${{ github.sha }}
+      GITLEAKS_VERSION: 8.30.1
+      # SHA-256 of gitleaks_8.30.1_linux_x64.tar.gz, from the checksums file
+      # published with the v8.30.1 release.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup show active-toolchain || rustup toolchain install
+          cargo --version
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -eu
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --proto '=https' --tlsv1.2 -sSfL -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/gitleaks"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/gitleaks" gitleaks
+          echo "${RUNNER_TEMP}/gitleaks" >> "$GITHUB_PATH"
+      - name: Privacy scan of the whole tree
+        shell: bash
+        env:
+          CI: "1"
+        run: cargo xtask privacy --all
+      - name: Work out the commit range
+        id: range
+        shell: bash
+        run: |
+          set -eu
+          range=""
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            range="origin/${BASE_REF}..HEAD"
+          elif [ "${EVENT_NAME}" = "push" ]; then
+            # An all-zero "before" (new branch) has no range to scan.
+            case "${PUSH_BEFORE}" in
+              ""|*[!0]*) [ -n "${PUSH_BEFORE}" ] && range="${PUSH_BEFORE}..${HEAD_SHA}" ;;
+            esac
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+          echo "commit range: ${range:-none}"
+      - name: Privacy scan of the commit range
+        if: steps.range.outputs.range != ''
+        shell: bash
+        env:
+          CI: "1"
+          RANGE: ${{ steps.range.outputs.range }}
+        run: cargo xtask privacy --range "${RANGE}"
+      - name: Secret scan of the commit range
+        if: steps.range.outputs.range != ''
+        shell: bash
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: |
+          gitleaks git --no-banner --redact --config .gitleaks.toml \
+            --log-opts="${RANGE}" .
+      - name: Flag changes to the privacy exemptions
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -eu
+          files="$(git diff --name-only "origin/${BASE_REF}...HEAD")"
+          while IFS= read -r f; do
+            if [ "$f" = "privacy-allow.toml" ]; then
+              echo "::warning file=privacy-allow.toml::This pull request changes privacy-allow.toml. Review every new exemption."
+            fi
+          done <<EOF
+          $files
+          EOF
