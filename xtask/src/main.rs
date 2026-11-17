@@ -44,6 +44,9 @@ struct PrivacyArgs {
     /// Fail with exit 2 when there is no local term list.
     #[arg(long)]
     require_local: bool,
+    /// With --stdin: clean the text as a git commit message file first.
+    #[arg(long)]
+    git_message: bool,
     /// Print findings as a JSON array.
     #[arg(long)]
     json: bool,
@@ -66,6 +69,7 @@ fn main() -> ExitCode {
                 mode,
                 require_local: a.require_local,
                 json: a.json,
+                git_message: a.git_message,
             });
             ExitCode::from(code as u8)
         }

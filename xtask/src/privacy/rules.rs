@@ -46,13 +46,29 @@ static EMAIL: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}").unwrap()
 });
 
-// A home folder: the account name is restricted to plain name characters, so
-// placeholders such as a shell variable or an angle-bracket name never match.
-static HOME_UNIX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:^|[^A-Za-z0-9._~-])(?P<p>/(?:Users|home)/(?P<n>[A-Za-z0-9._-]+)/)").unwrap()
+// Characters that never belong to an account name: separators, whitespace and
+// placeholder or syntax characters.
+const NAME_STOP: &str = r#"/\\\s<>%$:{}*?"'|,;()\[\]=&#`"#;
+
+static HOME_UNIX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"(?i)/(?:users|home)/([^{NAME_STOP}]+)")).unwrap());
+// With a following backslash the name may hold single spaces.
+static HOME_WINDOWS_SPACED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"(?i)[a-z]:\\{{1,2}}users\\{{1,2}}([^{NAME_STOP}]+(?: [^{NAME_STOP}]+)*)\\"
+    ))
+    .unwrap()
 });
-static HOME_WINDOWS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(?P<p>[a-z]:\\{1,2}Users\\{1,2}(?P<n>[A-Za-z0-9._-]+)\\)").unwrap()
+static HOME_WINDOWS_PLAIN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"(?i)[a-z]:\\{{1,2}}users\\{{1,2}}([^{NAME_STOP}]+)"
+    ))
+    .unwrap()
+});
+static URL_SCHEME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([A-Za-z][A-Za-z0-9+.-]*)://").unwrap());
+static RETINA: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)@[0-9]+x\.(?:png|jpe?g|gif|webp|svg|ico|icns|pdf)$").unwrap()
 });
 
 static NUMBER_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9]+(?:\.[0-9]+)*").unwrap());
@@ -61,13 +77,28 @@ static PRIVATE_HOST: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(?:[a-z0-9-]+\.)+ts\.net\b").unwrap());
 
 static SESSION_LINK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)claude\.ai/(?:code/session_[A-Za-z0-9_-]*|code/artifact/[^\s)>\]]*|artifact/[^\s)>\]]*)")
+    Regex::new(r#"(?i)claude\.ai/(?:code/session_[A-Za-z0-9_-]*|code/artifact/[^\s)>\]"'`,]*|artifact/[^\s)>\]"'`,]*)"#)
         .unwrap()
 });
 
-const PLACEHOLDER_HOMES: [&str; 7] = ["runner", "you", "me", "user", "username", "name", "example"];
+const PLACEHOLDER_HOMES: [&str; 11] = [
+    "runner",
+    "runneradmin",
+    "you",
+    "me",
+    "user",
+    "username",
+    "name",
+    "example",
+    "shared",
+    "public",
+    "default",
+];
 
 fn email_allowed(m: &str) -> bool {
+    if RETINA.is_match(m) {
+        return true;
+    }
     let m = m.to_ascii_lowercase();
     if m.ends_with("@users.noreply.github.com")
         || m == "noreply@anthropic.com"
@@ -82,7 +113,75 @@ fn email_allowed(m: &str) -> bool {
 }
 
 fn home_allowed(name: &str) -> bool {
-    PLACEHOLDER_HOMES.contains(&name.to_ascii_lowercase().as_str())
+    PLACEHOLDER_HOMES.contains(&name.trim().to_lowercase().as_str())
+}
+
+/// True when the match sits inside a URL whose scheme is not `file`.
+fn inside_url(line: &str, start: usize) -> bool {
+    let token_start = line[..start].rfind(char::is_whitespace).map_or(0, |i| {
+        i + line[i..].chars().next().map_or(1, char::len_utf8)
+    });
+    URL_SCHEME
+        .captures_iter(&line[token_start..start])
+        .any(|c| !c[1].eq_ignore_ascii_case("file"))
+}
+
+/// Home paths on one line. Matches may overlap, so each search resumes one
+/// character after the previous match started.
+fn home_matches(line: &str, out: &mut Vec<(RuleId, String)>) {
+    for re in [&*HOME_UNIX, &*HOME_WINDOWS_SPACED] {
+        let mut pos = 0;
+        while pos <= line.len() {
+            let Some(caps) = re.captures_at(line, pos) else {
+                break;
+            };
+            let whole = caps.get(0).unwrap();
+            let name = caps.get(1).unwrap();
+            // The spaced Windows form ends at the backslash; keep it out of the text.
+            let trimmed = name.as_str().trim_end_matches('.');
+            if trimmed.is_empty() {
+                pos = whole.start() + 1;
+                continue;
+            }
+            let end = name.start() + trimmed.len();
+            if !home_allowed(trimmed) && !inside_url(line, whole.start()) {
+                out.push((RuleId::HomePath, line[whole.start()..end].to_string()));
+            }
+            pos = whole.start()
+                + line[whole.start()..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+        }
+    }
+    // Windows path whose name is not followed by a backslash.
+    let mut pos = 0;
+    while pos <= line.len() {
+        let Some(caps) = HOME_WINDOWS_PLAIN.captures_at(line, pos) else {
+            break;
+        };
+        let whole = caps.get(0).unwrap();
+        let rest = &line[whole.end()..];
+        let covered_by_spaced = rest.starts_with('\\')
+            || line[whole.end()..].starts_with(' ')
+                && HOME_WINDOWS_SPACED
+                    .captures_at(line, whole.start())
+                    .is_some_and(|c| c.get(0).unwrap().start() == whole.start());
+        let name = caps[1].trim_end_matches('.');
+        if !covered_by_spaced
+            && !name.is_empty()
+            && !home_allowed(name)
+            && !inside_url(line, whole.start())
+        {
+            let end = caps.get(1).unwrap().start() + name.len();
+            out.push((RuleId::HomePath, line[whole.start()..end].to_string()));
+        }
+        pos = whole.start()
+            + line[whole.start()..]
+                .chars()
+                .next()
+                .map_or(1, char::len_utf8);
+    }
 }
 
 fn private_v4(parts: &[u8; 4]) -> bool {
@@ -100,16 +199,7 @@ pub(crate) fn generic_matches(line: &str) -> Vec<(RuleId, String)> {
             out.push((RuleId::Email, m.as_str().to_string()));
         }
     }
-    for caps in HOME_UNIX.captures_iter(line) {
-        if !home_allowed(&caps["n"]) {
-            out.push((RuleId::HomePath, caps["p"].to_string()));
-        }
-    }
-    for caps in HOME_WINDOWS.captures_iter(line) {
-        if !home_allowed(&caps["n"]) {
-            out.push((RuleId::HomePath, caps["p"].to_string()));
-        }
-    }
+    home_matches(line, &mut out);
     for run in NUMBER_RUN.find_iter(line) {
         let parts: Vec<&str> = run.as_str().split('.').collect();
         if parts.len() != 4 || parts.iter().any(|p| p.len() > 3) {

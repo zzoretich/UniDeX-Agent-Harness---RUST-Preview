@@ -115,8 +115,35 @@ fn invalid_utf8_is_scanned_without_a_panic() {
 
 // ---- command-level tests ----
 
+fn empty_gitconfig() -> &'static Path {
+    use std::sync::OnceLock;
+    static EMPTY: OnceLock<std::path::PathBuf> = OnceLock::new();
+    EMPTY.get_or_init(|| {
+        let p = std::env::temp_dir().join(format!("xtask-test-gitconfig-{}", std::process::id()));
+        fs::write(&p, "").unwrap();
+        p
+    })
+}
+
+/// A test must never read or write a real user's git configuration or hooks.
+fn isolated(mut cmd: std::process::Command) -> std::process::Command {
+    cmd.env("GIT_CONFIG_GLOBAL", empty_gitconfig())
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd
+}
+
+fn git_out(dir: &Path, args: &[&str]) -> String {
+    let out = isolated(std::process::Command::new("git"))
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("git runs");
+    assert!(out.status.success(), "git {args:?} failed");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 fn git(dir: &Path, args: &[&str]) {
-    let out = std::process::Command::new("git")
+    let out = isolated(std::process::Command::new("git"))
         .args(args)
         .current_dir(dir)
         .output()
@@ -148,7 +175,10 @@ fn commit_all(dir: &Path, msg: &str) {
 
 fn xtask(dir: &Path) -> Command {
     let mut cmd = Command::cargo_bin("xtask").unwrap();
-    cmd.current_dir(dir);
+    cmd.current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", empty_gitconfig())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("CI");
     cmd
 }
 
@@ -249,7 +279,7 @@ fn allow_file_exempts_one_rule_on_one_path_only() {
     write(
         repo.path(),
         "privacy-allow.toml",
-        "[[allow]]\npath = \"a.md\"\nrule = \"HomePath\"\nreason = \"test\"\n",
+        "[[allow]]\npath = \"a.md\"\nrule = \"HomePath\"\nvalues = [\"/Users/jroe\"]\nreason = \"test\"\n",
     );
     commit_all(repo.path(), "add files");
     let out = xtask(repo.path())
@@ -282,7 +312,7 @@ fn allow_file_glob_matches_nested_paths() {
     write(
         repo.path(),
         "privacy-allow.toml",
-        "[[allow]]\npath = \"fixtures/**\"\nrule = \"HomePath\"\nreason = \"test\"\n",
+        "[[allow]]\npath = \"fixtures/**\"\nrule = \"HomePath\"\nvalues = [\"/Users/jroe\"]\nreason = \"test\"\n",
     );
     commit_all(repo.path(), "add files");
     let out = xtask(repo.path())
@@ -337,7 +367,7 @@ fn allowing_a_local_term_is_a_usage_error() {
     write(
         repo.path(),
         "privacy-allow.toml",
-        "[[allow]]\npath = \"a.md\"\nrule = \"LocalTerm\"\nreason = \"test\"\n",
+        "[[allow]]\npath = \"a.md\"\nrule = \"LocalTerm\"\nvalues = [\"x\"]\nreason = \"test\"\n",
     );
     commit_all(repo.path(), "add files");
     xtask(repo.path())
@@ -353,7 +383,7 @@ fn an_allow_entry_without_a_reason_is_a_usage_error() {
     write(
         repo.path(),
         "privacy-allow.toml",
-        "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nreason = \"\"\n",
+        "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nvalues = [\"x@y.io\"]\nreason = \"\"\n",
     );
     commit_all(repo.path(), "add files");
     xtask(repo.path())
@@ -396,4 +426,368 @@ fn hooks_install_refuses_to_replace_a_foreign_hook() {
         "#!/bin/sh\necho mine\n"
     );
     assert!(!hooks.join("commit-msg").exists());
+}
+
+// ---- review round 1 ----
+
+fn run(dir: &Path, args: &[&str]) -> (i32, String) {
+    let out = xtask(dir).args(args).output().unwrap();
+    (out.status.code().unwrap(), output_text(&out))
+}
+
+fn flagged(text: &str) -> bool {
+    rules(text).contains(&RuleId::HomePath)
+}
+
+// C1
+#[test]
+fn range_scans_the_files_of_a_root_commit() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "see /Users/jroe/x\n");
+    commit_all(repo.path(), "first");
+    assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 1);
+    let sha = git_out(repo.path(), &["rev-parse", "HEAD"]);
+    assert_eq!(run(repo.path(), &["privacy", "--range", &sha]).0, 1);
+}
+
+// I1
+#[cfg(unix)]
+#[test]
+fn type_change_symlink_to_file_is_scanned() {
+    let repo = new_repo();
+    std::os::unix::fs::symlink("harmless-target", repo.path().join("cfg")).unwrap();
+    commit_all(repo.path(), "link");
+    fs::remove_file(repo.path().join("cfg")).unwrap();
+    write(repo.path(), "cfg", "home /Users/jroe/x\n");
+    git(repo.path(), &["add", "-A"]);
+    assert_eq!(run(repo.path(), &["privacy", "--staged"]).0, 1);
+    git(repo.path(), &["commit", "-q", "--no-verify", "-m", "file"]);
+    assert_eq!(
+        run(repo.path(), &["privacy", "--range", "HEAD~1..HEAD"]).0,
+        1
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn type_change_file_to_symlink_is_scanned() {
+    let repo = new_repo();
+    write(repo.path(), "cfg", "harmless\n");
+    commit_all(repo.path(), "file");
+    fs::remove_file(repo.path().join("cfg")).unwrap();
+    std::os::unix::fs::symlink("/Users/jroe/x", repo.path().join("cfg")).unwrap();
+    git(repo.path(), &["add", "-A"]);
+    assert_eq!(run(repo.path(), &["privacy", "--staged"]).0, 1);
+    git(repo.path(), &["commit", "-q", "--no-verify", "-m", "link"]);
+    assert_eq!(
+        run(repo.path(), &["privacy", "--range", "HEAD~1..HEAD"]).0,
+        1
+    );
+}
+
+// I2 / I3
+#[test]
+fn home_paths_without_a_trailing_separator_are_flagged() {
+    assert!(flagged("HOME=/Users/jroe"));
+    assert!(flagged("cd /home/jroe"));
+    assert!(flagged(r#""cwd": "/Users/jroe""#));
+}
+
+#[test]
+fn home_paths_with_any_prefix_are_flagged() {
+    for bad in [
+        "/mnt/c/Users/jroe/x",
+        "/System/Volumes/Data/Users/jroe/x",
+        "/var/home/jroe/x",
+        "/usr/home/jroe/x",
+        "C:/Users/jroe/x",
+        "/Users/runner//Users/jroe/x",
+    ] {
+        assert!(flagged(bad), "{bad}");
+    }
+}
+
+#[test]
+fn home_paths_match_case_insensitively() {
+    assert!(flagged("/users/jroe/x"));
+    assert!(flagged("/HOME/jroe/x"));
+    assert!(flagged(r"c:\users\jroe\x"));
+}
+
+#[test]
+fn windows_names_may_hold_spaces_and_non_ascii() {
+    assert!(flagged(r"C:\Users\Jane Roe\AppData"));
+    assert!(flagged(r"C:\Users\Jane Roe"));
+    assert!(flagged("/Users/jos\u{e9}/x"));
+    assert!(flagged(r"C:\\Users\\jroe\\x"));
+}
+
+#[test]
+fn more_placeholder_homes_are_allowed() {
+    for ok in [
+        "/Users/Shared/x",
+        r"C:\Users\Public\x",
+        r"C:\Users\runneradmin\x",
+        r"C:\Users\Default\x",
+        "/Users/$USER/x",
+        "/home/<name>/x",
+        r"C:\Users\%USERNAME%\x",
+    ] {
+        assert!(!flagged(ok), "{ok}");
+    }
+}
+
+#[test]
+fn urls_are_not_home_paths_but_file_urls_are() {
+    assert!(!flagged("https://example.com/users/octocat"));
+    assert!(!flagged("see https://example.com/home/page for more"));
+    assert!(flagged("file:///Users/jroe/x"));
+    assert!(flagged("/users/octocat"));
+}
+
+// I4
+const SCISSORS: &str = "# ------------------------ >8 ------------------------";
+
+#[test]
+fn git_message_flag_cuts_at_the_scissors_line() {
+    let repo = new_repo();
+    let msg = format!("fix a thing\n# a comment\n{SCISSORS}\n+ path /Users/jroe/x\n");
+    let ok = xtask(repo.path())
+        .args(["privacy", "--stdin", "msg", "--git-message"])
+        .write_stdin(msg.clone())
+        .assert()
+        .code(0);
+    drop(ok);
+    xtask(repo.path())
+        .args(["privacy", "--stdin", "msg"])
+        .write_stdin(msg)
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn git_message_flag_still_scans_above_the_scissors_line() {
+    let repo = new_repo();
+    let msg = format!("see /Users/jroe/x\n{SCISSORS}\n+ more\n");
+    xtask(repo.path())
+        .args(["privacy", "--stdin", "msg", "--git-message"])
+        .write_stdin(msg)
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn git_message_flag_drops_comment_lines_and_honours_comment_char() {
+    let repo = new_repo();
+    xtask(repo.path())
+        .args(["privacy", "--stdin", "msg", "--git-message"])
+        .write_stdin("subject\n# On branch main, /Users/jroe/x\n")
+        .assert()
+        .code(0);
+    git(repo.path(), &["config", "core.commentChar", ";"]);
+    xtask(repo.path())
+        .args(["privacy", "--stdin", "msg", "--git-message"])
+        .write_stdin("subject\n; comment /Users/jroe/x\n")
+        .assert()
+        .code(0);
+    xtask(repo.path())
+        .args(["privacy", "--stdin", "msg", "--git-message"])
+        .write_stdin("subject\n# not a comment now /Users/jroe/x\n")
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn the_commit_msg_hook_passes_git_message() {
+    let repo = new_repo();
+    xtask(repo.path())
+        .args(["hooks", "install"])
+        .assert()
+        .code(0);
+    let body = fs::read_to_string(repo.path().join(".git/hooks/commit-msg")).unwrap();
+    assert!(body.contains("--git-message"), "{body}");
+}
+
+// I5
+#[test]
+fn local_terms_match_across_line_breaks_and_extra_whitespace() {
+    let t = Terms::generic().with_local("Jane Roe\n");
+    for text in [
+        "met Jane\nRoe today",
+        "met Jane   Roe",
+        "met Jane\tRoe",
+        "Jane \n  Roe",
+    ] {
+        let f = scan_text("f.md", text, &t);
+        assert_eq!(f.len(), 1, "{text:?}");
+        assert_eq!(f[0].rule, RuleId::LocalTerm);
+    }
+    let f = scan_text("f.md", "x\ny\nJane\nRoe\n", &t);
+    assert_eq!(f[0].line, 3);
+}
+
+// I6
+#[test]
+fn a_linked_worktree_uses_the_main_checkouts_local_list() {
+    let main = new_repo();
+    write(main.path(), ".gitignore", "privacy-terms.local.txt\n");
+    write(main.path(), "privacy-terms.local.txt", "Zebracorp\n");
+    write(main.path(), "a.md", "about zebracorp\n");
+    commit_all(main.path(), "add a");
+    let wt = TempDir::new().unwrap();
+    let wt_path = wt.path().join("wt");
+    git(
+        main.path(),
+        &["worktree", "add", "-q", wt_path.to_str().unwrap()],
+    );
+    let (code, text) = run(&wt_path, &["privacy", "--all"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("LocalTerm"), "{text}");
+    assert_eq!(run(&wt_path, &["privacy", "--all", "--require-local"]).0, 1);
+}
+
+#[test]
+fn a_missing_local_list_is_announced_on_stderr() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    commit_all(repo.path(), "add a");
+    let out = xtask(repo.path())
+        .args(["privacy", "--all"])
+        .assert()
+        .code(0)
+        .get_output()
+        .clone();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("not being checked"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_local_list_is_a_usage_error() {
+    let repo = new_repo();
+    fs::create_dir(repo.path().join("privacy-terms.local.txt")).unwrap();
+    write(repo.path(), "a.md", "harmless\n");
+    commit_all(repo.path(), "add a");
+    assert_eq!(run(repo.path(), &["privacy", "--all"]).0, 2);
+}
+
+// I7
+fn allow(path: &str, rule: &str, values: &str) -> String {
+    format!(
+        "[[allow]]\npath = \"{path}\"\nrule = \"{rule}\"\nvalues = [{values}]\nreason = \"test\"\n"
+    )
+}
+
+#[test]
+fn an_allow_entry_without_values_is_a_usage_error() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nreason = \"test\"\n",
+    );
+    commit_all(repo.path(), "add files");
+    assert_eq!(run(repo.path(), &["privacy", "--all"]).0, 2);
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("a.md", "Email", ""),
+    );
+    assert_eq!(run(repo.path(), &["privacy", "--all"]).0, 2);
+}
+
+#[test]
+fn only_the_listed_value_is_exempt() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "mail jane.roe@corp.io\n");
+    write(repo.path(), "b.md", "mail jane.roe@corp.io\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("a.md", "Email", "\"jane.roe@corp.io\""),
+    );
+    commit_all(repo.path(), "add files");
+    let (code, text) = run(repo.path(), &["privacy", "--all"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("b.md") && !text.contains("a.md"), "{text}");
+    // a different value of the same rule on the same path is flagged
+    write(repo.path(), "a.md", "mail other.person@corp.io\n");
+    let (code, text) = run(repo.path(), &["privacy", "--all"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("a.md"), "{text}");
+}
+
+#[test]
+fn the_allow_files_own_values_do_not_flag_it() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "mail jane.roe@corp.io\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("a.md", "Email", "\"jane.roe@corp.io\""),
+    );
+    commit_all(repo.path(), "add files");
+    let (code, text) = run(repo.path(), &["privacy", "--all"]);
+    assert_eq!(code, 0, "{text}");
+}
+
+// R-A
+#[test]
+fn allow_globs_do_not_cross_directories_with_a_single_star() {
+    let repo = new_repo();
+    fs::create_dir_all(repo.path().join("docs")).unwrap();
+    write(repo.path(), "docs/x.md", "mail jane.roe@corp.io\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("*.md", "Email", "\"jane.roe@corp.io\""),
+    );
+    commit_all(repo.path(), "add files");
+    assert_eq!(run(repo.path(), &["privacy", "--all"]).0, 1);
+}
+
+#[test]
+fn allow_entries_never_exempt_stdin_or_commit_messages() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("*", "Email", "\"jane.roe@corp.io\""),
+    );
+    commit_all(repo.path(), "contact jane.roe@corp.io");
+    xtask(repo.path())
+        .args(["privacy", "--stdin", "msg"])
+        .write_stdin("contact jane.roe@corp.io")
+        .assert()
+        .code(1);
+    assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 1);
+}
+
+// R-C
+#[test]
+fn retina_asset_names_are_not_emails() {
+    let t = Terms::generic();
+    assert!(scan_path_name("assets/icon@2x.png", &t).is_empty());
+    assert!(scan_text("f.md", "![i](assets/icon@3x.webp)", &t).is_empty());
+    assert_eq!(rules("icon@2x.io"), vec![RuleId::Email]);
+}
+
+// R-D
+#[test]
+fn range_scans_author_and_committer_emails() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "one\n");
+    commit_all(repo.path(), "first");
+    assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 0);
+    git(repo.path(), &["config", "user.email", "jane.roe@corp.io"]);
+    write(repo.path(), "a.md", "two\n");
+    commit_all(repo.path(), "second");
+    let (code, text) = run(repo.path(), &["privacy", "--range", "HEAD~1..HEAD"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(
+        text.contains("author") && text.contains("committer"),
+        "{text}"
+    );
 }

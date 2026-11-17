@@ -45,7 +45,7 @@ pub fn install() -> Result<Vec<PathBuf>, String> {
         ("pre-commit", script("exec cargo xtask privacy --staged")),
         (
             "commit-msg",
-            script("exec cargo xtask privacy --stdin commit-message < \"$1\""),
+            script("exec cargo xtask privacy --stdin commit-message --git-message < \"$1\""),
         ),
     ];
     for (name, _) in &hooks {

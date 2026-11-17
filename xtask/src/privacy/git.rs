@@ -75,14 +75,23 @@ pub struct Blob {
 }
 
 /// Parses `git diff --raw -z --no-renames` output, keeping blobs (not submodules).
-fn parse_raw(bytes: &[u8]) -> Vec<Blob> {
+/// A token that is not a raw entry is an error, never silently skipped.
+fn parse_raw(bytes: &[u8]) -> Result<Vec<Blob>> {
     let mut toks = split_nul(bytes);
     let mut out = Vec::new();
     while let Some(meta) = toks.next() {
-        let Some(path) = toks.next() else { break };
+        if !meta.starts_with(':') {
+            return Err(format!("unexpected git diff output: {meta:?}"));
+        }
+        let path = toks
+            .next()
+            .ok_or_else(|| "git diff output ended after an entry header".to_string())?;
         // ":<old mode> <new mode> <old oid> <new oid> <status>"
         let f: Vec<&str> = meta.trim_start_matches(':').split(' ').collect();
-        if f.len() < 5 || f[1] == "160000" || f[3].chars().all(|c| c == '0') {
+        if f.len() < 5 {
+            return Err(format!("unexpected git diff entry: {meta:?}"));
+        }
+        if f[1] == "160000" || f[3].chars().all(|c| c == '0') {
             continue;
         }
         out.push(Blob {
@@ -90,10 +99,10 @@ fn parse_raw(bytes: &[u8]) -> Vec<Blob> {
             oid: f[3].to_string(),
         });
     }
-    out
+    Ok(out)
 }
 
-/// Added, copied or modified files in the index.
+/// Added, copied, modified or type-changed files in the index.
 pub fn staged(root: &Path) -> Result<Vec<Blob>> {
     let out = git(
         root,
@@ -103,10 +112,10 @@ pub fn staged(root: &Path) -> Result<Vec<Blob>> {
             "--raw",
             "-z",
             "--no-renames",
-            "--diff-filter=ACM",
+            "--diff-filter=ACMT",
         ],
     )?;
-    Ok(parse_raw(&out))
+    parse_raw(&out)
 }
 
 pub struct CommitInfo {
@@ -138,11 +147,12 @@ pub fn commit_message(root: &Path, sha: &str) -> Result<Vec<u8>> {
 pub fn commit_blobs(root: &Path, c: &CommitInfo) -> Result<Vec<Blob>> {
     let mut args = vec![
         "diff-tree",
+        "--no-commit-id",
         "-r",
         "--raw",
         "-z",
         "--no-renames",
-        "--diff-filter=ACM",
+        "--diff-filter=ACMT",
     ];
     match c.parents.first() {
         Some(p) => {
@@ -154,7 +164,7 @@ pub fn commit_blobs(root: &Path, c: &CommitInfo) -> Result<Vec<Blob>> {
             args.push(&c.sha);
         }
     }
-    Ok(parse_raw(&git(root, &args)?))
+    parse_raw(&git(root, &args)?)
 }
 
 pub fn read_blob(root: &Path, oid: &str) -> Result<Vec<u8>> {
@@ -170,4 +180,45 @@ pub fn local_list_problem(root: &Path, name: &str) -> Result<Option<&'static str
         return Ok(Some("the local term list is not ignored by git"));
     }
     Ok(None)
+}
+
+/// A commit's author and committer email addresses.
+pub fn commit_identities(root: &Path, sha: &str) -> Result<(String, String)> {
+    let out = git(root, &["log", "-1", "--format=%ae%n%ce", sha, "--"])?;
+    let s = String::from_utf8_lossy(&out);
+    let mut it = s.lines();
+    Ok((
+        it.next().unwrap_or("").to_string(),
+        it.next().unwrap_or("").to_string(),
+    ))
+}
+
+/// The prefix git treats as a comment in commit messages (default `#`).
+pub fn comment_prefix(root: &Path) -> String {
+    match git(root, &["config", "--get", "core.commentChar"]) {
+        Ok(b) => {
+            let v = String::from_utf8_lossy(&b).trim().to_string();
+            if v.is_empty() || v == "auto" {
+                "#".to_string()
+            } else {
+                v
+            }
+        }
+        Err(_) => "#".to_string(),
+    }
+}
+
+/// The top level of the main worktree, when `root` is a linked worktree.
+pub fn main_worktree_root(root: &Path) -> Option<PathBuf> {
+    let out = git(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .ok()?;
+    let common = PathBuf::from(String::from_utf8_lossy(&out).trim_end_matches(['\n', '\r']));
+    if common.file_name()? == ".git" {
+        common.parent().map(Path::to_path_buf)
+    } else {
+        None
+    }
 }

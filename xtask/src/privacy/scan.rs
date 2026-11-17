@@ -16,19 +16,37 @@ pub struct Terms {
     local: Vec<String>,
 }
 
+fn collapse_ws(s: &str) -> String {
+    let mut out = String::new();
+    let mut last_space = true;
+    for c in s.trim().chars() {
+        if c.is_whitespace() {
+            if !last_space {
+                out.push(' ');
+            }
+            last_space = true;
+        } else {
+            out.extend(c.to_lowercase());
+            last_space = false;
+        }
+    }
+    out
+}
+
 impl Terms {
     pub fn generic() -> Terms {
         Terms::default()
     }
 
     /// Adds local terms, one per line. Blank lines and `#` comments are skipped.
+    /// Whitespace inside a term is collapsed to single spaces.
     pub fn with_local(mut self, list_text: &str) -> Terms {
         for line in list_text.lines() {
             let t = line.trim();
             if t.is_empty() || t.starts_with('#') {
                 continue;
             }
-            let t = t.to_lowercase();
+            let t = collapse_ws(t);
             if !self.local.contains(&t) {
                 self.local.push(t);
             }
@@ -40,11 +58,40 @@ impl Terms {
         !self.local.is_empty()
     }
 
-    /// Terms found in `line`, matched case-insensitively. With `separators`,
-    /// a term also matches when its spaces are `-`, `_` or removed (file names).
-    fn local_hits(&self, line: &str, separators: bool) -> Vec<String> {
-        let hay = line.to_lowercase();
-        let mut hits = Vec::new();
+    /// Local-term hits in `text` as (line, term). Matching is case-insensitive
+    /// and runs on the whole text with whitespace runs collapsed, so a term
+    /// split across lines or padded with extra whitespace is still found. The
+    /// line is the one where the match starts. With `separators`, a term also
+    /// matches when its spaces are `-`, `_` or removed (file names).
+    fn local_hits(&self, text: &str, separators: bool) -> Vec<(usize, String)> {
+        if self.local.is_empty() {
+            return Vec::new();
+        }
+        // Normalised text, with the source line of every byte of it.
+        let mut hay = String::new();
+        let mut lines: Vec<usize> = Vec::new();
+        let mut last_space = true;
+        let mut line = 1;
+        for c in text.chars() {
+            if c.is_whitespace() {
+                if !last_space {
+                    hay.push(' ');
+                    lines.push(line);
+                }
+                last_space = true;
+            } else {
+                for l in c.to_lowercase() {
+                    let before = hay.len();
+                    hay.push(l);
+                    lines.extend(std::iter::repeat_n(line, hay.len() - before));
+                }
+                last_space = false;
+            }
+            if c == '\n' {
+                line += 1;
+            }
+        }
+        let mut hits: Vec<(usize, String)> = Vec::new();
         for term in &self.local {
             let mut variants = vec![term.clone()];
             if separators && term.contains(' ') {
@@ -52,15 +99,24 @@ impl Terms {
                     variants.push(term.replace(' ', sep));
                 }
             }
-            if variants.iter().any(|v| hay.contains(v.as_str())) {
-                hits.push(term.clone());
+            for v in variants.iter().filter(|v| !v.is_empty()) {
+                let mut from = 0;
+                while let Some(i) = hay[from..].find(v.as_str()) {
+                    let at = from + i;
+                    let hit = (lines[at], term.clone());
+                    if !hits.contains(&hit) {
+                        hits.push(hit);
+                    }
+                    from = at + hay[at..].chars().next().map_or(1, char::len_utf8);
+                }
             }
         }
+        hits.sort();
         hits
     }
 }
 
-fn shorten(s: &str) -> String {
+pub(crate) fn shorten(s: &str) -> String {
     const MAX: usize = 100;
     if s.chars().count() <= MAX {
         s.to_string()
@@ -70,14 +126,7 @@ fn shorten(s: &str) -> String {
     }
 }
 
-fn scan_line(
-    label: &str,
-    line_no: usize,
-    line: &str,
-    terms: &Terms,
-    seps: bool,
-    out: &mut Vec<Finding>,
-) {
+fn push_generic(label: &str, line_no: usize, line: &str, out: &mut Vec<Finding>) {
     for (rule, text) in generic_matches(line) {
         out.push(Finding {
             path: label.to_string(),
@@ -86,10 +135,13 @@ fn scan_line(
             excerpt: shorten(&text),
         });
     }
-    for term in terms.local_hits(line, seps) {
+}
+
+fn push_local(label: &str, hits: Vec<(usize, String)>, line_zero: bool, out: &mut Vec<Finding>) {
+    for (line, term) in hits {
         out.push(Finding {
             path: label.to_string(),
-            line: line_no,
+            line: if line_zero { 0 } else { line },
             rule: RuleId::LocalTerm,
             excerpt: shorten(&term),
         });
@@ -99,8 +151,10 @@ fn scan_line(
 pub fn scan_text(label: &str, text: &str, terms: &Terms) -> Vec<Finding> {
     let mut out = Vec::new();
     for (i, line) in text.lines().enumerate() {
-        scan_line(label, i + 1, line, terms, false, &mut out);
+        push_generic(label, i + 1, line, &mut out);
     }
+    push_local(label, terms.local_hits(text, false), false, &mut out);
+    out.sort_by_key(|f| f.line);
     out
 }
 
@@ -112,6 +166,7 @@ pub fn scan_bytes(label: &str, bytes: &[u8], terms: &Terms) -> Vec<Finding> {
 /// Scans a path name. Findings carry line 0.
 pub fn scan_path_name(path: &str, terms: &Terms) -> Vec<Finding> {
     let mut out = Vec::new();
-    scan_line(path, 0, path, terms, true, &mut out);
+    push_generic(path, 0, path, &mut out);
+    push_local(path, terms.local_hits(path, true), true, &mut out);
     out
 }
