@@ -54,7 +54,7 @@ The display refresh rate as the app sees it was 100 Hz (Electron reports 99.98 H
   Window size 1480 by 940 points, the app's own default.
 - OS: macOS 26.6.2. The machine had been up for 20 days, so the OS file cache was warm except where noted.
 - Load: other desktop applications and several automated coding sessions were running and could not be stopped for
-  the measurement. At the end of the runs the 1, 5 and 15 minute load averages were 1.8, 2.4 and 2.6 on 10 cores, and
+  the measurement. At the end of the runs the 1, 5 and 15 minute load averages were 1.8, 2.4 and 2.6, and
   72% of memory was free.
 - Temp folder: the app lists the user's temp folder in the background after creating its window. It held 8,632
   entries during the runs (far fewer than the several hundred thousand found there earlier). The app sweeps its own
@@ -226,7 +226,8 @@ record (8 to 30 words), the agent's `text` record (1 to 3 paragraphs of 6 to 18 
 three-item list, 15% name a file in inline code, 5% end with a fenced code block of 3 to 6 lines), a `usage` and a
 `done` record; one `session` record in the first turn. That is 5,000 messages, 10,002 records and 2,140,999 bytes,
 generated from a fixed seed from a made-up vocabulary. The generator is committed as
-`docs/baseline/fixtures/long-thread.mjs` (with a README) and reproduces these exact bytes. Prompts run 8 to 30 words
+`docs/baseline/fixtures/long-thread.mjs` (with a README) and reproduces the fixture's size and its message text, not the
+original's run-time timestamps and session id. Prompts run 8 to 30 words
 (median 19); replies run 6 to 146 words (median 53) and 32 to 901 characters (median 323, 95th percentile 628). The
 app is launched with the Sessions surface on and a stand-in `claude` CLI recorded as the host's binary, as the
 project's Sessions spec does.

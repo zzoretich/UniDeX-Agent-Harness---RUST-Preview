@@ -2,8 +2,9 @@ name: nightly
 
 # Nightly trial packages of the cookbook window (the example target `hello_window` of udx-cookbook, for now),
 # built with cargo-packager 0.11.8 (decision 0014) on macOS, Linux and Windows. Each platform's package is attached
-# to the workflow run as an artifact and nowhere else: the workflow publishes nothing (no release, no tag, no
-# upload), its token is read-only, and it references no secret.
+# to the workflow run as an artifact and nowhere else; on a public repository any signed-in user of the hosting
+# service can download a run's artifacts. The workflow creates no release, pushes no tag and uploads nowhere else,
+# its token is read-only, and it references no secret.
 #
 # The packages are UNSIGNED trial builds, named so, and are not releases. Signing is not set up: when the
 # maintainer supplies signing identities as CI secrets, the macOS signing and notarization settings go in
@@ -11,8 +12,13 @@ name: nightly
 # job, in this file and only there. Windows signing is likewise a setting of the "Package" step (cargo-packager signs
 # the program, the uninstaller and the installer itself), not a later step. Before any secret is added: it must not be
 # available to pull_request runs, the -vv flag on "Package" (it traces the whole configuration) must go, and the
-# per-platform signing environment needs a condition on the operating system (decision 0014). Until then there is
-# no secret to miss.
+# per-platform signing environment needs a condition on the operating system (decision 0014). Also before any
+# signing secret is added to "Package": (a) the two fetches with no hash check (listed below) are hash-checked or
+# supplied from verified copies, since the create-dmg script runs inside that step and could read the signing and
+# notarization secrets from its environment; (b) where the secrets live and who approves their use is decided
+# (threat model P38: only a release environment that needs the maintainer's approval holds them, which a schedule
+# cannot use unattended; the options are an approval-gated environment, signing only on manually approved runs, or
+# unsigned nightlies with signed builds made separately). Until then there is no secret to miss.
 #
 # Triggers:
 #   schedule            once a day, and only when there has been a commit in the last 25 hours (see "Decide").
@@ -54,9 +60,10 @@ env:
 #                           against hashes compiled into the tool (SHA-1), and WiX the same way (not used here).
 #                           NOT hash-checked, and fetched on every run: on Windows the NSIS ApplicationID plugin
 #                           (its DLL is shipped inside the installer), and on macOS the create-dmg shell script
-#                           (pinned to a commit in its URL, executed on the runner). Before any build is released
-#                           to users each must be hash-checked or supplied from a verified copy; decision 0014
-#                           lists what is and is not verified.
+#                           (pinned to a commit in its URL, executed on the runner). Before the first signed
+#                           build, and in any case before any build is released to users, each must be
+#                           hash-checked or supplied from a verified copy; decision 0014 lists what is and is not
+#                           verified.
 
 jobs:
   decide:

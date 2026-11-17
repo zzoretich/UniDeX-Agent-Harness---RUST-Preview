@@ -101,7 +101,7 @@ permissively licensed.
 Everything in this section was verified on the development Mac by scripted checks through the program's own
 instrumentation; no person operated it, and the maintainer's hands-on check (Tier 1) is still owed.
 
-Machine: an Apple silicon desktop (10 cores) with 16 GB of memory and external displays, macOS 26.6, release builds,
+Machine: an Apple silicon desktop with 16 GB of memory and external displays, macOS 26.6, release builds,
 under ordinary desktop load. It is not the design's reference machine, which is a laptop whose display may run at
 120 Hz. Most runs used a 4K panel at scale 2 and 60 Hz with a 1280 x 801 logical pane (2560 x 1602 device pixels); some
 used a 2560 x 1440 panel at scale 1 and 100 Hz; the two complete input runs used a single display that GPUI reported as
@@ -170,14 +170,14 @@ includes layout, prepaint and `paint_image`, and excludes GPUI's scene submissio
   included. In these runs a frame arrives only on a key press, and the UI thread per window frame had a p95 of 5.2 to
   7.7 ms, higher than in the streaming runs above.
 - Start-up, spawn to first frame received, warm file cache, across all 23 runs of the measurement sets on simple local
-  pages (blank, form, long and animation pages; the two runs that came first after a build are excluded): median
-  356 ms, range 288 to 980 ms, 6 of 23 over 500 ms. They fall into two groups: 17 runs at 288 to 398 ms and 6 at 539 to
-  980 ms (two latency runs at 977 and 966 ms, three scale-1 scroll runs at 941, 980 and 539 ms, one animation run at
-  618 ms). In four of the six the helper was also slow to create its browser (616 to 722 ms, against 167 to 230 ms in
-  the fast group), so most of the time went before the page loaded; in the other two (618 and 539 ms) it went after.
-  The logs do not show why. Painting the first frame took 2 to 40 ms more. The heavy page took 2.2 to 3.7 s (the page's own generation); the public documentation page 489 to 652 ms
-  (network). The two runs first after a build took 2.2 and 2.8 s to the first frame (cold cache, observed, not
-  controlled).
+  pages (blank, form, long and animation pages; the two runs that came first after a build are excluded): median 356 ms,
+  range 288 to 980 ms, 6 of 23 over 500 ms. They fall into two groups: 17 runs at 288 to 398 ms and 6 at 539 to 980 ms
+  (two latency runs at 977 and 966 ms, three scale-1 scroll runs at 941, 980 and 539 ms, one animation run at 618 ms).
+  In four of the six the helper was also slow to create its browser (616 to 722 ms, against 167 to 230 ms in the fast
+  group), so most of the time went before the page loaded; in the other two (618 and 539 ms) it went after. The logs do
+  not show why. Painting the first frame took 2 to 40 ms more. The heavy page took 2.2 to 3.7 s (the page's own
+  generation); the public documentation page 489 to 652 ms (network). The two runs first after a build took 2.2 and 2.8
+  s to the first frame (cold cache, observed, not controlled).
 - Frame transport per frame at 2560 x 1602 (16.4 MB): a GPU-to-CPU readback inside Chromium (not measured), the
   helper's copy into shared memory 1.7 to 2.5 ms, the app's copy out on its reader thread 0.8 to 1.05 ms, and the upload
   into GPUI's atlas inside `paint_image` 2.2 ms on the UI thread. At 1280 x 801: 0.6 to 0.9, 0.35 and 1.3 ms.
@@ -243,12 +243,14 @@ What the sandbox check tests, per platform:
   line unless Chromium can rewrite its process title, so run 2's check took every forked child for a zygote. Since run 3
   the helper hands CEF the process's own argument memory on Linux, so Chromium's titles (`--type=renderer`,
   `--type=gpu-process` and so on) are visible; as a fallback a zygote is told apart by its single thread and a forked
-  child's role is read from its thread names; every forked child is required. A required process without the filter
-  is named in the failure and in an error annotation. Phase B's check
-  required the filter of every process but the browser, which the zygotes would fail although Chromium's design gives
-  them none. The check runs three ways: as a tarball would install it (no setuid helper, no AppArmor profile); installed
-  as a `.deb` with `chrome-sandbox` setuid root; and with an AppArmor profile that lets the helper create user
-  namespaces. The last two are the two ways Chromium documents to have its sandbox on Ubuntu 23.10 and later.
+  child's role is read from its thread names; every forked child is required. A required process without the filter is
+  named in the failure and in an error annotation (first exercised in run 44147154193 on commit 74cb34d, where it named
+  the GPU process in both confined routes). Phase B's check required the filter of every process but the browser, which
+  the zygotes would fail although Chromium's design gives them none. The check runs three ways: as a tarball would
+  install it (no setuid helper, no AppArmor profile); installed as a `.deb` with `chrome-sandbox` setuid root; and with
+  an AppArmor profile that lets the helper create user namespaces (an unconfined profile, `flags=(unconfined)`, granting
+  the `userns` permission, as Chromium documents). The last two are the two ways Chromium documents to have its sandbox
+  on Ubuntu 23.10 and later.
 - Windows: the process tree is not read by the smoke check; while it holds the helper, a script reads each process's
   integrity level, whether its token is restricted, and whether it runs in an AppContainer and a job. Since run 3 it
   applies the same rule as on Linux: every process but the browser process and those Chromium starts with
@@ -292,15 +294,15 @@ bindings copy CEF's runtime files to `release/build`, not beside the helper, so 
   with restricted tokens, the GPU process at Low integrity with a restricted token, all in a job; the network service
   started by Chromium with `--service-sandbox-type=none`, unrestricted, at the runner account's High integrity; CEF's
   browser process also at High integrity, in a job, unrestricted (the hosted runner's account is an elevated
-  administrator; on a normal account it would be Medium). The verdict enforced only the renderers in this run (2 of
-  2); the GPU and storage processes were listed and are sandboxed by the same measure. No listening TCP socket. Both
-  outcomes appeared as warning annotations.
-- `cef helper` on macOS (the hosted macOS 26 runner, a virtual machine), job 134237859564: passed. The bundle ran; the
-  GPU process, the network service (sandbox type `network`), the storage service and two renderers all reported
-  `sandbox_check=1`; one frame (first after 3.1 s on the cold runner), both DevTools answers (the evaluate ran before the
-  navigation finished and returned an empty title; the check requires an answer, not a value), exit status 0, no
-  listening socket. This is the first run of the macOS helper on a machine other than the development Mac. What the
-  runner's run contacted over the network is not in the logs.
+  administrator; on a normal account it would be Medium, which is expected, not observed). The verdict enforced only the
+  renderers in this run (2 of 2); the GPU and storage processes were listed and are sandboxed by the same measure. No
+  listening TCP socket. Both outcomes appeared as warning annotations.
+- `cef helper` on macOS (the hosted macOS 26 runner), job 134237859564: passed. The bundle ran; the GPU process, the
+  network service (sandbox type `network`), the storage service and two renderers all reported `sandbox_check=1`; one
+  frame (first after 3.1 s on the cold runner), both DevTools answers (the evaluate ran before the navigation finished
+  and returned an empty title; the check requires an answer, not a value), exit status 0, no listening socket. This is
+  the first run of the macOS helper on a machine other than the development Mac. What the runner's run contacted over
+  the network is not in the logs.
 - `cef helper` on Linux (Ubuntu 26.04, kernel 7.0, `kernel.apparmor_restrict_unprivileged_userns = 1`, AppArmor
   enabled), job 134237859162: failed, in the sandbox check only. The helper compiled and linked, and `ldd` found every
   library. Tarball-style: Chromium refused to start with "The SUID sandbox helper binary was found, but is not configured
@@ -363,8 +365,8 @@ popup windows or not at all), better than an external window. Not built.
 ## Decision
 
 Option A everywhere, with a fallback per platform, and one condition for every platform: **the embedded browser does not
-ship until a working control stops or routes Chromium's background traffic to its vendor's servers** (see "Security";
-P52).
+ship until a working control stops or routes Chromium's background traffic to its vendor's servers** (observed on the
+development Mac; see "Security"; P52).
 
 - **macOS: embed with CEF off-screen in a helper process.** Verified on the development Mac by scripted checks through
   the program's own instrumentation; no person operated it, and the maintainer's hands-on check is still owed. Shown:
@@ -389,12 +391,14 @@ P52).
   GPU work into the unsandboxed browser process or turn the GPU sandbox off (`--in-process-gpu`,
   `--disable-gpu-sandbox`) are not candidates. The network service also runs unsandboxed by Chromium's choice (see
   "Security"). Nothing was drawn in a window and no input was tried.
-- **Windows: embed with CEF off-screen under CEF's bootstrap**, the same code as macOS as a DLL. CI-verified in runs
-  2 and 3 (headless only): the bootstrap loaded the helper DLL with sandbox information, the helper ran, sent a frame
-  and answered DevTools, and every process the rule requires (the renderers, the GPU process and the storage service)
-  ran at Untrusted or Low integrity with a restricted token; the network service runs unsandboxed by Chromium's choice.
-  Unverified: anything drawn in a window, input and input methods, and a run under a normal (not elevated) account. WebView2 as a windowed view (overlays only as owned popup windows) stays the fallback before an
-  external window, should the bootstrap arrangement fail later.
+- **Windows: embed with CEF off-screen under CEF's bootstrap**, the same code as macOS as a DLL. CI-verified in runs 2
+  and 3 (headless only): the bootstrap loaded the helper DLL with sandbox information, the helper ran, sent a frame and
+  answered DevTools; in run 3 every process the rule requires (the renderers, the GPU process and the storage service)
+  ran at Untrusted or Low integrity with a restricted token (run 2 enforced the rule for the renderers only and listed
+  the others in the same state); the network service runs unsandboxed by Chromium's choice. Unverified: anything drawn
+  in a window, input and input methods, and a run under a normal (not elevated) account. WebView2 as a windowed view
+  (overlays only as owned popup windows) stays the fallback before an external window, should the bootstrap arrangement
+  fail later.
 
 Proposed targets for the browser component (section 9 left them to this trial), measured on the reference machine at
 each gate. The trial's figures come from a desktop with external displays at 60 and 100 Hz, not the reference laptop,
@@ -411,7 +415,7 @@ stated for 60 Hz and have not been tried at 120 Hz.
 | Memory, Chromium processes, 1280 x 800 pane at scale 2 | at most 300 MB with one blank tab at rest; at most 450 MB with one typical documentation page at rest; at most 650 MB while scrolling one such page; heavy pages measured, not capped | 265; 362; 506 and 607 (601-609) |
 | Memory, the app's frame path, 1280 x 800 pane at scale 2 | at most 200 MB above the app's idle footprint while the pane streams | 117 to 185 (scroll 117 to 134, documentation page 134 to 150, animation 168 to 185) |
 | Start-up, helper spawn to first frame of a simple local page, warm | not yet supported by the measurements: median 356 ms, but 6 of 23 runs took 539 to 980 ms for a reason not found, and cold start was not measured | median 356, range 288 to 980 |
-| Download size (macOS arm64), English-only component including `CREDITS.html` | at most 100 MB compressed, at most 320 MB on disk | 95.0 (xz -9, trimmed, unit caveat above) and about 301 |
+| Download size (macOS arm64), English-only component including `CREDITS.html` | at most 100 MB compressed, at most 320 MB on disk | 95.0 (xz -9, trimmed, without `CREDITS.html`; unit caveat above) and about 301 (with it) |
 
 How these sit against section 9. Section 9 sets the application's targets "without the browser component" (download
 under 40 MB, idle memory under 150 MB) and says the component is measured on its own and its memory does not count
@@ -440,14 +444,15 @@ development machine and installing CMake and Ninja were the maintainer's approva
   notarize it; it cannot be a raw download from CEF's host.
 - **Linux:** `libcef.so`, its resources and locales, the helper executable (found beside `libcef.so` through an
   `$ORIGIN` run path, because the setuid sandbox drops `LD_LIBRARY_PATH`), and Chromium's sandbox enabled one of the two
-  documented ways: `chrome-sandbox` owned by root with the setuid bit, or an AppArmor profile that lets the helper create
-  user namespaces (on Ubuntu 23.10 and later, where unprivileged user namespaces are restricted by AppArmor). Either needs
-  root at install time: a component downloaded by the user after installation can carry neither a setuid-root file nor a
-  system AppArmor profile, so the `.deb` must install `chrome-sandbox` or the profile itself (or the whole component)
-  even if the rest is fetched on first use. Where unprivileged user namespaces are allowed (not default Ubuntu 24.04 and
-  later) Chromium uses them without either. The tarball cannot run the sandbox on default Ubuntu and ships no embedded
-  browser; AppImage likewise. Either way of enabling the sandbox confined the renderers and the storage service in CI,
-  but not the GPU process on a runner without a GPU (see the Linux decision).
+  documented ways: `chrome-sandbox` owned by root with the setuid bit, or an AppArmor profile that lets the helper
+  create user namespaces (an unconfined profile with the `userns` permission; on Ubuntu 23.10 and later, where
+  unprivileged user namespaces are restricted by AppArmor). Either needs root at install time: a component downloaded by
+  the user after installation can carry neither a setuid-root file nor a system AppArmor profile, so the `.deb` must
+  install `chrome-sandbox` or the profile itself (or the whole component) even if the rest is fetched on first use.
+  Where unprivileged user namespaces are allowed (not default Ubuntu 24.04 and later) Chromium uses them without either.
+  The tarball cannot run the sandbox on default Ubuntu and ships no embedded browser; AppImage likewise. Either way of
+  enabling the sandbox confined the renderers and the storage service in CI, but not the GPU process on a runner without
+  a GPU (see the Linux decision).
 - **Windows:** `libcef.dll` and resources, the helper as a DLL, and CEF's bootstrap executable renamed to the helper's
   name, all signed by the project; the bootstrap sets up the sandbox and calls the DLL (unverified, see "Results on Linux
   and Windows").
@@ -511,12 +516,13 @@ Not achieved or not tried:
   `--service-sandbox-type=none`; on Windows it ran unrestricted at the account's integrity), while on macOS it runs in
   the `network` sandbox. It is the process that parses what comes off the network, so on Linux and Windows a flaw in it
   is outside Chromium's sandbox. Whether a Chromium feature or setting turns its sandbox on there was not tried.
-- P52, background traffic, with its privacy consequence. On every start, before any navigation, Chromium's network
-  service contacted its vendor's servers: the component updater, network time and a search endpoint, named by
-  Chromium's own net log, and the saved inspections show the network-service process connected to the vendor's addresses
-  while a local page was shown. Each such contact discloses the machine's public IP address, the Chromium version and
-  the time of use to the vendor, and the component updater downloaded files from those servers into the profile folder.
-  What was downloaded is not known: the net log named the hosts, not the files, and the per-run profiles were deleted.
+- P52, background traffic, with its privacy consequence. On every start on the development Mac, before any navigation,
+  Chromium's network service contacted its vendor's servers: the component updater, network time and a search endpoint,
+  named by Chromium's own net log (the net logs themselves were not kept), and the saved inspections show the
+  network-service process connected to the vendor's addresses while a local page was shown. Each such contact discloses
+  the machine's public IP address, the Chromium version and the time of use to the vendor, and the component updater
+  downloaded files from those servers into the profile folder. What was downloaded is not known: the net log named the
+  hosts, not the files, and the per-run profiles were deleted. What the CI runs contacted is not in their logs.
   `--disable-background-networking`, `--disable-component-update` and `--no-pings` did not stop it. Candidate controls,
   none tried: disabling the responsible features by name (`--disable-features` for network time, the optimization guide
   and the component updater's services), Chromium policies where CEF honours them, a host-resolver rule or proxy that
@@ -584,7 +590,8 @@ needs. Not worth it for M0's targets; worth revisiting if the targets tighten (h
   macOS edit shortcuts performed on the focused frame; input-method calls with an explicit invalid range (a null range
   is silently ignored by libcef: the first IME runs failed on exactly this); refusals reported to the app; reload after a
   renderer crash; descriptors 0 and 1 moved off the pipes and the region closed on exec before CEF starts.
-- `cef-helper/src/keys.rs`: explicit key codes (the precedent's special-key bug did not occur on macOS).
+- `cef-helper/src/keys.rs`: explicit key codes (the precedent's special-key bug did not occur on macOS); its Linux and
+  Windows key tables are unverified.
 - `cef-helper/src/main.rs`: on Linux, CEF gets the process's own argument memory, not a copy, so Chromium's process
   titles name each sub-process's role and tools (and the sandbox check) can tell a renderer from a zygote.
 - `app/src/main.rs`: the pane's hitbox inserted in prepaint so overlays occlude it; "pointer left" sent when the hitbox
@@ -596,12 +603,12 @@ needs. Not worth it for M0's targets; worth revisiting if the targets tighten (h
 
 ## Revisit when
 
-the Linux GPU process is shown with its seccomp filter on a machine with a GPU, or a supported Chromium setting is
-found that confines or removes it where it runs without one (until then the browser does not ship on Linux); a
-Chromium setting is found that sandboxes the network service on Linux and Windows; a person runs the browser on real Linux or Windows hardware; the maintainer's hands-on check on macOS; a
-control is found that stops or routes Chromium's background traffic (P52), which the browser needs before it ships;
-confinement of CEF's browser process is tried (P33); a way to contain page clipboard writes is found (P52); the
-maintainer answers how the component's budget relates to section 9; the slow start-ups are explained; GPUI gains an
-external-texture element on Linux and Windows, BGRA surfaces on macOS, or an exposed composition tree on Windows; the
-targets above are missed at a gate; 120 Hz panes become a requirement; or CEF changes its off-screen rendering, its
-Windows sandbox arrangement or its macOS bundle layout.
+the Linux GPU process is shown with its seccomp filter on a machine with a GPU, or a supported Chromium setting is found
+that confines or removes it where it runs without one (until then the browser does not ship on Linux); a Chromium
+setting is found that sandboxes the network service on Linux and Windows; a person runs the browser on real Linux or
+Windows hardware; the maintainer's hands-on check on macOS; a control is found that stops or routes Chromium's
+background traffic (P52), which the browser needs before it ships; confinement of CEF's browser process is tried (P33);
+a way to contain page clipboard writes is found (P52); the maintainer answers how the component's budget relates to
+section 9; the slow start-ups are explained; GPUI gains an external-texture element on Linux and Windows, BGRA surfaces
+on macOS, or an exposed composition tree on Windows; the targets above are missed at a gate; 120 Hz panes become a
+requirement; or CEF changes its off-screen rendering, its Windows sandbox arrangement or its macOS bundle layout.

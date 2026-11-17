@@ -366,3 +366,6 @@ jobs:
           flag ".github/workflows/" .github/workflows
           flag "deny.toml" deny.toml
           flag ".cargo/mutants.toml" .cargo/mutants.toml
+          flag "xtask/src/hooks.rs" xtask/src/hooks.rs
+          flag ".cargo/config.toml" .cargo/config.toml
+          flag "crates/udx-core/src/paths.rs" crates/udx-core/src/paths.rs

@@ -18,7 +18,7 @@ element tree back and capture a frame, without becoming a way into a user's runn
 test-only feature in a release build is threat 4 of the supply-chain section, with controls P37 and L13; endpoints
 are owner-only and peer-checked, L28 and P39; entry points take named verbs and validated arguments, L5); what
 "CI-verified" can honestly claim per platform; and whether virtual machines on the development machine (an Apple
-silicon laptop with 16 GB) should become a hands-on step. GPUI is the pinned `gpui-pre =0.3.12` snapshot (decision
+silicon desktop with 16 GB) should become a hands-on step. GPUI is the pinned `gpui-pre =0.3.12` snapshot (decision
 [0007](0007-gpui-source-and-pins.md)).
 
 Step 3 of the task (running virtual machines on the development machine) was not run: the maintainer has not approved
@@ -91,22 +91,24 @@ What each row shows, and how it could have been weaker than it looks:
   have; GPUI warned ("failed to load font ... .SystemUIFont") and the text system then logged a match on "DejaVu Sans",
   which was installed for this reason; the log does not say whether that match is what GPUI used for drawing. The
   text check passed. The app must name fonts it ships on Linux.
-- **Windows.** The runner is Windows Server 2025 Datacenter (build 26100, from the diagnostics log), not Windows 10 or 11, so its shell and window manager configuration are the server's. The session is interactive (`UserInteractive` true; the process's session is the active console
-  session; not a remote session). DXGI enumerated WARP as an adapter and GPUI took it; GPUI's own description says
-  `is_software_emulated: false` for it, so that flag cannot be trusted to detect software rendering on Windows. Time to
-  first render 99 to 124 ms over the round 2 attempts (77 and 78 ms in round 1, run 44128026417). DirectComposition on and off made no difference here.
-- **Wayland.** In the trial this result is advisory: the Wayland step runs under a wrapper that turns any failure into
-  a warning, so a green job does not mean Wayland passed. Read from the logs, it did pass in four of four attempts
-  (the display capture passed its check every time). The compositor is headless sway 1.11 with the pixman software
-  renderer: no real desktop environment, no window decorations, no input devices. The real harness must make
-  the Wayland check a hard one. The window rendered (render count 5, lavapipe; time to first render 1.2 to 2.2 s) and `grim` captured
-  it, but the app cannot read its own window back: GPUI's Wayland window does not implement `render_to_image`, and
-  Wayland gives a client no way to read the screen. The automation run on Wayland (round 2) clicked the button, saw the
-  state change and read the AccessKit tree; its two frame steps are reported as warnings, by design.
-  `scenario.sh` turns the app's non-zero exit into a warning only when the exit code is 1 and `scenario.json` carries
-  the message "no in-app readback on this display server" (every attempt showed exactly that); any other exit code, or
-  exit 1 without that message, fails the step. Before this fix round the script downgraded any non-zero exit. sway also logged
-  that it could not start Xwayland (not installed; irrelevant here).
+- **Windows.** The runner is Windows Server 2025 Datacenter (build 26100, from the diagnostics log), not Windows 10 or
+  11, so its shell and window manager configuration are the server's. The session is interactive (`UserInteractive`
+  true; the process's session is the active console session; not a remote session). DXGI enumerated WARP as an adapter
+  and GPUI took it; GPUI's own description says `is_software_emulated: false` for it, so that flag cannot be trusted to
+  detect software rendering on Windows. Time to first render 99 to 124 ms over the round 2 attempts (77 and 78 ms in
+  round 1, run 44128026417). DirectComposition on and off made no difference here.
+- **Wayland.** In the trial this result is advisory: the Wayland step runs under a wrapper that turns any failure into a
+  warning, so a green job does not mean Wayland passed. Read from the logs, it did pass in four of four attempts (the
+  display capture passed its check every time). The compositor is headless sway 1.11 with the pixman software renderer:
+  no real desktop environment, no window decorations, no input devices. The real harness must make the Wayland check a
+  hard one. The window rendered (render count 5, lavapipe; time to first render 1.2 to 2.2 s) and `grim` captured it,
+  but the app cannot read its own window back: GPUI's Wayland window does not implement `render_to_image`, and Wayland
+  gives a client no way to read the screen. The automation run on Wayland (round 2) clicked the button, saw the state
+  change and read the AccessKit tree; its two frame steps are reported as warnings, by design. `scenario.sh` turns the
+  app's non-zero exit into a warning only when the exit code is 1 and `scenario.json` carries the message "no in-app
+  readback on this display server" (every attempt showed exactly that); any other exit code, or exit 1 without that
+  message, fails the step. Before this fix round the script downgraded any non-zero exit. sway also logged that it could
+  not start Xwayland (not installed; irrelevant here).
 - **The AccessKit tree did not come from a screen reader.** It came from activating accessibility per platform (below).
   On Linux the AT-SPI bus was told `IsEnabled = true` before the app started; on Windows the app sent itself a UI
   Automation root query; on macOS it asked its own content view for its accessibility children.
@@ -304,8 +306,9 @@ documentation):
 - Signing and notarization: not verified. Neither the release notes nor the installation page says; it can be checked
   after download with `codesign` and `spctl` before the first run.
 - The Linux guest image: UTM's Ubuntu guide points to "Ubuntu Server for ARM" at ubuntu.com/download/server/arm (its
-  desktop download is for Intel). An arm64 desktop environment would be installed inside the guest from packages (or
-  from another distribution's arm64 desktop image); the exact image and its size are not verified.
+  desktop download is for Intel); both points are as the guide states them, not verified. An arm64 desktop environment
+  would be installed inside the guest from packages (or from another distribution's arm64 desktop image); the exact
+  image and its size are not verified.
 - Removing everything afterwards: delete the application, delete each virtual machine from UTM's window, and delete
   the downloaded `.dmg` and installer image. UTM's documentation does not cover uninstalling or where machines are
   stored; that location is not verified, so check it before the first guest is created.

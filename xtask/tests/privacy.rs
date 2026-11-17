@@ -863,3 +863,189 @@ fn an_allow_file_value_exempts_only_its_own_rule_inside_the_allow_file() {
         "{text}"
     );
 }
+
+// ---- final review: behaviours that had no test ----
+
+/// The findings of a `--json` run, as (path, commit) pairs.
+fn json_findings(stdout: &str) -> Vec<(String, Option<String>)> {
+    let start = stdout.find('[').expect("json array in stdout");
+    let end = stdout.rfind(']').expect("json array end");
+    let v: Vec<serde_json::Value> =
+        serde_json::from_str(&stdout[start..=end]).expect("valid json array");
+    v.iter()
+        .map(|f| {
+            (
+                f["path"].as_str().unwrap_or_default().to_string(),
+                f.get("commit").and_then(|c| c.as_str()).map(str::to_string),
+            )
+        })
+        .collect()
+}
+
+// With rename detection, a renamed and edited file is an "R" entry, which the
+// added, copied, modified and type-changed filter drops; `--no-renames` is
+// what keeps it scanned. Mutation testing does not change string arguments,
+// so this test is the only guard on that flag.
+#[test]
+fn staged_mode_scans_a_renamed_and_edited_file() {
+    let repo = new_repo();
+    let body: String = (1..=20).map(|i| format!("ordinary line {i}\n")).collect();
+    write(repo.path(), "old.md", &body);
+    commit_all(repo.path(), "add old");
+    git(repo.path(), &["mv", "old.md", "new.md"]);
+    write(repo.path(), "new.md", &format!("{body}see /Users/jroe/x\n"));
+    git(repo.path(), &["add", "new.md"]);
+    // The case under test: git itself sees a rename here.
+    let status = git_out(repo.path(), &["diff", "--cached", "--name-status", "-M"]);
+    assert!(
+        status.starts_with('R') && status.contains("new.md"),
+        "{status}"
+    );
+    let (code, text) = run(repo.path(), &["privacy", "--staged"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(
+        text.contains("new.md") && text.contains("HomePath"),
+        "{text}"
+    );
+}
+
+// A finding made on a side branch is reported against the side commit that
+// introduced it, and one made only in a merge commit's own resolution is
+// reported against the merge commit.
+#[test]
+fn range_mode_scans_a_merged_side_branch_and_the_merge_resolution() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "base\n");
+    write(repo.path(), "b.md", "base\n");
+    commit_all(repo.path(), "base");
+    let base = git_out(repo.path(), &["rev-parse", "HEAD"]);
+    let main = git_out(repo.path(), &["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(repo.path(), &["checkout", "-q", "-b", "side"]);
+    write(repo.path(), "side.md", "see /Users/jroe/side\n");
+    commit_all(repo.path(), "side work");
+    let side: String = git_out(repo.path(), &["rev-parse", "HEAD"])
+        .chars()
+        .take(10)
+        .collect();
+    git(repo.path(), &["checkout", "-q", &main]);
+    write(repo.path(), "a.md", "main work\n");
+    commit_all(repo.path(), "main work");
+    git(
+        repo.path(),
+        &["merge", "-q", "--no-ff", "--no-commit", "side"],
+    );
+    write(repo.path(), "b.md", "resolved at /Users/jroe/merge\n");
+    git(repo.path(), &["add", "b.md"]);
+    git(
+        repo.path(),
+        &["commit", "-q", "--no-verify", "-m", "merge side"],
+    );
+    let merge: String = git_out(repo.path(), &["rev-parse", "HEAD"])
+        .chars()
+        .take(10)
+        .collect();
+    assert_eq!(
+        git_out(repo.path(), &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .split(' ')
+            .count(),
+        3,
+        "HEAD must be a merge commit"
+    );
+    let out = xtask(repo.path())
+        .args(["privacy", "--json", "--range", &format!("{base}..HEAD")])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{stdout}");
+    let found = json_findings(&stdout);
+    assert!(
+        found.contains(&("side.md".to_string(), Some(side.clone()))),
+        "side branch finding against commit {side}: {found:?}"
+    );
+    assert!(
+        found.contains(&("b.md".to_string(), Some(merge.clone()))),
+        "merge resolution finding against commit {merge}: {found:?}"
+    );
+}
+
+// The installed hooks refuse a commit: the pre-commit hook for a finding in
+// the staged content, the commit-msg hook for one in the message. The hooks
+// run `cargo xtask ...` from the scratch repository's top level after
+// checking for `xtask/Cargo.toml` there; a stand-in `cargo` first on PATH
+// runs the `xtask` binary built for this test, so nothing outside the scratch
+// repository is used or changed.
+#[cfg(unix)]
+#[test]
+fn installed_hooks_refuse_a_commit_with_a_finding() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = new_repo();
+    fs::create_dir_all(repo.path().join("xtask")).unwrap();
+    write(
+        repo.path(),
+        "xtask/Cargo.toml",
+        "[package]\nname = \"stand-in\"\n",
+    );
+    write(repo.path(), "a.md", "clean\n");
+    commit_all(repo.path(), "first");
+    xtask(repo.path())
+        .args(["hooks", "install"])
+        .assert()
+        .code(0);
+
+    let bin = TempDir::new().unwrap();
+    let cargo = bin.path().join("cargo");
+    fs::write(
+        &cargo,
+        format!(
+            "#!/bin/sh\n[ \"$1\" = xtask ] || exit 97\nshift\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_xtask")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&cargo, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut path = vec![bin.path().to_path_buf()];
+    path.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let path = std::env::join_paths(path).unwrap();
+
+    let commit = |msg: &str| -> (bool, String) {
+        let out = isolated(std::process::Command::new("git"))
+            .args(["commit", "-q", "-m", msg])
+            .current_dir(repo.path())
+            .env("PATH", &path)
+            .env_remove("CI")
+            .output()
+            .expect("git runs");
+        (out.status.success(), output_text(&out))
+    };
+    let head = || git_out(repo.path(), &["rev-parse", "HEAD"]);
+
+    // A finding in the staged content: the pre-commit hook refuses.
+    write(repo.path(), "a.md", "see /Users/jroe/x\n");
+    git(repo.path(), &["add", "a.md"]);
+    let before = head();
+    let (ok, text) = commit("ordinary message");
+    assert!(!ok, "a staged finding must refuse the commit: {text}");
+    assert!(text.contains("HomePath"), "{text}");
+    assert_eq!(head(), before, "nothing may be committed");
+
+    // A finding in the message: the commit-msg hook refuses.
+    write(repo.path(), "a.md", "clean again\n");
+    git(repo.path(), &["add", "a.md"]);
+    let (ok, text) = commit("fix for jane.roe@corp.io");
+    assert!(
+        !ok,
+        "a finding in the message must refuse the commit: {text}"
+    );
+    assert!(text.contains("Email"), "{text}");
+    assert_eq!(head(), before, "nothing may be committed");
+
+    // Control: the same hooks let a clean commit through, so the refusals
+    // above came from the gate, not from a hook that cannot run.
+    let (ok, text) = commit("ordinary message");
+    assert!(ok, "a clean commit must pass: {text}");
+    assert!(text.contains("privacy: clean"), "{text}");
+    assert_ne!(head(), before);
+}

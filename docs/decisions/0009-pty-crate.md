@@ -30,12 +30,11 @@ crates' own source in the cargo registry.
 Read as reference, all permissively licensed: the source of `alacritty_terminal` 0.26.0 (its `tty` module for Unix and
 Windows including ConPTY, the event loop, `Term`, the grid, selection and events), `vte` 0.15.0, and `portable-pty`
 0.9.0 (the library, its command builder and the Windows pseudoconsole code), plus `libc` 0.2.191, all from the cargo
-registry; and crates.io and GitHub API pages for versions, release dates, licences, wezterm commits under `pty/`, wezterm
-issues #8338, #6783, #7025, #4205 and #4206, and Alacritty commits under `alacritty_terminal/` and its open ConPTY
-issues. The spike's session type calls both crates through their public APIs; the spike source carries no credit for copied code and the trial's report records
-none. Nothing was
-read or copied from the editor project's crates that are not permissively licensed (its terminal view, markdown and
-editor crates in particular).
+registry; and crates.io and GitHub API pages for versions, release dates, licences, wezterm commits under `pty/`,
+wezterm issues #8338, #6783, #7025, #4205 and #4206, and Alacritty commits under `alacritty_terminal/` and its open
+ConPTY issues. The spike's session type calls both crates through their public APIs; the spike source carries no credit
+for copied code and the trial's report records none. Nothing was read or copied from the editor project's crates that
+are not permissively licensed (its terminal view, markdown and editor crates in particular).
 
 ## Options considered
 
@@ -51,7 +50,7 @@ editor crates in particular).
 | Builds and headless check, macOS (local, release, 3 runs) | Builds; every hard check passes in all 3 runs | Builds; every hard check passes in all 3 runs |
 | Builds and headless check, Linux (x86_64, CI) | Builds; run 44093008374: 46 passed, 0 failed, 2 warnings (the `vi` resize check, below); run 44097237928: 47 passed, 1 warning (the same check) | Builds; run 44093008374: 46 passed, 2 warnings (the same check); run 44097237928: that check passed |
 | Builds and headless check, Windows (CI) | Builds; 38 passed, 0 failed, 2 warnings (the raw keystroke round trip, below) | Same: builds; 38 passed, 0 failed, 2 warnings (the raw keystroke round trip) |
-| Builds and headless check, macOS (CI, same workflow run) | Builds; 48 passed, 0 failed, 0 warnings | Same: 48 passed, 0 failed, 0 warnings |
+| Builds and headless check, macOS (CI, run 44093008374) | Builds; 48 passed, 0 failed, 0 warnings | Same: 48 passed, 0 failed, 0 warnings |
 | Licence | MIT. New transitive crates: `nix` 0.28 (MIT), `serial2` (BSD-2-Clause OR Apache-2.0), `shared_library` 0.1.9 (Apache-2.0/MIT, last released 2018), `winreg` 0.10 (MIT), `shell-words` (MIT/Apache-2.0) | Apache-2.0. New transitive crates: `vte` 0.15 (Apache-2.0 OR MIT), `rustix-openpty` (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT), `signal-hook` (MIT OR Apache-2.0), `miow` (MIT OR Apache-2.0), `home`, `cursor-icon`, `windows-sys` 0.59 |
 | Releases | 0.9.0 on 2025-02-11, 0.8.1 on 2023-03-13. Lives in the wezterm monorepo, whose last tagged release is from 2024-02 | 0.26.0 on 2026-04-06, 0.25.1 on 2025-10-18; commits to the crate in August, October and November 2026 |
 | Open issues that matter | wezterm #8338 (2026-11-14): 0.9.0's Windows `kill()` reports success as failure and failure as success; fixed on main 2026-06-07, not released. #6783 (open since 2025-03): "0.9.0 doesn't work on Windows", which the maintainer traced to ConPTY's cursor-position request going unanswered; downstream projects carry workarounds. #4205/#4206 (2023): PATH and write problems on Windows. 26 open issues mention the crate. The move from `winapi` to `windows-sys` (2026-08) is also unreleased | In the Alacritty repository: 31 open issues mention ConPTY, most of them old and about Alacritty's behaviour rather than the crate's API (for example #8147, a freeze on heavy colour output on Windows 10) |
@@ -107,9 +106,9 @@ A design call, within design section 5.7 (the PTY crate is chosen in the M0 tria
   `vi` (vim-tiny 9.1) switched to the alternate screen, showed typed text and quit correctly, but after a resize to 70
   by 18 it still reported 80 columns and 24 lines and the check timed out (46 passed, 2 warnings). In run 44097237928
   (commit d6a7e38, same checks) it timed out on `portable-pty` only (47 passed, 1 warning). No conclusion about either
-  backend follows from one run each. The other Linux resize checks passed on both backends (the child helper at 100x30 and `stty size`
-  reporting 20 90), so the PTY layer does carry the resize; why `vi` did not see it was not determined. On macOS the
-  same check passed on both backends, locally and in CI.
+  backend follows from one run each. The other Linux resize checks passed on both backends (the child helper at 100x30
+  and `stty size` reporting 20 90), so the PTY layer does carry the resize; why `vi` did not see it was not determined.
+  On macOS the same check passed on both backends, locally and in CI.
 - That `portable-pty` works with ConPTY when the host answers the cursor-position request (the session does): the
   Windows CI run shows it spawning, echoing, resizing, bursting and reporting exit codes, so it does work for those,
   but the raw key round trip, the one check on which a ConPTY flag choice would matter for input, failed there on both
@@ -136,6 +135,10 @@ CI annotation and a step summary entry, so none passes unseen. Why each is soft,
 | Shell resize reported by `mode con` (Windows only; Unix uses `stty size`, hard) | The output format of `mode con` is unproven | not applicable | not applicable | pass both |
 | Reader ends after the child exits | Marked soft on every platform because end-of-file timing differs by platform (on Windows the reader ends only after the session closes the master) | pass | pass | pass both |
 | `vi` on the alternate screen: draws the file; typed text appears; resize reported by `vi`; quitting leaves the alternate screen (Unix only) | Depends on a `vi` being installed and on its behaviour; soft on every Unix platform | pass all four, both backends | pass three; the resize check intermittent: WARN on both backends in run 44093008374 (timed out, `vi` reported 80x24), on `portable-pty` only in run 44097237928 | not run |
+
+Two notes on the table. Spawning `vi` is a soft check of its own as well (Unix only); it is listed here with the four
+`vi` checks it comes before. The reasons given for the `mode con` and reader-end checks are the trial author's inference
+about platform behaviour, not documented behaviour.
 
 ## Revisit when
 

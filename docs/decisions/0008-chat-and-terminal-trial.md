@@ -143,12 +143,12 @@ background thread. A streamed token counts as painted only once the parse that c
 The kit's runs agree with each other closely; the plain renderer's vary between runs (see above), so the two compare
 best on their worst runs. On frame pacing the kit is behind the plain renderer in places, as the table shows: while
 resizing, 27 to 40 intervals over 1.5 times the refresh interval against 12 to 23, and a token p99 of 20.8 to 22.2 ms
-against 15.7 to 18.0 ms; on the first-visit scroll, 1 to 7 intervals over twice the refresh interval against 0 or 1;
-on the fast pass, 4, 5 and 8 intervals over twice the refresh interval against 2, 1 and 1; and start-up 17 ms later at
-the median. It is ahead on memory because it forgets rows it no longer draws (and parses
-them again when they return). The kit adds 33 crates to the resolved graph, counted from `cargo metadata` over all
-targets and all dependency kinds; a later recount over normal dependency edges only gave 31, and the difference was not
-traced. All are permissively licensed; one, `instant`, carries an unmaintained notice.
+against 15.7 to 18.0 ms; on the first-visit scroll, 1 to 7 intervals over twice the refresh interval against 0 or 1; on
+the fast pass, 4, 5 and 8 intervals over twice the refresh interval against 2, 1 and 1; and start-up 17 ms later at the
+median. It is ahead on memory because it forgets rows it no longer draws (and parses them again when they return). The
+kit adds 33 crates to the resolved graph, counted from `cargo metadata` over all targets and all dependency kinds; a
+later recount over normal dependency edges only gave 31, and the difference was not traced. All are permissively
+licensed; one, `instant`, carries an unmaintained notice.
 
 ### Where a frame's time goes (GPUI's profiler, plain renderer, one run)
 
@@ -267,17 +267,16 @@ wrapper over it) or for the terminal (it has nothing for a cell grid). For messa
 provisional: adopt the kit's unstyled layer, `gpui-base`, and its markdown `TextView` (it already passes the licence
 policy) for the selection, copy, link handling, code-block highlighting hooks and background, incremental streaming
 parse that GPUI does not have and the plain renderer would have to build, if the checks below hold. Its measured cost is
-worse than our own renderer's in places: while resizing, 27 to 40 intervals over 1.5 times the refresh
-interval against 12 to 23, and a token p99 of about 21 ms against 16 to 18 ms; on a first-visit scroll, 1 to 7
-intervals over twice the refresh interval against 0 or 1; on the fast pass, 4, 5 and 8 against 2, 1 and 1; and
-start-up 17 ms later (169 against 152 ms). It is smaller in
-memory after a full scroll. Two limits on the evidence: the kit was measured only in its element-keyed form, which
-drops its parse whenever a row leaves the view, while the form recommended here (one `TextViewState` per message in an
-app-level cache) was not measured; and selection and links, the reasons for adopting it, were not exercised. Before the
-recommendation is final, measure: the cached-state form in the same scenarios (scroll, jumps, stream, resize);
-selection and copy within a message and across messages in the virtualised list; link activation; and that a long
-message whose parse lands a frame later does not shift the rows around it. None of that was measured here. The styled
-layer (`gpui-component`) is not needed for these two surfaces.
+worse than our own renderer's in places: while resizing, 27 to 40 intervals over 1.5 times the refresh interval against
+12 to 23, and a token p99 of about 21 ms against 16 to 18 ms; on a first-visit scroll, 1 to 7 intervals over twice the
+refresh interval against 0 or 1; on the fast pass, 4, 5 and 8 against 2, 1 and 1; and start-up 17 ms later (169 against
+152 ms). It is smaller in memory after a full scroll. Two limits on the evidence: the kit was measured only in its
+element-keyed form, which drops its parse whenever a row leaves the view, while the form recommended here (one
+`TextViewState` per message in an app-level cache) was not measured; and selection and links, the reasons for adopting
+it, were not exercised. Before the recommendation is final, measure: the cached-state form in the same scenarios
+(scroll, jumps, stream, resize); selection and copy within a message and across messages in the virtualised list; link
+activation; and that a long message whose parse lands a frame later does not shift the rows around it. None of that was
+measured here. The styled layer (`gpui-component`) is not needed for these two surfaces.
 
 ## Who decided
 
@@ -337,17 +336,17 @@ A design call from the M0 trial (Task 10), within decision 0002 and design secti
 
 ## What remains unverified
 
-- Everything visual on Linux and Windows. The runners have no display, so nothing visual was verified there: no
-  window, frame time or glyph. CI (workflow run 44093008374 on commit 332cbf2, all three jobs green) shows that `chat`
-  and `term` build in release on macOS, Linux and Windows, that `--features kit,profiler` type-checks there, and that
-  their windowless self-tests pass (`--selftest`: every message's text runs cover its text on character boundaries;
-  GPUI keystrokes map to the expected bytes). `headless-check` (markdown, keys, the emulator, both PTY backends with real
+- Everything visual on Linux and Windows. The runners have no display, so nothing visual was verified there: no window,
+  frame time or glyph. CI (workflow run 44093008374 on commit 332cbf2, all three jobs green) shows that `chat` and
+  `term` build in release on macOS, Linux and Windows, that `--features kit,profiler` type-checks there, and that their
+  windowless self-tests pass (`--selftest`: every message's text runs cover its text on character boundaries; GPUI
+  keystrokes map to the expected bytes). `headless-check` (markdown, keys, the emulator, both PTY backends with real
   child processes) passed with 48 of 48 on macOS, 46 passed and 0 failed on Linux with 2 warnings, and 38 passed and 0
-  failed on Windows with 2 warnings. The Linux warnings are the `vi` resize check, which is intermittent (on both backends in that run, `vi`
-  still reported 80x24 after a resize to 70x18 and the check timed out; on `portable-pty` only in a later run,
-  44097237928); the Windows warnings are the 33-key raw keystroke round trip
-  on both backends, which stopped at the key "z" with no reply, so it is an open question for the real terminal on
-  Windows. Details are in [0009](0009-pty-crate.md). Task 13 looks at rendering without hardware.
+  failed on Windows with 2 warnings. The Linux warnings are the `vi` resize check, which is intermittent (on both
+  backends in that run, `vi` still reported 80x24 after a resize to 70x18 and the check timed out; on `portable-pty`
+  only in a later run, 44097237928); the Windows warnings are the 33-key raw keystroke round trip on both backends,
+  which stopped at the key "z" with no reply, so it is an open question for the real terminal on Windows. Details are in
+  [0009](0009-pty-crate.md). Task 13 looks at rendering without hardware.
 - What the frames look like on macOS: no screenshots were taken (the trial may not capture the screen), so glyph
   fallback for emoji and CJK, right-to-left shaping of the Arabic and Hebrew messages, wrapping of long lines and the
   terminal's colours were checked only through the emulator's state and the app's own records. The maintainer's

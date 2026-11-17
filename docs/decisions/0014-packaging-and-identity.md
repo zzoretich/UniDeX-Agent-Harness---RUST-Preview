@@ -163,7 +163,15 @@ included in none of them.
   setting of the Package step, not a step after it. Before any secret is added to the repository: the secrets must not be
   available to `pull_request` runs (this workflow runs on pull requests that change its paths); the `-vv` flag on the
   Package step traces the whole configuration and must be removed; and Package is one matrix step, so each platform's
-  signing environment needs a condition on the operating system.
+  signing environment needs a condition on the operating system. Added at the M0 gate's final review, two more
+  conditions before any signing secret is added to the Package step: (a) the two fetches with no hash check (Supply
+  chain, below) are hash-checked or supplied from verified copies, because the `create-dmg` script runs inside that
+  step and could read the certificate and notarization credentials from its environment (its URL is pinned to a
+  commit, which lowers the likelihood); (b) where the secrets live and who approves their use is decided first: threat
+  model P38 keeps signing secrets only in a release environment that needs the maintainer's approval, which a scheduled
+  nightly cannot satisfy without a decision. The options: an approval-gated environment, which a schedule cannot use
+  unattended; signing only on manually approved runs; or unsigned nightlies, with signed builds made separately. M1
+  delivers signed nightlies (design 6), so these hold before the first signed build, not only before a release.
 - Linux formats: `.deb` and a plain tarball now; the `.deb` moves to cargo-deb when the setuid helper arrives (measured to
   work). cargo-packager's AppImage is unnecessary for the browser-less build until needed.
 - Future browser component: the macOS nested bundles and the Windows bootstrap arrangement are not exercised by any
@@ -184,8 +192,9 @@ included in none of them.
   the route to a hashed build: the packager skips the create-dmg download when the script already exists in its tools
   folder (`dmg/mod.rs`), and it skips the NSIS toolset download, plugin included, when its NSIS folder already holds the
   required files (`nsis/mod.rs`, `package()`), re-verifying only `nsis_tauri_utils.dll` by hash, so a copy of the
-  ApplicationID plugin placed there is used as it is. Condition: before any build is released to users, each of these
-  is fetched with a hash check or supplied from a copy verified in advance.
+  ApplicationID plugin placed there is used as it is. Condition: before the first signed build, and in any case before
+  any build is released to users, each of these is fetched with a hash check or supplied from a copy verified in
+  advance (the first signed build was added at the M0 gate's final review; see Signing and notarization, above).
   Actions are pinned to commit SHAs; `actions/setup-dotnet` (trial only) at `0f4a354dd5547a28c70b7853dbd95d5b67886e73`
   (v6.1.0, from `gh api repos/actions/setup-dotnet/git/ref/tags/v6.1.0`).
 - Tool risk: cargo-packager's last release is 2025-11-27, almost a year old, although its repository has commits in
@@ -259,7 +268,9 @@ paths). Debian package and program file name: `unidex-rust-preview`.
 
 ## Maintainer's step: the macOS package by hand
 
-Take a green `nightly` run on the default branch (scheduled or started by hand), or this pull request's run; do not use a run from a fork's pull request, which can also produce artifacts with "nightly" in their names. On that run's page download the artifact `unidex-rust-preview-nightly-unsigned-macos`
+Take a green `nightly` run on the default branch (scheduled or started by hand); the artifacts of Task 14's pull
+request (13) exist until 2026-11-24. Do not use a run from a fork's pull request, which can also produce artifacts
+with "nightly" in their names. On that run's page download the artifact `unidex-rust-preview-nightly-unsigned-macos`
 (about 3.2 MB), unzip it and open the `.dmg` inside; drag the app to a scratch folder, not Applications. The package is
 unsigned, and a browser download is quarantined, so macOS will refuse to open it, saying it cannot verify the app is free
 of malware or (because the bundle's signature is only the linker's) that it is damaged. If it offers a choice, open
@@ -272,8 +283,9 @@ delete the download, and report what macOS said: that is the one result the runn
 
 ## Revisit when
 
-- Any build is to be released to users: first the unhashed fetches listed under Supply chain (the NSIS ApplicationID
-  plugin, the `create-dmg` script, the AppImage tooling if used) are hash-checked or supplied from a verified copy;
+- The first signed build is made, or any build is to be released to users: first the unhashed fetches listed under
+  Supply chain (the NSIS ApplicationID plugin, the `create-dmg` script, the AppImage tooling if used) are hash-checked
+  or supplied from a verified copy;
 - The first signed or notarized release is prepared (identity confirmed; secrets supplied; the pre-signing changes in
   Consequences made); the browser is packaged
   (re-trial nested bundles, the setuid `.deb` and the Windows bootstrap); cargo-packager has no release by
