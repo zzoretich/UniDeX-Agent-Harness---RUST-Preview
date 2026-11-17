@@ -75,6 +75,11 @@ pub enum FromHelper {
     DevTools {
         message: serde_json::Value,
     },
+    /// Something the engine reports that the app only logs or shows: a load finished, a
+    /// renderer ended, a popup, download, file dialog or permission prompt was refused.
+    Status {
+        text: String,
+    },
 }
 
 pub fn write_line<T: Serialize>(out: &mut impl Write, message: &T) -> io::Result<()> {

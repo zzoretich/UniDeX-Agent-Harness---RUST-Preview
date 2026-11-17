@@ -24,3 +24,11 @@ gpui_platform = { workspace = true, features = ["test-support"] }
 image.workspace = true
 serde_json.workspace = true
 spike-protocol.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The process tree measurements (proc_pid_rusage, proc_listchildpids).
+libc.workspace = true
+# The input-method path: GPUI's own NSView, driven as an input method drives it.
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSString", "NSRange", "NSGeometry"] }
+raw-window-handle.workspace = true

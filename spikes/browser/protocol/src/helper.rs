@@ -127,6 +127,7 @@ impl HelperBrowser {
                             characters,
                         }),
                         FromHelper::DevTools { message } => sink(BrowserEvent::DevTools(message)),
+                        FromHelper::Status { text } => sink(BrowserEvent::Status(text)),
                     }
                 };
                 sink(BrowserEvent::Exited { status });

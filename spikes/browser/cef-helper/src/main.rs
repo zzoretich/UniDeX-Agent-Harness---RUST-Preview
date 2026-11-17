@@ -1,21 +1,30 @@
-//! The CEF helper for the browser trial (Task 12, decision 0012). Throwaway; phase B runs it.
+//! The CEF helper for the browser trial (Task 12, decision 0012). Throwaway.
 //!
 //! One executable, two roles:
 //!
-//! - Started by `spike-app` (no `--type=` switch), it is CEF's browser process. It owns CEF
-//!   entirely: on macOS its own `NSApplication` subclass (see `mac.rs`), and CEF's own message
-//!   loop (`CefRunMessageLoop`), so nothing has to be pumped from outside. It renders one
-//!   windowless browser, copies each `OnPaint` frame into a shared-memory slot, maps the
-//!   forwarded input onto CEF's off-screen input calls, and relays DevTools calls through
-//!   `SendDevToolsMessage` (no remote-debugging port, threat model P32).
+//! - Started by `spike-app` or `spike-smoke` (no `--type=` switch), it is CEF's browser
+//!   process. It owns CEF entirely: on macOS its own `NSApplication` subclass (see `mac.rs`),
+//!   and CEF's own message loop (`CefRunMessageLoop`), so nothing has to be pumped from outside.
+//!   It renders one visible windowless browser (plus hidden ones with `--tabs`), copies each
+//!   `OnPaint` frame into a shared-memory slot, maps the forwarded input onto CEF's off-screen
+//!   input calls, and relays DevTools calls through `SendDevToolsMessage` (no remote-debugging
+//!   port, threat model P32).
 //! - Started by Chromium with `--type=renderer`, `--type=gpu-process` and so on, it runs that
 //!   sub-process and exits. On macOS those copies live in the helper app bundles Chromium
-//!   requires (`<name> Helper (Renderer).app` and so on); elsewhere Chromium starts this same
-//!   file again.
+//!   requires (`<name> Helper (Renderer).app` and so on) and enter Chromium's sandbox first;
+//!   elsewhere Chromium starts this same file again.
+//!
+//! Before either role does anything, `guard::check` stops a re-launch loop (see `guard.rs`).
 //!
 //! The protocol is the stand-in's (`spike-protocol`). Arguments from the app:
-//! `--shm-fd`/`--shm-handle`, `--shm-size`, `--profile-dir DIR` (the dedicated profile).
+//! `--shm-fd`/`--shm-handle`, `--shm-size`, `--profile-dir DIR` (the dedicated profile and
+//! cache), `--start-url URL` (default `about:blank`), `--tabs N` (N - 1 hidden extra tabs,
+//! for memory measurements), `--hidden-url URL` (what the hidden tabs load), and
+//! `--probe-shared-texture` (asks CEF for shared textures instead of `OnPaint` buffers and
+//! only logs what arrives; the app then gets no frames), `--frame-rate N` (CEF's windowless
+//! frame rate, default 60).
 
+mod guard;
 mod keys;
 #[cfg(target_os = "macos")]
 mod mac;
@@ -29,7 +38,7 @@ use std::cell::{Cell, RefCell};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 const EVENTFLAG_SHIFT_DOWN: u32 = 1 << 1;
@@ -40,6 +49,12 @@ const EVENTFLAG_MIDDLE_MOUSE_BUTTON: u32 = 1 << 5;
 const EVENTFLAG_RIGHT_MOUSE_BUTTON: u32 = 1 << 6;
 const EVENTFLAG_COMMAND_DOWN: u32 = 1 << 7;
 const EVENTFLAG_IS_REPEAT: u32 = 1 << 13;
+/// CEF's "no range" (`CefRange::InvalidRange()`). The range arguments of the input-method calls
+/// must not be null: libcef ignores a call whose range pointer is null, silently.
+const NO_RANGE: Range = Range {
+    from: u32::MAX,
+    to: u32::MAX,
+};
 
 /// State shared between CEF's UI thread and the thread reading the app's messages.
 struct Shared {
@@ -47,9 +62,18 @@ struct Shared {
     free: Vec<AtomicBool>,
     repaint_wanted: AtomicBool,
     out: Mutex<BufWriter<File>>,
+    /// The view in logical pixels and the scale factor, written by the reader thread as soon as
+    /// the app sends it, read by CEF whenever it asks for the view rectangle or screen info.
     view: Mutex<(i32, i32, f32)>,
     popup: Mutex<Option<proto::Rect>>,
     seq: AtomicU64,
+    /// The visible browser's identifier; only its frames go to the app.
+    main_id: AtomicU32,
+    accelerated_logged: AtomicU32,
+    /// The copy from CEF's buffer into shared memory: frames and nanoseconds since the last
+    /// report.
+    copies: AtomicU64,
+    copy_ns: AtomicU64,
 }
 
 impl Shared {
@@ -61,18 +85,39 @@ impl Shared {
             quit_message_loop();
         }
     }
+
+    fn status(&self, text: impl Into<String>) {
+        let text = text.into();
+        eprintln!("cef-helper: {text}");
+        self.send(&FromHelper::Status { text });
+    }
+}
+
+struct Options {
+    start_url: String,
+    tabs: usize,
+    hidden_url: String,
+    probe_shared_texture: bool,
+    frame_rate: i32,
 }
 
 thread_local! {
-    // CEF objects live on CEF's UI thread only.
-    static BROWSER: RefCell<Option<Browser>> = const { RefCell::new(None) };
+    // CEF objects live on CEF's UI thread only. Index 0 is the visible browser.
+    static BROWSERS: RefCell<Vec<Browser>> = const { RefCell::new(Vec::new()) };
     static DEVTOOLS: RefCell<Option<Registration>> = const { RefCell::new(None) };
     static COMPOSING: Cell<bool> = const { Cell::new(false) };
+    /// Messages that arrived before the visible browser existed, replayed once it does.
+    static PENDING: RefCell<Vec<ToHelper>> = const { RefCell::new(Vec::new()) };
+    static CLOSING: Cell<bool> = const { Cell::new(false) };
 }
 
 fn main() -> ExitCode {
     let raw: Vec<String> = std::env::args().collect();
     let is_subprocess = raw.iter().any(|a| a.starts_with("--type="));
+    if let Err(reason) = guard::check(is_subprocess) {
+        eprintln!("cef-helper: refusing to start: {reason}");
+        return ExitCode::from(3);
+    }
     let args = Args::new();
 
     #[cfg(target_os = "macos")]
@@ -122,8 +167,31 @@ fn run_browser_process(raw: &[String], args: &Args) -> anyhow::Result<()> {
     }) {
         anyhow::bail!("refusing to start with a remote-debugging switch");
     }
+    // The design keeps Chromium's sandbox on; refuse the switches that turn it off.
+    if raw
+        .iter()
+        .any(|a| a == "--no-sandbox" || a == "--disable-setuid-sandbox")
+    {
+        anyhow::bail!("refusing to start with a switch that turns Chromium's sandbox off");
+    }
     let profile =
         arg(raw, "--profile-dir").ok_or_else(|| anyhow::anyhow!("missing --profile-dir"))?;
+    let options = Options {
+        start_url: arg(raw, "--start-url").unwrap_or("about:blank").to_string(),
+        tabs: arg(raw, "--tabs")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1usize)
+            .clamp(1, 8),
+        hidden_url: arg(raw, "--hidden-url")
+            .or(arg(raw, "--start-url"))
+            .unwrap_or("about:blank")
+            .to_string(),
+        probe_shared_texture: raw.iter().any(|a| a == "--probe-shared-texture"),
+        frame_rate: arg(raw, "--frame-rate")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60i32)
+            .clamp(1, 240),
+    };
     let shm = SharedFrames::open_inherited(raw)?;
     let (input, output) = take_protocol_pipes()?;
 
@@ -135,17 +203,28 @@ fn run_browser_process(raw: &[String], args: &Args) -> anyhow::Result<()> {
         view: Mutex::new((800, 600, 1.0)),
         popup: Mutex::new(None),
         seq: AtomicU64::new(0),
+        main_id: AtomicU32::new(u32::MAX),
+        accelerated_logged: AtomicU32::new(0),
+        copies: AtomicU64::new(0),
+        copy_ns: AtomicU64::new(0),
     });
 
     #[cfg(target_os = "macos")]
     mac::install_application();
 
-    let mut app = HelperApp::new(shared.clone());
+    let log_file = std::path::Path::new(profile).join("cef.log");
+    // `--allow-background-network` keeps Chromium's default background fetches (to measure them).
+    let allow_background_network = raw.iter().any(|a| a == "--allow-background-network");
+    let mut app = HelperApp::new(shared.clone(), Arc::new(options), allow_background_network);
     let settings = Settings {
         windowless_rendering_enabled: 1,
         no_sandbox: 0,
         root_cache_path: CefString::from(profile),
         cache_path: CefString::from(profile),
+        log_file: CefString::from(log_file.to_string_lossy().as_ref()),
+        log_severity: LogSeverity::WARNING,
+        // Never a debugging port (P32); 0 is CEF's "off".
+        remote_debugging_port: 0,
         ..Default::default()
     };
     if initialize(
@@ -162,7 +241,7 @@ fn run_browser_process(raw: &[String], args: &Args) -> anyhow::Result<()> {
     std::thread::spawn(move || read_app_messages(input, reader_shared));
 
     run_message_loop();
-    BROWSER.with_borrow_mut(|b| *b = None);
+    BROWSERS.with_borrow_mut(|b| b.clear());
     DEVTOOLS.with_borrow_mut(|d| *d = None);
     shutdown();
     eprintln!("cef-helper: exiting");
@@ -194,8 +273,7 @@ fn take_protocol_pipes() -> anyhow::Result<(File, File)> {
     #[cfg(windows)]
     {
         // Duplicated handles are not inheritable; Chromium starts its sub-processes with an
-        // explicit handle list. Whether a stray inheritable standard handle still reaches them
-        // is a phase B check.
+        // explicit handle list.
         use std::os::windows::io::AsHandle as _;
         let input = File::from(std::io::stdin().as_handle().try_clone_to_owned()?);
         let output = File::from(std::io::stdout().as_handle().try_clone_to_owned()?);
@@ -203,8 +281,8 @@ fn take_protocol_pipes() -> anyhow::Result<(File, File)> {
     }
 }
 
-/// The thread that reads the app's messages. Slot releases are handled here; everything else
-/// is posted to CEF's UI thread, where CEF's objects live.
+/// The thread that reads the app's messages. Slot releases and the view size are handled here;
+/// everything else is posted to CEF's UI thread, where CEF's objects live.
 fn read_app_messages(input: File, shared: Arc<Shared>) {
     let mut input = BufReader::new(input);
     let mut buffer = Vec::new();
@@ -226,6 +304,27 @@ fn read_app_messages(input: File, shared: Arc<Shared>) {
                 if shared.repaint_wanted.swap(false, Ordering::AcqRel) {
                     post(ToHelper::Release { slot });
                 }
+            }
+            ToHelper::Resize {
+                width,
+                height,
+                scale_factor,
+            } => {
+                // Validated: the app is trusted, but the numbers size a shared-memory frame.
+                let (max_w, max_h) = shared.shm.max_size();
+                let scale = if scale_factor.is_finite() {
+                    scale_factor.clamp(0.5, 4.0)
+                } else {
+                    1.0
+                };
+                let w = (width as f32).clamp(1.0, max_w as f32 / scale) as i32;
+                let h = (height as f32).clamp(1.0, max_h as f32 / scale) as i32;
+                *shared.view.lock().unwrap() = (w, h, scale);
+                post(ToHelper::Resize {
+                    width: w as u32,
+                    height: h as u32,
+                    scale_factor: scale,
+                });
             }
             other => post(other),
         }
@@ -252,41 +351,35 @@ wrap_task! {
     }
 }
 
+fn main_browser() -> Option<Browser> {
+    BROWSERS.with_borrow(|b| b.first().cloned())
+}
+
 fn handle_on_ui_thread(message: ToHelper) {
-    let host = BROWSER.with_borrow(|b| b.as_ref().and_then(|b| b.host()));
+    let browser = main_browser();
+    if browser.is_none() && !matches!(message, ToHelper::Shutdown | ToHelper::Release { .. }) {
+        // The browser is created once CEF's context is up; keep what arrives before.
+        PENDING.with_borrow_mut(|p| p.push(message));
+        return;
+    }
+    let host = browser.as_ref().and_then(|b| b.host());
     match message {
-        ToHelper::Shutdown => match host {
-            Some(host) => host.close_browser(1),
-            None => quit_message_loop(),
-        },
+        ToHelper::Shutdown => close_all(),
         // A slot came free after a frame was dropped for lack of one: ask for a repaint.
         ToHelper::Release { .. } => {
             if let Some(host) = host {
                 host.invalidate(PaintElementType::VIEW);
             }
         }
-        ToHelper::Resize {
-            width,
-            height,
-            scale_factor,
-        } => {
+        ToHelper::Resize { .. } => {
             let Some(host) = host else { return };
-            let changed_scale = {
-                let shared = SHARED.with_borrow(|s| s.clone());
-                let Some(shared) = shared else { return };
-                let mut view = shared.view.lock().unwrap();
-                let changed = (view.2 - scale_factor).abs() > f32::EPSILON;
-                *view = (width as i32, height as i32, scale_factor);
-                changed
-            };
-            if changed_scale {
-                host.notify_screen_info_changed();
-            }
+            // The reader thread already stored the size; CEF reads it back from the handlers.
+            host.notify_screen_info_changed();
             host.was_resized();
         }
         ToHelper::Input { event } => {
-            if let Some(host) = host {
-                forward_input(&host, event);
+            if let (Some(host), Some(browser)) = (host, browser) {
+                forward_input(&browser, &host, event);
             }
         }
         ToHelper::DevTools { id, method, params } => {
@@ -300,8 +393,18 @@ fn handle_on_ui_thread(message: ToHelper) {
     }
 }
 
-thread_local! {
-    static SHARED: RefCell<Option<Arc<Shared>>> = const { RefCell::new(None) };
+fn close_all() {
+    CLOSING.set(true);
+    let browsers = BROWSERS.with_borrow(|b| b.clone());
+    if browsers.is_empty() {
+        quit_message_loop();
+        return;
+    }
+    for browser in browsers {
+        if let Some(host) = browser.host() {
+            host.close_browser(1);
+        }
+    }
 }
 
 fn modifier_flags(m: &proto::Modifiers) -> u32 {
@@ -341,9 +444,32 @@ fn mouse_button(button: proto::PointerButton) -> Option<MouseButtonType> {
     }
 }
 
+/// On macOS, Chromium leaves the edit shortcuts (Command-C and so on) to the application's
+/// menu, so Blink's own key bindings do not handle them. An off-screen embedder has no menu for
+/// the page, so the helper performs them on the focused frame. This is also the one place the
+/// app could intercept clipboard access by a shortcut (P52).
+fn edit_command(browser: &Browser, key: &str, modifiers: &proto::Modifiers) -> bool {
+    if !cfg!(target_os = "macos") || !modifiers.platform || modifiers.control || modifiers.alt {
+        return false;
+    }
+    let Some(frame) = browser.focused_frame().or_else(|| browser.main_frame()) else {
+        return false;
+    };
+    match (key, modifiers.shift) {
+        ("c", false) => frame.copy(),
+        ("v", false) => frame.paste(),
+        ("x", false) => frame.cut(),
+        ("a", false) => frame.select_all(),
+        ("z", false) => frame.undo(),
+        ("z", true) => frame.redo(),
+        _ => return false,
+    }
+    true
+}
+
 /// Maps one forwarded event onto CEF's off-screen input calls. Positions arrive in logical
 /// pixels relative to the view, which is what CEF's `MouseEvent` takes.
-fn forward_input(host: &BrowserHost, event: InputEvent) {
+fn forward_input(browser: &Browser, host: &BrowserHost, event: InputEvent) {
     match event {
         InputEvent::PointerMove {
             x,
@@ -390,7 +516,7 @@ fn forward_input(host: &BrowserHost, event: InputEvent) {
                 modifiers: modifier_flags(&modifiers)
                     | if up { 0 } else { button_flag(Some(button)) },
             };
-            host.send_mouse_click_event(Some(&e), kind, up as i32, click_count as i32);
+            host.send_mouse_click_event(Some(&e), kind, up as i32, click_count.max(1) as i32);
         }
         InputEvent::Wheel {
             x,
@@ -400,8 +526,8 @@ fn forward_input(host: &BrowserHost, event: InputEvent) {
             unit,
             modifiers,
         } => {
-            // CEF takes pixels; a line is about 40 pixels in Chromium. The sign convention
-            // (positive y scrolls towards the top) is checked by hand in phase B.
+            // CEF takes pixels; a line is about 40 pixels in Chromium. GPUI and CEF agree on the
+            // sign: positive y moves the content down (towards the top of the page).
             let scale = match unit {
                 proto::WheelUnit::Pixels => 1.0,
                 proto::WheelUnit::Lines => 40.0,
@@ -457,6 +583,7 @@ fn forward_input(host: &BrowserHost, event: InputEvent) {
                 };
                 host.send_key_event(Some(&char_event));
             }
+            edit_command(browser, &key, &modifiers);
         }
         InputEvent::KeyUp { key, modifiers } => {
             let Some(codes) = keys::key_codes(&key) else {
@@ -477,9 +604,10 @@ fn forward_input(host: &BrowserHost, event: InputEvent) {
         }
         InputEvent::Text { text } => {
             if COMPOSING.replace(false) {
-                host.ime_commit_text(Some(&CefString::from(text.as_str())), None, 0);
+                host.ime_commit_text(Some(&CefString::from(text.as_str())), Some(&NO_RANGE), 0);
             } else {
-                for unit in text.encode_utf16() {
+                // Control characters (Return, Tab) already went as CHAR events with their key.
+                for unit in text.encode_utf16().filter(|u| *u >= 0x20) {
                     let e = KeyEvent {
                         size: size_of::<KeyEvent>(),
                         type_: KeyEventType::CHAR,
@@ -511,13 +639,13 @@ fn forward_input(host: &BrowserHost, event: InputEvent) {
                 style: Default::default(),
             };
             let selection = Range {
-                from: selected_start,
-                to: selected_end,
+                from: selected_start.min(len),
+                to: selected_end.min(len),
             };
             host.ime_set_composition(
                 Some(&CefString::from(text.as_str())),
                 Some(&[underline]),
-                None,
+                Some(&NO_RANGE),
                 Some(&selection),
             );
         }
@@ -536,6 +664,8 @@ fn forward_input(host: &BrowserHost, event: InputEvent) {
 wrap_app! {
     struct HelperApp {
         shared: Arc<Shared>,
+        options: Arc<Options>,
+        allow_background_network: bool,
     }
 
     impl App {
@@ -547,46 +677,67 @@ wrap_app! {
             let Some(command_line) = command_line else { return };
             // No keychain prompt for the dedicated profile on macOS.
             command_line.append_switch(Some(&"use-mock-keychain".into()));
+            // Without these, the network service talks to Google's servers on its own (component
+            // updates, field trials and similar background fetches) even while showing a local
+            // file; the trial saw the connections with lsof. P52 wants the browser to resolve
+            // only the names it is sent to.
+            if !self.allow_background_network {
+                for switch in ["disable-background-networking", "disable-component-update", "no-pings"] {
+                    command_line.append_switch(Some(&switch.into()));
+                }
+            }
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
-            Some(HelperBrowserProcess::new(self.shared.clone()))
+            Some(HelperBrowserProcess::new(self.shared.clone(), self.options.clone()))
         }
     }
+}
+
+fn new_client(shared: &Arc<Shared>) -> Client {
+    HelperClient::new(
+        HelperRender::new(shared.clone()),
+        HelperDisplay::new(shared.clone()),
+        HelperLifeSpan::new(shared.clone()),
+        HelperLoad::new(shared.clone()),
+        HelperRequest::new(shared.clone()),
+        refusal_set(shared.clone()),
+    )
 }
 
 wrap_browser_process_handler! {
     struct HelperBrowserProcess {
         shared: Arc<Shared>,
+        options: Arc<Options>,
     }
 
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
-            SHARED.with_borrow_mut(|s| *s = Some(self.shared.clone()));
-            let window_info = WindowInfo {
-                windowless_rendering_enabled: 1,
-                ..Default::default()
-            };
             let browser_settings = BrowserSettings {
-                windowless_frame_rate: 60,
+                windowless_frame_rate: self.options.frame_rate,
                 ..Default::default()
             };
-            let mut client = HelperClient::new(
-                HelperRender::new(self.shared.clone()),
-                HelperDisplay::new(self.shared.clone()),
-                HelperLifeSpan::new(self.shared.clone()),
-            );
-            let created = browser_host_create_browser(
-                Some(&window_info),
-                Some(&mut client),
-                Some(&CefString::from("about:blank")),
-                Some(&browser_settings),
-                None,
-                None,
-            );
-            if created != 1 {
-                eprintln!("cef-helper: could not create the browser");
-                quit_message_loop();
+            for tab in 0..self.options.tabs {
+                let window_info = WindowInfo {
+                    windowless_rendering_enabled: 1,
+                    shared_texture_enabled: (tab == 0 && self.options.probe_shared_texture) as i32,
+                    ..Default::default()
+                };
+                let url = if tab == 0 { &self.options.start_url } else { &self.options.hidden_url };
+                let mut client = new_client(&self.shared);
+                let created = browser_host_create_browser(
+                    Some(&window_info),
+                    Some(&mut client),
+                    Some(&CefString::from(url.as_str())),
+                    Some(&browser_settings),
+                    None,
+                    None,
+                );
+                if created != 1 {
+                    eprintln!("cef-helper: could not create browser {tab}");
+                    quit_message_loop();
+                    return;
+                }
             }
         }
     }
@@ -597,6 +748,9 @@ wrap_client! {
         render: RenderHandler,
         display: DisplayHandler,
         life_span: LifeSpanHandler,
+        load: LoadHandler,
+        request: RequestHandler,
+        refusals: HelperRefusalSet,
     }
 
     impl Client {
@@ -611,6 +765,159 @@ wrap_client! {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
             Some(self.life_span.clone())
         }
+
+        fn load_handler(&self) -> Option<LoadHandler> {
+            Some(self.load.clone())
+        }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(self.request.clone())
+        }
+
+        fn dialog_handler(&self) -> Option<DialogHandler> {
+            Some(self.refusals.dialog.clone())
+        }
+
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(self.refusals.download.clone())
+        }
+
+        fn permission_handler(&self) -> Option<PermissionHandler> {
+            Some(self.refusals.permission.clone())
+        }
+
+        fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
+            Some(self.refusals.jsdialog.clone())
+        }
+    }
+}
+
+/// The handlers that refuse what the trial does not support and report it to the app, which in
+/// the real product would decide (P35): file choosers, downloads, permission prompts, page
+/// dialogs.
+#[derive(Clone)]
+struct HelperRefusalSet {
+    dialog: DialogHandler,
+    download: DownloadHandler,
+    permission: PermissionHandler,
+    jsdialog: JsdialogHandler,
+}
+
+fn refusal_set(shared: Arc<Shared>) -> HelperRefusalSet {
+    HelperRefusalSet {
+        dialog: HelperDialog::new(shared.clone()),
+        download: HelperDownload::new(shared.clone()),
+        permission: HelperPermission::new(shared.clone()),
+        jsdialog: HelperJsDialog::new(shared),
+    }
+}
+
+wrap_dialog_handler! {
+    struct HelperDialog {
+        shared: Arc<Shared>,
+    }
+
+    impl DialogHandler {
+        fn on_file_dialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            mode: FileDialogMode,
+            _title: Option<&CefString>,
+            _default_file_path: Option<&CefString>,
+            _accept_filters: Option<&mut CefStringList>,
+            _accept_extensions: Option<&mut CefStringList>,
+            _accept_descriptions: Option<&mut CefStringList>,
+            callback: Option<&mut FileDialogCallback>,
+        ) -> ::std::os::raw::c_int {
+            self.shared.status(format!("refused: file dialog (mode {mode:?})"));
+            if let Some(callback) = callback {
+                callback.cancel();
+            }
+            1
+        }
+    }
+}
+
+wrap_download_handler! {
+    struct HelperDownload {
+        shared: Arc<Shared>,
+    }
+
+    impl DownloadHandler {
+        fn can_download(
+            &self,
+            _browser: Option<&mut Browser>,
+            _url: Option<&CefString>,
+            _request_method: Option<&CefString>,
+        ) -> ::std::os::raw::c_int {
+            self.shared.status("refused: download");
+            0
+        }
+    }
+}
+
+wrap_permission_handler! {
+    struct HelperPermission {
+        shared: Arc<Shared>,
+    }
+
+    impl PermissionHandler {
+        fn on_request_media_access_permission(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut MediaAccessCallback>,
+        ) -> ::std::os::raw::c_int {
+            self.shared.status(format!("refused: media access 0x{requested_permissions:x}"));
+            if let Some(callback) = callback {
+                callback.cancel();
+            }
+            1
+        }
+
+        fn on_show_permission_prompt(
+            &self,
+            _browser: Option<&mut Browser>,
+            prompt_id: u64,
+            _requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut PermissionPromptCallback>,
+        ) -> ::std::os::raw::c_int {
+            self.shared.status(format!(
+                "refused: permission prompt {prompt_id} for 0x{requested_permissions:x}"
+            ));
+            if let Some(callback) = callback {
+                callback.cont(PermissionRequestResult::DENY);
+            }
+            1
+        }
+    }
+}
+
+wrap_jsdialog_handler! {
+    struct HelperJsDialog {
+        shared: Arc<Shared>,
+    }
+
+    impl JsdialogHandler {
+        fn on_jsdialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            _origin_url: Option<&CefString>,
+            dialog_type: JsdialogType,
+            _message_text: Option<&CefString>,
+            _default_prompt_text: Option<&CefString>,
+            _callback: Option<&mut JsdialogCallback>,
+            suppress_message: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            self.shared.status(format!("suppressed: page dialog {dialog_type:?}"));
+            if let Some(suppress) = suppress_message {
+                *suppress = 1;
+            }
+            0
+        }
     }
 }
 
@@ -620,24 +927,127 @@ wrap_life_span_handler! {
     }
 
     impl LifeSpanHandler {
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: ::std::os::raw::c_int,
+            target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: ::std::os::raw::c_int,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
+        ) -> ::std::os::raw::c_int {
+            // A windowless browser's popup would otherwise become a native window.
+            let url = target_url.map(|u| u.to_string()).unwrap_or_default();
+            self.shared.status(format!("refused: popup window to {} characters of URL", url.len()));
+            1
+        }
+
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             let Some(browser) = browser else { return };
+            let first = BROWSERS.with_borrow_mut(|b| {
+                b.push(browser.clone());
+                b.len() == 1
+            });
+            if !first {
+                // An extra tab: a background tab, alive but not painting.
+                if let Some(host) = browser.host() {
+                    host.was_hidden(1);
+                }
+                return;
+            }
+            self.shared.main_id.store(browser.identifier() as u32, Ordering::Release);
             if let Some(host) = browser.host() {
                 let mut observer = HelperDevTools::new(self.shared.clone());
                 let registration = host.add_dev_tools_message_observer(Some(&mut observer));
                 DEVTOOLS.with_borrow_mut(|d| *d = registration);
+                host.was_resized();
             }
-            BROWSER.with_borrow_mut(|b| *b = Some(browser.clone()));
             let version = String::from_utf8_lossy(sys::CEF_VERSION);
             self.shared.send(&FromHelper::Ready {
                 engine: format!("CEF {}", version.trim_end_matches('\0')),
             });
+            for message in PENDING.with_borrow_mut(std::mem::take) {
+                handle_on_ui_thread(message);
+            }
         }
 
-        fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            DEVTOOLS.with_borrow_mut(|d| *d = None);
-            BROWSER.with_borrow_mut(|b| *b = None);
-            quit_message_loop();
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            let Some(browser) = browser else { return };
+            let id = browser.identifier();
+            let empty = BROWSERS.with_borrow_mut(|b| {
+                b.retain(|other| other.identifier() != id);
+                b.is_empty()
+            });
+            if id as u32 == self.shared.main_id.load(Ordering::Acquire) {
+                DEVTOOLS.with_borrow_mut(|d| *d = None);
+            }
+            if empty && CLOSING.get() {
+                quit_message_loop();
+            }
+        }
+    }
+}
+
+wrap_load_handler! {
+    struct HelperLoad {
+        shared: Arc<Shared>,
+    }
+
+    impl LoadHandler {
+        fn on_load_end(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            http_status_code: ::std::os::raw::c_int,
+        ) {
+            let main = frame.is_some_and(|f| f.is_main() == 1);
+            let id = browser.map(|b| b.identifier()).unwrap_or(-1);
+            if main {
+                self.shared.status(format!("load-end browser {id} status {http_status_code}"));
+            }
+        }
+
+        fn on_load_error(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            error_code: Errorcode,
+            _error_text: Option<&CefString>,
+            _failed_url: Option<&CefString>,
+        ) {
+            let id = browser.map(|b| b.identifier()).unwrap_or(-1);
+            self.shared.status(format!("load-error browser {id} {error_code:?}"));
+        }
+    }
+}
+
+wrap_request_handler! {
+    struct HelperRequest {
+        shared: Arc<Shared>,
+    }
+
+    impl RequestHandler {
+        fn on_render_process_terminated(
+            &self,
+            browser: Option<&mut Browser>,
+            status: TerminationStatus,
+            error_code: ::std::os::raw::c_int,
+            _error_string: Option<&CefString>,
+        ) {
+            self.shared.status(format!("renderer-terminated {status:?} code {error_code}; reloading"));
+            // Recovery: a reload starts a fresh renderer for this browser.
+            if let Some(browser) = browser
+                && !CLOSING.get()
+            {
+                browser.reload();
+            }
         }
     }
 }
@@ -667,11 +1077,14 @@ wrap_display_handler! {
     impl DisplayHandler {
         fn on_cursor_change(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             _cursor: *mut u8,
             type_: CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> ::std::os::raw::c_int {
+            if !is_main(&self.shared, browser) {
+                return 1;
+            }
             let cursor = match type_ {
                 CursorType::HAND => CursorKind::PointingHand,
                 CursorType::IBEAM => CursorKind::IBeam,
@@ -688,6 +1101,10 @@ wrap_display_handler! {
             1
         }
     }
+}
+
+fn is_main(shared: &Shared, browser: Option<&mut Browser>) -> bool {
+    browser.is_some_and(|b| b.identifier() as u32 == shared.main_id.load(Ordering::Acquire))
 }
 
 wrap_render_handler! {
@@ -712,12 +1129,18 @@ wrap_render_handler! {
             1
         }
 
-        fn on_popup_show(&self, _browser: Option<&mut Browser>, show: ::std::os::raw::c_int) {
+        fn on_popup_show(&self, browser: Option<&mut Browser>, show: ::std::os::raw::c_int) {
+            if !is_main(&self.shared, browser) {
+                return;
+            }
             let rect = if show != 0 { *self.shared.popup.lock().unwrap() } else { None };
             self.shared.send(&FromHelper::Popup { show: show != 0, rect });
         }
 
-        fn on_popup_size(&self, _browser: Option<&mut Browser>, rect: Option<&Rect>) {
+        fn on_popup_size(&self, browser: Option<&mut Browser>, rect: Option<&Rect>) {
+            if !is_main(&self.shared, browser) {
+                return;
+            }
             let Some(rect) = rect else { return };
             let rect = proto::Rect { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
             *self.shared.popup.lock().unwrap() = Some(rect);
@@ -726,14 +1149,14 @@ wrap_render_handler! {
 
         fn on_paint(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             type_: PaintElementType,
             dirty_rects: Option<&[Rect]>,
             buffer: *const u8,
             width: ::std::os::raw::c_int,
             height: ::std::os::raw::c_int,
         ) {
-            if buffer.is_null() || width <= 0 || height <= 0 {
+            if buffer.is_null() || width <= 0 || height <= 0 || !is_main(&self.shared, browser) {
                 return;
             }
             let shared = &self.shared;
@@ -759,7 +1182,19 @@ wrap_render_handler! {
             };
             // SAFETY: CEF hands over width * height * 4 bytes, valid for this call.
             let source = unsafe { std::slice::from_raw_parts(buffer, target.len()) };
+            let started = std::time::Instant::now();
             target.copy_from_slice(source);
+            let this_ns = started.elapsed().as_nanos() as u64;
+            let ns = shared.copy_ns.fetch_add(this_ns, Ordering::Relaxed) + this_ns;
+            let n = shared.copies.fetch_add(1, Ordering::Relaxed) + 1;
+            if n == 300 {
+                shared.copies.store(0, Ordering::Relaxed);
+                shared.copy_ns.store(0, Ordering::Relaxed);
+                shared.status(format!(
+                    "helper copy into shared memory: {:.2} ms average over 300 frames of {w}x{h}",
+                    ns as f64 / 300.0 / 1e6
+                ));
+            }
             let kind = if type_ == PaintElementType::POPUP { FrameKind::Popup } else { FrameKind::View };
             let dirty = dirty_rects
                 .unwrap_or_default()
@@ -778,12 +1213,40 @@ wrap_render_handler! {
             });
         }
 
+        fn on_accelerated_paint(
+            &self,
+            browser: Option<&mut Browser>,
+            type_: PaintElementType,
+            _dirty_rects: Option<&[Rect]>,
+            info: Option<&AcceleratedPaintInfo>,
+        ) {
+            if !is_main(&self.shared, browser) {
+                return;
+            }
+            // Probe only: report what a shared texture looks like, a few times.
+            let n = self.shared.accelerated_logged.fetch_add(1, Ordering::Relaxed);
+            if n < 5 || n.is_multiple_of(60) {
+                let line = match info {
+                    Some(info) => format!(
+                        "shared-texture frame {n} type {type_:?} format {:?} handle_present={}",
+                        info.format,
+                        !info.shared_texture_io_surface.is_null(),
+                    ),
+                    None => format!("shared-texture frame {n} without info"),
+                };
+                self.shared.status(line);
+            }
+        }
+
         fn on_ime_composition_range_changed(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             selected_range: Option<&Range>,
             character_bounds: Option<&[Rect]>,
         ) {
+            if !is_main(&self.shared, browser) {
+                return;
+            }
             let (range_start, range_end) = selected_range.map_or((0, 0), |r| (r.from, r.to));
             let characters = character_bounds
                 .unwrap_or_default()

@@ -55,7 +55,9 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks" "$app/Contents/Resources"
 cp "$target/$name" "$app/Contents/MacOS/$name"
 plist "$app/Contents/Info.plist" "$name" ""
-cp -R "$cef_dir/$framework" "$app/Contents/Frameworks/"
+# A copy-on-write clone where the file system allows it (APFS), a plain copy otherwise.
+cp -cR "$cef_dir/$framework" "$app/Contents/Frameworks/" 2>/dev/null ||
+  cp -R "$cef_dir/$framework" "$app/Contents/Frameworks/"
 
 for suffix in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   helper="$name Helper$suffix"

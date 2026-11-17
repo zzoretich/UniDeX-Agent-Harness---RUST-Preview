@@ -3,40 +3,56 @@
 //! A window with a toolbar and a browser pane. The pane draws frames that a helper process
 //! paints into shared memory, as an element; forwards pointer, wheel, key, text and
 //! input-method events to the helper; shows the cursor and popups the helper asks for; and draws
-//! a GPUI overlay card above the page. The helper is the stand-in test pattern now and the CEF
-//! helper in phase B; both speak the protocol in `spike-protocol`.
+//! a GPUI overlay card (a stand-in permission card) above the page. The helper is the CEF
+//! helper (`--helper cef`) or the stand-in test pattern; both speak `spike-protocol`.
 //!
 //! ```sh
-//! cargo run --release -p spike-app -- [options]
+//! spike-app [options]
 //!   --helper standin|cef   which helper to start (default standin)
+//!   --page NAME            start on pages/NAME.html (CEF; a file URL)
+//!   --start-url URL        start on URL (CEF)
+//!   --tabs N               N - 1 extra hidden tabs in the helper (CEF), loading --hidden-page
+//!   --hidden-page NAME     what the hidden tabs load (default: the start page)
+//!   --scenario NAME        input | scroll | anim | idle | latency | memory (see script.rs)
+//!   --measure-seconds N    length of a measurement window (default 10)
 //!   --width W --height H   requested pane size in logical pixels (default 1280 x 800)
 //!   --display N            open the window on the Nth display GPUI lists (logged at start)
 //!   --fps N                frame rate the stand-in paints at (default 60)
-//!   --seconds N            quit after N seconds (for measurements)
+//!   --seconds N            hard limit: quit after N seconds whatever happens
+//!   --quiet-ui             do not redraw the toolbar's stats line every second (idle runs)
+//!   --probe-shared-texture ask CEF for shared textures; frames are then only logged
+//!   --engine-fps N         CEF's windowless frame rate (default 60)
 //!   --demo-popup           the stand-in shows and hides a popup every 1.5 s
-//!   --script               drive a scripted input sequence through GPUI's own event dispatch
 //!   --selfcheck            read the window back and check the overlay is drawn above the page
 //!   --url URL              navigate there at start (a DevTools call), then evaluate document.title
 //! ```
 //!
-//! Everything it measures goes to stderr, one `app:` line per second; the helper's lines start
-//! with its own name.
+//! Everything it measures goes to stderr: one `app: stats` line per second, `check:` lines from
+//! the input scenario and one `app: summary {json}` line per measurement window. The helper's
+//! lines start with its own name.
+
+mod script;
+mod stats;
+
+#[cfg(target_os = "macos")]
+mod mac_ime;
 
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui::{
     App, AppContext as _, Bounds, Context, Corners, CursorStyle, DispatchPhase,
     ElementInputHandler, EntityInputHandler, FocusHandle, HitboxBehavior, InteractiveElement as _,
-    IntoElement, KeyDownEvent, KeyUpEvent, Keystroke, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, NavigationDirection, ParentElement as _, Pixels, PlatformInput, Point, Render,
-    RenderImage, ScrollDelta, ScrollEvent, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Task, TitlebarOptions, UTF16Selection, Window, WindowBounds, WindowOptions,
-    canvas, div, fill, point, px, rgb, rgba, size,
+    IntoElement, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, NavigationDirection, ParentElement as _, Pixels, Point, Render, RenderImage,
+    ScrollDelta, ScrollEvent, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
+    TitlebarOptions, UTF16Selection, Window, WindowBounds, WindowOptions, canvas, div, fill, point,
+    px, rgb, rgba, size,
 };
 use spike_protocol::helper::{HelperBrowser, HelperOptions};
 use spike_protocol::usage;
 use spike_protocol::view::{self as proto, BrowserEvent, BrowserView as _};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -44,18 +60,26 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const TOOLBAR_HEIGHT: f32 = 44.0;
+const SIDEBAR_WIDTH: f32 = 240.0;
 /// Shared memory is sized for frames up to this many device pixels.
 const MAX_FRAME: (u32, u32) = (3840, 2400);
 
 #[derive(Clone)]
-struct Args {
+pub struct Args {
     helper: String,
+    start_url: Option<String>,
+    tabs: u32,
+    hidden_url: Option<String>,
+    pub scenario: Option<String>,
+    pub measure_seconds: u64,
     width: f32,
     height: f32,
     fps: u32,
     seconds: Option<u64>,
+    quiet_ui: bool,
+    probe_shared_texture: bool,
+    engine_fps: Option<u32>,
     demo_popup: bool,
-    script: bool,
     selfcheck: bool,
     url: Option<String>,
     display: Option<usize>,
@@ -71,8 +95,16 @@ impl Args {
                 .cloned()
         };
         let flag = |name: &str| raw.iter().any(|a| a == name);
+        let start_url = value("--start-url").or_else(|| value("--page").map(|p| page_url(&p)));
         Args {
             helper: value("--helper").unwrap_or_else(|| "standin".into()),
+            hidden_url: value("--hidden-page").map(|p| page_url(&p)),
+            start_url,
+            tabs: value("--tabs").and_then(|v| v.parse().ok()).unwrap_or(1),
+            scenario: value("--scenario"),
+            measure_seconds: value("--measure-seconds")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
             width: value("--width")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1280.0),
@@ -81,8 +113,10 @@ impl Args {
                 .unwrap_or(800.0),
             fps: value("--fps").and_then(|v| v.parse().ok()).unwrap_or(60),
             seconds: value("--seconds").and_then(|v| v.parse().ok()),
+            quiet_ui: flag("--quiet-ui"),
+            probe_shared_texture: flag("--probe-shared-texture"),
+            engine_fps: value("--engine-fps").and_then(|v| v.parse().ok()),
             demo_popup: flag("--demo-popup"),
-            script: flag("--script"),
             selfcheck: flag("--selfcheck"),
             url: value("--url"),
             display: value("--display").and_then(|v| v.parse().ok()),
@@ -90,21 +124,63 @@ impl Args {
     }
 }
 
+/// `pages/NAME.html` beside the build (target/release/../../pages) as a file URL, or
+/// `about:blank` for "blank".
+pub fn page_url(name: &str) -> String {
+    if name == "blank" {
+        return "about:blank".into();
+    }
+    let exe = std::env::current_exe().unwrap_or_default();
+    let pages = exe
+        .parent()
+        .and_then(|d| d.parent())
+        .and_then(|d| d.parent())
+        .map(|d| d.join("pages"))
+        .unwrap_or_default();
+    let file = pages.join(format!("{name}.html"));
+    let file = file.canonicalize().unwrap_or(file);
+    format!("file://{}", file.display())
+}
+
 /// A frame ready to paint: the pixels already wrapped as a GPUI image off the UI thread.
 #[derive(Clone)]
-struct UiFrame {
-    seq: u64,
-    image: Arc<RenderImage>,
+pub struct UiFrame {
+    pub seq: u64,
+    pub image: Arc<RenderImage>,
     produced_unix_ns: u64,
 }
 
 /// Counters the helper's reader thread updates.
 #[derive(Default)]
-struct ReaderCounters {
-    received: AtomicU64,
-    superseded: AtomicU64,
+pub struct ReaderCounters {
+    pub received: AtomicU64,
+    pub superseded: AtomicU64,
     copy_ns: AtomicU64,
     wrap_ns: AtomicU64,
+    pub copy_ns_total: AtomicU64,
+    received_total: AtomicU64,
+}
+
+impl ReaderCounters {
+    pub fn received_total(&self) -> u64 {
+        self.received_total.load(Ordering::Relaxed)
+    }
+}
+
+/// The key-to-frame latency probe. The reader thread hashes one rectangle of every page frame;
+/// once armed (just before a key is injected), the first frame whose rectangle differs from the
+/// last one before the key is the frame that shows the typed character.
+#[derive(Default)]
+pub struct Watch {
+    /// Device pixels: x, y, width, height.
+    pub rect: Option<(u32, u32, u32, u32)>,
+    pub last_hash: u64,
+    /// When the key was injected, and the rectangle's hash before it.
+    pub armed: Option<(Instant, u64)>,
+    /// When the changed frame reached the app (reader thread), and its sequence number.
+    pub hit: Option<(Instant, u64)>,
+    /// When that frame was painted (UI thread, right after `paint_image`).
+    pub painted: Option<Instant>,
 }
 
 /// What the reader thread tells the UI. Frames of the page do not travel here: the newest one
@@ -119,19 +195,22 @@ enum ToUi {
     Cursor(proto::CursorKind),
     ImeBounds(Vec<proto::Rect>),
     DevTools(serde_json::Value),
+    Status(String),
     Ready(String),
     Exited(String),
 }
 
 /// State the paint closures share with the view across frames.
 #[derive(Default)]
-struct PaintState {
-    pane: Option<Bounds<Pixels>>,
-    swatch: Option<Bounds<Pixels>>,
+pub struct PaintState {
+    pub pane: Option<Bounds<Pixels>>,
+    pub swatch: Option<Bounds<Pixels>>,
     sent_size: Option<(u32, u32, u32)>,
     painted_view: Option<(u64, Arc<RenderImage>)>,
     painted_popup: Option<Arc<RenderImage>>,
     pointer_inside: bool,
+    pub popup_painted: u64,
+    pub first_painted: Option<Instant>,
     // Per-second counters.
     paints: u64,
     new_frames_painted: u64,
@@ -139,15 +218,42 @@ struct PaintState {
     paint_ns_max: u64,
     latency_ns: u64,
     latency_ns_max: u64,
+    // The window frame being built: when `render` started.
+    frame_start: Option<Instant>,
+    // Recording, for a measurement window.
+    pub recording: bool,
+    pub rec_painted_at: Vec<Instant>,
+    pub rec_paint_ns: Vec<u64>,
+    pub rec_latency_ns: Vec<u64>,
+    pub rec_ui_frame_ns: Vec<u64>,
+    pub rec_window_frames: u64,
 }
 
-struct Pane {
-    browser: Rc<RefCell<HelperBrowser>>,
-    helper_pid: u32,
-    focus: FocusHandle,
-    latest: Arc<Mutex<Option<UiFrame>>>,
-    counters: Arc<ReaderCounters>,
-    view_frame: Option<UiFrame>,
+/// Everything the scripted scenarios wait for or read back.
+#[derive(Default)]
+pub struct EventLog {
+    pub events: Vec<(Instant, String)>,
+    pub replies: HashMap<u64, serde_json::Value>,
+    pub ready_at: Option<Instant>,
+    pub first_frame_at: Option<Instant>,
+}
+
+impl EventLog {
+    fn push(&mut self, text: String) {
+        self.events.push((Instant::now(), text));
+    }
+}
+
+pub struct Pane {
+    pub browser: Rc<RefCell<HelperBrowser>>,
+    pub helper_pid: u32,
+    pub focus: FocusHandle,
+    /// Something else in the app to give focus to, for the focus-out check.
+    pub other_focus: FocusHandle,
+    pub latest: Arc<Mutex<Option<UiFrame>>>,
+    pub counters: Arc<ReaderCounters>,
+    pub watch: Arc<Mutex<Watch>>,
+    pub view_frame: Option<UiFrame>,
     popup_rect: Option<proto::Rect>,
     popup_frame: Option<UiFrame>,
     cursor: CursorStyle,
@@ -156,7 +262,12 @@ struct Pane {
     engine: String,
     status: String,
     stats_line: String,
-    paint: Rc<RefCell<PaintState>>,
+    pub paint: Rc<RefCell<PaintState>>,
+    pub log: Rc<RefCell<EventLog>>,
+    pub sidebar: bool,
+    pub spawned_at: Instant,
+    pub tree: stats::ProcessTree,
+    quiet_ui: bool,
     taken: u64,
     usage_at: (Instant, usage::Usage),
     _subscriptions: Vec<Subscription>,
@@ -176,7 +287,15 @@ fn main() {
         let (to_ui, from_helper) = mpsc::unbounded::<ToUi>();
         let latest = Arc::new(Mutex::new(None::<UiFrame>));
         let counters = Arc::new(ReaderCounters::default());
-        let browser = match start_helper(&args, to_ui, latest.clone(), counters.clone()) {
+        let watch = Arc::new(Mutex::new(Watch::default()));
+        let spawned_at = Instant::now();
+        let browser = match start_helper(
+            &args,
+            to_ui,
+            latest.clone(),
+            counters.clone(),
+            watch.clone(),
+        ) {
             Ok(browser) => browser,
             Err(error) => {
                 eprintln!("app: could not start the helper: {error:#}");
@@ -219,6 +338,8 @@ fn main() {
                     browser,
                     latest,
                     counters,
+                    watch,
+                    spawned_at,
                     from_helper,
                     window,
                     cx,
@@ -241,6 +362,7 @@ fn start_helper(
     to_ui: mpsc::UnboundedSender<ToUi>,
     latest: Arc<Mutex<Option<UiFrame>>>,
     counters: Arc<ReaderCounters>,
+    watch: Arc<Mutex<Watch>>,
 ) -> anyhow::Result<HelperBrowser> {
     let exe = std::env::current_exe()?;
     let dir = exe.parent().unwrap_or(std::path::Path::new("."));
@@ -254,10 +376,31 @@ fn start_helper(
             dir.join(format!("spike-standin{}", std::env::consts::EXE_SUFFIX))
         }
         "cef" => {
-            // A dedicated profile beside the build, never the user's browser profile.
-            let profile = dir.join("cef-profile");
+            // A dedicated profile beside the build, never the user's browser profile. A fresh
+            // one per run unless UDX_SPIKE_PROFILE names one.
+            let profile = match std::env::var_os("UDX_SPIKE_PROFILE") {
+                Some(dir) => std::path::PathBuf::from(dir),
+                None => dir
+                    .join("cef-profiles")
+                    .join(format!("run-{}", std::process::id())),
+            };
             std::fs::create_dir_all(&profile)?;
             helper_args.extend(["--profile-dir".to_string(), profile.display().to_string()]);
+            if let Some(url) = &args.start_url {
+                helper_args.extend(["--start-url".to_string(), url.clone()]);
+            }
+            if args.tabs > 1 {
+                helper_args.extend(["--tabs".to_string(), args.tabs.to_string()]);
+            }
+            if let Some(url) = &args.hidden_url {
+                helper_args.extend(["--hidden-url".to_string(), url.clone()]);
+            }
+            if args.probe_shared_texture {
+                helper_args.push("--probe-shared-texture".into());
+            }
+            if let Some(fps) = args.engine_fps {
+                helper_args.extend(["--frame-rate".to_string(), fps.to_string()]);
+            }
             // On macOS CEF's browser process must run from an app bundle that holds the
             // framework and the helper bundles (see cef-helper/bundle-macos.sh).
             if cfg!(target_os = "macos") {
@@ -280,9 +423,16 @@ fn start_helper(
         let message = match event {
             BrowserEvent::Frame(frame) => {
                 counters.received.fetch_add(1, Ordering::Relaxed);
+                counters.received_total.fetch_add(1, Ordering::Relaxed);
                 counters.copy_ns.fetch_add(frame.copy_ns, Ordering::Relaxed);
+                counters
+                    .copy_ns_total
+                    .fetch_add(frame.copy_ns, Ordering::Relaxed);
                 let started = Instant::now();
                 let kind = frame.kind;
+                if kind == proto::FrameKind::View {
+                    probe(&watch, &frame);
+                }
                 let Some(ui) = wrap(frame) else {
                     eprintln!("app: frame with a bad size dropped");
                     return;
@@ -308,11 +458,34 @@ fn start_helper(
             BrowserEvent::Cursor(cursor) => ToUi::Cursor(cursor),
             BrowserEvent::ImeCompositionBounds { characters, .. } => ToUi::ImeBounds(characters),
             BrowserEvent::DevTools(message) => ToUi::DevTools(message),
+            BrowserEvent::Status(text) => ToUi::Status(text),
             BrowserEvent::Exited { status } => ToUi::Exited(status),
         };
         let _ = to_ui.unbounded_send(message);
     })?;
     Ok(browser)
+}
+
+/// The latency probe's reader-thread half (see [`Watch`]).
+fn probe(watch: &Mutex<Watch>, frame: &proto::Frame) {
+    let mut w = watch.lock().unwrap();
+    let Some((x, y, rw, rh)) = w.rect else { return };
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let stride = frame.width as usize * 4;
+    for row in y..(y + rh).min(frame.height) {
+        let start = row as usize * stride + x as usize * 4;
+        let end = (start + rw as usize * 4).min((row as usize + 1) * stride);
+        for byte in &frame.bgra[start.min(end)..end] {
+            hash = (hash ^ *byte as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    if let Some((_, baseline)) = w.armed
+        && hash != baseline
+    {
+        w.hit = Some((Instant::now(), frame.seq));
+        w.armed = None;
+    }
+    w.last_hash = hash;
 }
 
 fn wrap(frame: proto::Frame) -> Option<UiFrame> {
@@ -333,11 +506,14 @@ impl Pane {
         browser: HelperBrowser,
         latest: Arc<Mutex<Option<UiFrame>>>,
         counters: Arc<ReaderCounters>,
+        watch: Arc<Mutex<Watch>>,
+        spawned_at: Instant,
         mut from_helper: mpsc::UnboundedReceiver<ToUi>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus = cx.focus_handle();
+        let other_focus = cx.focus_handle();
         let helper_pid = browser.pid();
         let browser = Rc::new(RefCell::new(browser));
         let mut tasks = Vec::new();
@@ -384,19 +560,17 @@ impl Pane {
             }));
         }
 
-        if args.script {
+        if let Some(scenario) = args.scenario.clone() {
+            let args = args.clone();
             tasks.push(cx.spawn_in(window, async move |this, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_millis(1500))
-                    .await;
-                run_script(this, cx).await;
+                script::run(scenario, args, this, cx).await;
             }));
         }
 
         if let Some(url) = args.url.clone() {
             let mut browser = browser.borrow_mut();
             let id = browser.navigate(&url);
-            eprintln!("app: devtools call {id}: Page.navigate {url}");
+            eprintln!("app: devtools call {id}: Page.navigate");
             let id = browser.evaluate("document.title");
             eprintln!("app: devtools call {id}: Runtime.evaluate document.title");
         }
@@ -418,8 +592,10 @@ impl Pane {
             browser,
             helper_pid,
             focus,
+            other_focus,
             latest,
             counters,
+            watch,
             view_frame: None,
             popup_rect: None,
             popup_frame: None,
@@ -430,6 +606,11 @@ impl Pane {
             status: String::new(),
             stats_line: String::new(),
             paint: Rc::new(RefCell::new(PaintState::default())),
+            log: Rc::new(RefCell::new(EventLog::default())),
+            sidebar: false,
+            spawned_at,
+            tree: stats::ProcessTree::default(),
+            quiet_ui: args.quiet_ui,
             taken: 0,
             usage_at: (Instant::now(), usage::current()),
             _subscriptions: subscriptions,
@@ -437,7 +618,7 @@ impl Pane {
         }
     }
 
-    fn send(&mut self, event: proto::InputEvent) {
+    pub fn send(&mut self, event: proto::InputEvent) {
         self.browser.borrow_mut().input(event);
     }
 
@@ -445,6 +626,15 @@ impl Pane {
         match message {
             ToUi::FrameReady => {
                 if let Some(frame) = self.latest.lock().unwrap().take() {
+                    let mut log = self.log.borrow_mut();
+                    if log.first_frame_at.is_none() {
+                        log.first_frame_at = Some(Instant::now());
+                        eprintln!(
+                            "app: first frame {:.1} ms after spawn",
+                            self.spawned_at.elapsed().as_secs_f64() * 1e3
+                        );
+                    }
+                    drop(log);
                     self.view_frame = Some(frame);
                     self.taken += 1;
                     cx.notify();
@@ -456,6 +646,9 @@ impl Pane {
             }
             ToUi::Popup { show, rect } => {
                 eprintln!("app: popup show={show} rect={rect:?}");
+                self.log
+                    .borrow_mut()
+                    .push(format!("popup show={show} rect={rect:?}"));
                 self.popup_rect = if show { rect } else { None };
                 if !show {
                     self.popup_frame = None;
@@ -464,25 +657,54 @@ impl Pane {
             }
             ToUi::Cursor(kind) => {
                 eprintln!("app: cursor {kind:?}");
+                self.log.borrow_mut().push(format!("cursor {kind:?}"));
                 self.cursor = cursor_style(kind);
                 cx.notify();
             }
             ToUi::ImeBounds(characters) => {
                 eprintln!("app: composition bounds {characters:?}");
+                self.log
+                    .borrow_mut()
+                    .push(format!("ime-bounds {}", characters.len()));
                 self.ime_bounds = characters;
             }
             ToUi::DevTools(message) => {
-                eprintln!("app: devtools reply {message}");
-                self.status = format!("DevTools: {message}");
+                let mut log = self.log.borrow_mut();
+                match message.get("id").and_then(|v| v.as_u64()) {
+                    Some(id) => {
+                        let shown = message.to_string();
+                        eprintln!(
+                            "app: devtools reply {}",
+                            shown.chars().take(300).collect::<String>()
+                        );
+                        self.status = format!(
+                            "DevTools {id}: {}",
+                            shown.chars().take(120).collect::<String>()
+                        );
+                        log.replies.insert(id, message);
+                    }
+                    None => {
+                        let method = message["method"].as_str().unwrap_or("?").to_string();
+                        log.push(format!("devtools-event {method}"));
+                    }
+                }
                 cx.notify();
             }
+            ToUi::Status(text) => {
+                self.log.borrow_mut().push(text);
+            }
             ToUi::Ready(engine) => {
-                eprintln!("app: helper ready: {engine}");
+                eprintln!(
+                    "app: helper ready: {engine} ({:.1} ms after spawn)",
+                    self.spawned_at.elapsed().as_secs_f64() * 1e3
+                );
+                self.log.borrow_mut().ready_at = Some(Instant::now());
                 self.engine = engine;
                 cx.notify();
             }
             ToUi::Exited(status) => {
                 eprintln!("app: helper gone: {status}");
+                self.log.borrow_mut().push(format!("exited {status}"));
                 self.engine = format!("helper gone ({status})");
                 cx.notify();
             }
@@ -492,7 +714,7 @@ impl Pane {
     /// Once a second: log and show what the last second looked like.
     fn tick(&mut self, cx: &mut Context<Self>) {
         let received = self.counters.received.swap(0, Ordering::Relaxed);
-        let superseded = self.counters.superseded.swap(0, Ordering::Relaxed);
+        let superseded = self.counters.superseded.load(Ordering::Relaxed);
         let copy_ns = self.counters.copy_ns.swap(0, Ordering::Relaxed);
         let wrap_ns = self.counters.wrap_ns.swap(0, Ordering::Relaxed);
         let taken = std::mem::take(&mut self.taken);
@@ -511,6 +733,8 @@ impl Pane {
         let elapsed = self.usage_at.0.elapsed();
         let cpu = now.cpu_percent_since(&self.usage_at.1, elapsed);
         self.usage_at = (Instant::now(), now);
+        let tree = self.tree.sample(self.helper_pid as i32);
+        let tree_footprint: u64 = tree.iter().map(|s| s.footprint).sum();
 
         let avg = |total: u64, n: u64| total as f64 / n.max(1) as f64 / 1e6;
         let device = size.map(|(w, h, s)| {
@@ -518,15 +742,15 @@ impl Pane {
             format!("{}x{}", (w as f32 * s).round(), (h as f32 * s).round())
         });
         self.stats_line = format!(
-            "{painted} fps painted, {received} received, paint {:.2} ms, latency {:.1} ms, app cpu {cpu:.0}%",
+            "{painted} fps painted, paint {:.2} ms, latency {:.1} ms, app cpu {cpu:.0}%",
             avg(paint_ns, painted),
             avg(latency_ns, painted),
         );
         eprintln!(
-            "app: stats received={received} superseded={superseded} taken={taken} painted_new={painted} paint_calls={paints} \
+            "app: stats received={received} superseded_total={superseded} taken={taken} painted_new={painted} paint_calls={paints} \
              copy_avg_ms={:.2} wrap_avg_ms={:.3} paint_image_avg_ms={:.2} paint_image_max_ms={:.2} \
              latency_avg_ms={:.1} latency_max_ms={:.1} cpu={cpu:.1}% resident={:.0}MB footprint={:.0}MB \
-             pane_logical={:?} device={} helper_pid={}",
+             helper_tree_processes={} helper_tree_footprint={:.0}MB pane_logical={:?} device={}",
             avg(copy_ns, received),
             avg(wrap_ns, received),
             avg(paint_ns, painted),
@@ -535,22 +759,26 @@ impl Pane {
             latency_max as f64 / 1e6,
             now.resident_bytes as f64 / 1e6,
             now.footprint_bytes as f64 / 1e6,
+            tree.len(),
+            tree_footprint as f64 / 1e6,
             pane.map(|b| (f32::from(b.size.width), f32::from(b.size.height))),
             device.unwrap_or_else(|| "none".into()),
-            self.helper_pid,
         );
-        cx.notify();
+        if !self.quiet_ui {
+            cx.notify();
+        }
     }
 
     /// Reads the window back and checks two pixels: the overlay's magenta swatch must be
-    /// magenta (the overlay draws above the page), and the stand-in's green corner marker must
-    /// be green (the page's frames reach the window).
-    fn selfcheck(&mut self, window: &mut Window) {
+    /// magenta (the overlay draws above the page), and for the stand-in its green corner marker
+    /// must be green (the page's frames reach the window). Returns the readback for the
+    /// scenarios.
+    pub fn selfcheck(&mut self, window: &mut Window) -> Option<image::RgbaImage> {
         let image = match window.render_to_image() {
             Ok(image) => image,
             Err(error) => {
                 eprintln!("app: selfcheck could not read the window back: {error:#}");
-                return;
+                return None;
             }
         };
         let scale = window.scale_factor();
@@ -563,21 +791,22 @@ impl Pane {
         let near = |c: Option<[u8; 4]>, want: [u8; 3]| {
             c.is_some_and(|c| (0..3).all(|i| (c[i] as i32 - want[i] as i32).abs() <= 8))
         };
-        let swatch = p.swatch.map(|b| sample(b.center()));
-        let marker = p.pane.map(|b| sample(b.origin + point(px(4.0), px(4.0))));
-        let swatch = swatch.flatten();
-        let marker = marker.flatten();
+        let swatch = p.swatch.and_then(|b| sample(b.center()));
+        let marker = p
+            .pane
+            .and_then(|b| sample(b.origin + point(px(4.0), px(4.0))));
         eprintln!(
             "app: selfcheck window_readback={}x{} scale={scale} overlay_swatch_pixel={swatch:?} overlay_above_page={} \
-             page_marker_pixel={marker:?} page_frame_visible={}",
+             page_corner_pixel={marker:?} standin_marker_visible={}",
             image.width(),
             image.height(),
             near(swatch, [255, 0, 255]),
             near(marker, [0, 255, 0]),
         );
+        Some(image)
     }
 
-    fn local(&self, position: Point<Pixels>) -> (f32, f32) {
+    pub fn local(&self, position: Point<Pixels>) -> (f32, f32) {
         let origin = self
             .paint
             .borrow()
@@ -593,7 +822,6 @@ impl Pane {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         let (x, y) = self.local(event.position);
-        eprintln!("app: pane got mouse down at ({x:.0}, {y:.0})");
         self.send(proto::InputEvent::PointerDown {
             x,
             y,
@@ -683,6 +911,7 @@ impl Pane {
             .px_3()
             .h(px(TOOLBAR_HEIGHT))
             .bg(rgb(0x2b2b2b))
+            .track_focus(&self.other_focus)
             .child(format!("Engine: {}", self.engine))
             .child(
                 button("navigate", "Navigate").on_click(cx.listener(|pane, _, _, _| {
@@ -719,7 +948,7 @@ impl Pane {
             .text_color(rgb(0xf9fafb))
             // An ask card over the page must take clicks itself, not pass them to the page.
             .occlude()
-            .child("GPUI overlay, drawn above the page")
+            .child("Allow this page to use the camera?")
             .child(
                 div()
                     .flex()
@@ -738,22 +967,25 @@ impl Pane {
                         .w(px(24.0))
                         .h(px(24.0)),
                     )
-                    .child("self-check swatch"),
+                    .child("stand-in card (GPUI, above the page)"),
             )
     }
 }
 
 impl Render for Pane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.paint.borrow_mut().frame_start = Some(Instant::now());
         let entity = cx.entity();
         let paint = self.paint.clone();
         let paint_for_prepaint = self.paint.clone();
+        let paint_for_end = self.paint.clone();
         let browser = self.browser.clone();
         let browser_for_paint = self.browser.clone();
         let focus = self.focus.clone();
         let view_frame = self.view_frame.clone();
         let popup = self.popup_rect.zip(self.popup_frame.clone());
         let cursor = self.cursor;
+        let watch = self.watch.clone();
 
         div()
             .size_full()
@@ -765,75 +997,128 @@ impl Render for Pane {
             .child(self.toolbar(cx))
             .child(
                 div()
-                    .id("browser-pane")
-                    .relative()
                     .flex_1()
                     .w_full()
-                    .overflow_hidden()
-                    .track_focus(&self.focus)
-                    .on_any_mouse_down(cx.listener(Self::mouse_down))
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
-                    .on_mouse_up(MouseButton::Right, cx.listener(Self::mouse_up))
-                    .on_mouse_up(MouseButton::Middle, cx.listener(Self::mouse_up))
-                    .on_mouse_move(cx.listener(Self::mouse_move))
-                    .on_scroll(cx.listener(Self::scroll))
-                    .on_key_down(cx.listener(Self::key_down))
-                    .on_key_up(cx.listener(Self::key_up))
+                    .flex()
+                    .flex_row()
+                    .when_some_sidebar(self.sidebar)
                     .child(
-                        canvas(
-                            move |bounds, window, _cx| {
-                                // Tell the engine the pane's size whenever it or the scale changes.
-                                let scale = window.scale_factor();
-                                let w = f32::from(bounds.size.width).round() as u32;
-                                let h = f32::from(bounds.size.height).round() as u32;
-                                let key = (w, h, (scale * 100.0).round() as u32);
-                                let mut p = paint_for_prepaint.borrow_mut();
-                                p.pane = Some(bounds);
-                                if p.sent_size != Some(key) && w > 0 && h > 0 {
-                                    p.sent_size = Some(key);
-                                    eprintln!("app: pane {w}x{h} logical at scale {scale}");
-                                    browser.borrow_mut().resize(w, h, scale);
-                                }
-                                // In prepaint, like every element's hitbox, so the overlay (also
-                                // inserted in prepaint, later) sits above it for hit testing.
-                                window.insert_hitbox(bounds, HitboxBehavior::Normal)
-                            },
-                            move |bounds, hitbox, window, cx| {
-                                window.handle_input(
-                                    &focus,
-                                    ElementInputHandler::new(bounds, entity.clone()),
-                                    cx,
-                                );
-                                window.set_cursor_style(cursor, &hitbox);
-                                // The page hears that the pointer left when it leaves the pane or
-                                // moves onto something drawn above it, such as the overlay. (GPUI's
-                                // hover state is not used: it also turns off while typing.)
-                                let leave_paint = paint.clone();
-                                let leave_browser = browser_for_paint.clone();
-                                window.on_mouse_event(
-                                    move |event: &MouseMoveEvent, phase, window, _cx| {
-                                        if phase != DispatchPhase::Bubble {
-                                            return;
+                        div()
+                            .id("browser-pane")
+                            .relative()
+                            .flex_1()
+                            .h_full()
+                            .overflow_hidden()
+                            .track_focus(&self.focus)
+                            .on_any_mouse_down(cx.listener(Self::mouse_down))
+                            .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
+                            .on_mouse_up(MouseButton::Right, cx.listener(Self::mouse_up))
+                            .on_mouse_up(MouseButton::Middle, cx.listener(Self::mouse_up))
+                            .on_mouse_move(cx.listener(Self::mouse_move))
+                            .on_scroll(cx.listener(Self::scroll))
+                            .on_key_down(cx.listener(Self::key_down))
+                            .on_key_up(cx.listener(Self::key_up))
+                            .child(
+                                canvas(
+                                    move |bounds, window, _cx| {
+                                        // Tell the engine the pane's size whenever it or the
+                                        // scale changes.
+                                        let scale = window.scale_factor();
+                                        let w = f32::from(bounds.size.width).round() as u32;
+                                        let h = f32::from(bounds.size.height).round() as u32;
+                                        let key = (w, h, (scale * 100.0).round() as u32);
+                                        let mut p = paint_for_prepaint.borrow_mut();
+                                        p.pane = Some(bounds);
+                                        if p.sent_size != Some(key) && w > 0 && h > 0 {
+                                            p.sent_size = Some(key);
+                                            eprintln!("app: pane {w}x{h} logical at scale {scale}");
+                                            browser.borrow_mut().resize(w, h, scale);
                                         }
-                                        let inside = hitbox.is_hovered(window);
-                                        let mut p = leave_paint.borrow_mut();
-                                        if p.pointer_inside && !inside {
-                                            leave_browser.borrow_mut().input(
-                                                proto::InputEvent::PointerLeave {
-                                                    modifiers: modifiers(&event.modifiers),
-                                                },
-                                            );
-                                        }
-                                        p.pointer_inside = inside;
+                                        // In prepaint, like every element's hitbox, so the
+                                        // overlay (also inserted in prepaint, later) sits above
+                                        // it for hit testing.
+                                        window.insert_hitbox(bounds, HitboxBehavior::Normal)
                                     },
-                                );
-                                paint_frames(&paint, bounds, view_frame, popup, window);
-                            },
-                        )
-                        .size_full(),
-                    )
-                    .child(self.overlay()),
+                                    move |bounds, hitbox, window, cx| {
+                                        window.handle_input(
+                                            &focus,
+                                            ElementInputHandler::new(bounds, entity.clone()),
+                                            cx,
+                                        );
+                                        window.set_cursor_style(cursor, &hitbox);
+                                        // The page hears that the pointer left when it leaves
+                                        // the pane or moves onto something drawn above it, such
+                                        // as the overlay. (GPUI's hover state is not used: it
+                                        // also turns off while typing.)
+                                        let leave_paint = paint.clone();
+                                        let leave_browser = browser_for_paint.clone();
+                                        window.on_mouse_event(
+                                            move |event: &MouseMoveEvent, phase, window, _cx| {
+                                                if phase != DispatchPhase::Bubble {
+                                                    return;
+                                                }
+                                                let inside = hitbox.is_hovered(window);
+                                                let mut p = leave_paint.borrow_mut();
+                                                if p.pointer_inside && !inside {
+                                                    leave_browser.borrow_mut().input(
+                                                        proto::InputEvent::PointerLeave {
+                                                            modifiers: modifiers(&event.modifiers),
+                                                        },
+                                                    );
+                                                }
+                                                p.pointer_inside = inside;
+                                            },
+                                        );
+                                        paint_frames(
+                                            &paint, &watch, bounds, view_frame, popup, window,
+                                        );
+                                    },
+                                )
+                                .size_full(),
+                            )
+                            .child(self.overlay()),
+                    ),
             )
+            .child(
+                // Painted last: closes the measurement of how long the UI thread spent building
+                // this window frame (render, layout, prepaint, paint, including paint_image).
+                canvas(
+                    |_, _, _| {},
+                    move |_, _, _, _| {
+                        let mut p = paint_for_end.borrow_mut();
+                        if let Some(start) = p.frame_start.take()
+                            && p.recording
+                        {
+                            p.rec_ui_frame_ns.push(start.elapsed().as_nanos() as u64);
+                            p.rec_window_frames += 1;
+                        }
+                    },
+                )
+                .absolute()
+                .size_0(),
+            )
+    }
+}
+
+/// A sidebar of fixed width beside the browser pane, toggled by the resize check.
+trait SidebarExt {
+    fn when_some_sidebar(self, show: bool) -> Self;
+}
+
+impl SidebarExt for gpui::Div {
+    fn when_some_sidebar(self, show: bool) -> Self {
+        if show {
+            self.child(
+                div()
+                    .w(px(SIDEBAR_WIDTH))
+                    .h_full()
+                    .bg(rgb(0x252526))
+                    .p_3()
+                    .child("sidebar (pane resize check)"),
+            )
+        } else {
+            self
+        }
     }
 }
 
@@ -842,6 +1127,7 @@ impl Render for Pane {
 /// one that was superseded before it was painted never reaches the atlas at all.
 fn paint_frames(
     paint: &Rc<RefCell<PaintState>>,
+    watch: &Mutex<Watch>,
     bounds: Bounds<Pixels>,
     view_frame: Option<UiFrame>,
     popup: Option<(proto::Rect, UiFrame)>,
@@ -873,13 +1159,26 @@ fn paint_frames(
     );
     let is_new = p.painted_view.as_ref().map(|(seq, _)| *seq) != Some(frame.seq);
     if is_new {
-        let paint_ns = started.elapsed().as_nanos() as u64;
+        let now = Instant::now();
+        let paint_ns = (now - started).as_nanos() as u64;
         let latency = spike_protocol::wire::unix_ns().saturating_sub(frame.produced_unix_ns);
+        p.first_painted.get_or_insert(now);
         p.new_frames_painted += 1;
         p.paint_ns += paint_ns;
         p.paint_ns_max = p.paint_ns_max.max(paint_ns);
         p.latency_ns += latency;
         p.latency_ns_max = p.latency_ns_max.max(latency);
+        if p.recording {
+            p.rec_painted_at.push(now);
+            p.rec_paint_ns.push(paint_ns);
+            p.rec_latency_ns.push(latency);
+        }
+        {
+            let mut w = watch.lock().unwrap();
+            if w.hit.is_some_and(|(_, seq)| seq == frame.seq) && w.painted.is_none() {
+                w.painted = Some(now);
+            }
+        }
         if let Some((_, old)) = p.painted_view.replace((frame.seq, frame.image.clone())) {
             let _ = window.drop_image(old);
         }
@@ -896,8 +1195,11 @@ fn paint_frames(
                 .painted_popup
                 .as_ref()
                 .is_none_or(|old| old.id != frame.image.id);
-            if changed && let Some(old) = p.painted_popup.replace(frame.image.clone()) {
-                let _ = window.drop_image(old);
+            if changed {
+                p.popup_painted += 1;
+                if let Some(old) = p.painted_popup.replace(frame.image.clone()) {
+                    let _ = window.drop_image(old);
+                }
             }
         }
         None => {
@@ -945,6 +1247,7 @@ impl EntityInputHandler for Pane {
     }
 
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        eprintln!("app: input handler: unmark_text");
         if self.composing.take().is_some() {
             self.send(proto::InputEvent::ImeFinish);
         }
@@ -969,6 +1272,9 @@ impl EntityInputHandler for Pane {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) {
+        eprintln!(
+            "app: input handler: replace_and_mark_text_in_range {new_text:?} {new_selected_range:?}"
+        );
         if new_text.is_empty() {
             self.composing = None;
             self.send(proto::InputEvent::ImeCancel);
@@ -1010,130 +1316,6 @@ impl EntityInputHandler for Pane {
     ) -> Option<usize> {
         None
     }
-}
-
-/// A scripted input sequence through GPUI's own event dispatch (hit testing, focus, element
-/// listeners, the input handler), so the forwarding path runs end to end without a person at
-/// the keyboard. Input-method compositions cannot be dispatched this way; the script calls the
-/// pane's input-handler methods directly for those, which skips the OS input method.
-async fn run_script(this: gpui::WeakEntity<Pane>, cx: &mut gpui::AsyncWindowContext) {
-    let executor = cx.background_executor().clone();
-    let pause = |ms| executor.timer(Duration::from_millis(ms));
-    let Ok((pane, swatch)) = this.update(cx, |p, _| {
-        let s = p.paint.borrow();
-        (s.pane, s.swatch)
-    }) else {
-        return;
-    };
-    let Some(pane) = pane else {
-        eprintln!("app: script: the pane has not been laid out");
-        return;
-    };
-    let at = |x: f32, y: f32| pane.origin + point(px(x), px(y));
-    eprintln!("app: script: start");
-
-    // Pointer moves: into the stand-in's link area, then its text field.
-    for (x, y) in [(400.0, 300.0), (120.0, 145.0), (200.0, 80.0)] {
-        let _ = cx.update(|window, cx| {
-            window.dispatch_event(
-                PlatformInput::MouseMove(MouseMoveEvent {
-                    position: at(x, y),
-                    pressed_button: None,
-                    modifiers: Default::default(),
-                }),
-                cx,
-            )
-        });
-        pause(150).await;
-    }
-
-    // Click the text field: focuses the pane and reaches the page.
-    click(cx, at(200.0, 80.0));
-    pause(150).await;
-
-    // Type through GPUI's keystroke dispatch, which also feeds the input handler.
-    for key in ["h", "e", "l", "l", "o", "space", "backspace"] {
-        if let Ok(keystroke) = Keystroke::parse(key) {
-            let _ = cx.update(|window, cx| window.dispatch_keystroke(keystroke, cx));
-        }
-        pause(60).await;
-    }
-
-    // A composition, by direct calls (see above): "ni" becomes "日本" and is committed.
-    let _ = this.update_in(cx, |p, window, cx| {
-        p.replace_and_mark_text_in_range(None, "に", Some(1..1), window, cx);
-    });
-    pause(150).await;
-    let _ = this.update_in(cx, |p, window, cx| {
-        p.replace_and_mark_text_in_range(None, "日本", Some(2..2), window, cx);
-        let bounds = p.bounds_for_range(0..1, pane, window, cx);
-        eprintln!("app: script: candidate window would sit at {bounds:?}");
-    });
-    pause(150).await;
-    let _ = this.update_in(cx, |p, window, cx| {
-        p.replace_text_in_range(None, "日本", window, cx);
-    });
-    pause(150).await;
-
-    // A wheel step over the page.
-    let _ = cx.update(|window, cx| {
-        window.dispatch_event(
-            PlatformInput::Scroll(ScrollEvent {
-                position: at(400.0, 400.0),
-                delta: ScrollDelta::Pixels(point(px(0.0), px(-120.0))),
-                ..Default::default()
-            }),
-            cx,
-        )
-    });
-    pause(150).await;
-
-    // A click on the overlay must not reach the page.
-    if let Some(swatch) = swatch {
-        eprintln!("app: script: moving onto the overlay; the page should hear PointerLeave");
-        let _ = cx.update(|window, cx| {
-            window.dispatch_event(
-                PlatformInput::MouseMove(MouseMoveEvent {
-                    position: swatch.center(),
-                    pressed_button: None,
-                    modifiers: Default::default(),
-                }),
-                cx,
-            )
-        });
-        pause(150).await;
-        eprintln!(
-            "app: script: clicking the overlay at {:?}; no 'pane got mouse down' line should follow",
-            swatch.center()
-        );
-        click(cx, swatch.center());
-    }
-    pause(300).await;
-    eprintln!("app: script: done");
-}
-
-fn click(cx: &mut gpui::AsyncWindowContext, position: Point<Pixels>) {
-    let _ = cx.update(|window, cx| {
-        window.dispatch_event(
-            PlatformInput::MouseDown(MouseDownEvent {
-                button: MouseButton::Left,
-                position,
-                modifiers: Default::default(),
-                click_count: 1,
-                first_mouse: false,
-            }),
-            cx,
-        );
-        window.dispatch_event(
-            PlatformInput::MouseUp(MouseUpEvent {
-                button: MouseButton::Left,
-                position,
-                modifiers: Default::default(),
-                click_count: 1,
-            }),
-            cx,
-        );
-    });
 }
 
 fn modifiers(m: &gpui::Modifiers) -> proto::Modifiers {

@@ -182,6 +182,8 @@ pub enum BrowserEvent {
     /// A DevTools protocol message from the engine: a result or error for a call made with
     /// [`BrowserView::devtools`] (it carries the call's `id`), or an event.
     DevTools(serde_json::Value),
+    /// A line the engine reports for the log (see `wire::FromHelper::Status`).
+    Status(String),
     /// The engine process ended. The view needs a new engine to show anything again.
     Exited {
         status: String,
