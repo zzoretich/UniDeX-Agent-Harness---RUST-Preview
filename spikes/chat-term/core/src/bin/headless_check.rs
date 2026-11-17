@@ -112,6 +112,7 @@ fn main() {
             continue;
         }
         check_pty_child(backend, &mut report);
+        check_pty_keys(backend, &mut report);
         check_pty_shell(backend, &mut report);
         #[cfg(unix)]
         check_pty_vi(backend, &mut report);
@@ -582,56 +583,6 @@ fn check_pty_child(backend: Backend, report: &mut Report) {
         format!("{}, grid ok {grid_ok}", ms(d)),
     );
 
-    // Raw keystroke round trip: the child reads in raw mode and prints the hex of what it received.
-    let table = keys::table();
-    session.write(format!("keys {}\r", table.len()).into_bytes());
-    let raw = wait_term(&session, &rec, Duration::from_secs(5), |t| {
-        has_line(t, "RAW")
-    });
-    let mut wrong = Vec::new();
-    let mut lat = Vec::new();
-    if raw.is_some() {
-        for (i, (key, app_cursor, expected)) in table.iter().enumerate() {
-            let bytes = keys::encode(key, *app_cursor).unwrap_or_default();
-            let prefix = format!("K{i} ");
-            let t0 = Instant::now();
-            session.write(bytes);
-            let mut got = None;
-            let d = wait_term(&session, &rec, Duration::from_secs(3), |t| {
-                got = pty::screen_lines(t)
-                    .iter()
-                    .find_map(|l| l.strip_prefix(&prefix).map(|h| h.trim().to_string()));
-                got.is_some()
-            });
-            if d.is_some() {
-                lat.push(t0.elapsed().as_secs_f64() * 1000.0);
-            }
-            let want = hex(expected);
-            if got.as_deref() != Some(want.as_str()) {
-                wrong.push(format!("{} got {:?} want {want}", key.key, got));
-            }
-        }
-    }
-    let raw_ok = raw.is_some() && wrong.is_empty();
-    report.check(
-        &group,
-        "keystrokes arrive byte for byte in raw mode",
-        raw_ok,
-        cfg!(unix),
-        format!("{} keys; {}", table.len(), wrong.join("; ")),
-    );
-    report.data(
-        &format!("{}_keystroke_roundtrip", backend.name()),
-        stats::summary_ms(&lat),
-    );
-    let cooked = wait_term(&session, &rec, Duration::from_secs(3), |t| {
-        has_line(t, "COOKED")
-    });
-    if cooked.is_none() {
-        // Leave raw mode however we can before the next step.
-        session.write(b"\r".to_vec());
-    }
-
     // A burst of 200,000 lines, timed until the end marker is on screen.
     let wakeups_before = rec.state.lock().unwrap().wakeups;
     let t0 = Instant::now();
@@ -662,7 +613,8 @@ fn check_pty_child(backend: Backend, report: &mut Report) {
         &group,
         "scrollback stays at 10,000 lines after the burst",
         history == 10_000,
-        true,
+        // ConPTY renders from its own buffer, so whether every scrolled line reaches the emulator is a finding there.
+        cfg!(unix),
         format!("history {history}"),
     );
     report.data(
@@ -687,6 +639,82 @@ fn check_pty_child(backend: Backend, report: &mut Report) {
         d.is_some(),
         false,
         ms(d),
+    );
+    session.shutdown(Duration::from_secs(3));
+}
+
+/// Raw keystroke round trip in a session of its own (so a platform where it fails cannot disturb the other checks):
+/// the child reads in raw mode and prints the hex of what it received.
+fn check_pty_keys(backend: Backend, report: &mut Report) {
+    let group = format!("pty {} / child helper", backend.name());
+    let exe = std::env::current_exe()
+        .expect("current_exe")
+        .to_string_lossy()
+        .into_owned();
+    let rec = Arc::new(Recorder::default());
+    let session = match Session::spawn(backend, &SpawnSpec::new(exe, &["child"]), rec.callback()) {
+        Ok(s) => s,
+        Err(e) => {
+            report.check(
+                &group,
+                "spawn for the keystroke check",
+                false,
+                true,
+                e.to_string(),
+            );
+            return;
+        }
+    };
+    let ready = wait_term(&session, &rec, Duration::from_secs(15), |t| {
+        has_line(t, "READY")
+    });
+    let table = keys::table();
+    session.write(format!("keys {}\r", table.len()).into_bytes());
+    let raw = ready.and(wait_term(&session, &rec, Duration::from_secs(5), |t| {
+        has_line(t, "RAW")
+    }));
+    let mut wrong = Vec::new();
+    let mut lat = Vec::new();
+    if raw.is_some() {
+        for (i, (key, app_cursor, expected)) in table.iter().enumerate() {
+            let bytes = keys::encode(key, *app_cursor).unwrap_or_default();
+            let prefix = format!("K{i} ");
+            let t0 = Instant::now();
+            session.write(bytes);
+            let mut got = None;
+            let d = wait_term(&session, &rec, Duration::from_secs(3), |t| {
+                got = pty::screen_lines(t)
+                    .iter()
+                    .find_map(|l| l.strip_prefix(&prefix).map(|h| h.trim().to_string()));
+                got.is_some()
+            });
+            let want = hex(expected);
+            if d.is_none() {
+                wrong.push(format!("{}: no reply, stopped here", key.key));
+                break;
+            }
+            lat.push(t0.elapsed().as_secs_f64() * 1000.0);
+            if got.as_deref() != Some(want.as_str()) {
+                wrong.push(format!("{} got {:?} want {want}", key.key, got));
+            }
+        }
+    } else {
+        wrong.push(format!(
+            "the child did not enter raw mode; {}",
+            screen_dump(&session)
+        ));
+    }
+    let raw_ok = raw.is_some() && wrong.is_empty();
+    report.check(
+        &group,
+        "keystrokes arrive byte for byte in raw mode",
+        raw_ok,
+        cfg!(unix),
+        format!("{} keys; {}", table.len(), wrong.join("; ")),
+    );
+    report.data(
+        &format!("{}_keystroke_roundtrip", backend.name()),
+        stats::summary_ms(&lat),
     );
     session.shutdown(Duration::from_secs(3));
 }
@@ -721,7 +749,7 @@ fn check_pty_shell(backend: Backend, report: &mut Report) {
         ms(prompt),
     );
     let (cmd, want): (&[u8], &str) = if cfg!(windows) {
-        (b"set /a 6*7\r", "42")
+        (b"echo marker-%ERRORLEVEL%\r", "marker-0")
     } else {
         (b"echo marker-$((6*7))\r", "marker-42")
     };

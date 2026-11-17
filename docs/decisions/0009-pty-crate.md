@@ -85,8 +85,10 @@ A design call, within design section 5.7 (the PTY crate is chosen in the M0 tria
 
 - Linux and Windows for both crates: building, and every headless check, are shown only by the spike's CI run. The
   Windows checks that are expected to be fragile are marked as warnings rather than failures in `headless-check`: the
-  raw keystroke round trip through ConPTY (Windows translates input into console records and back), the shell resize
-  check through `mode con`, and the reader ending after the child exits.
+  raw keystroke round trip through ConPTY (Windows translates input into console records and back; it runs in a
+  child session of its own so a failure cannot disturb the other checks), the shell resize check through `mode con`,
+  whether every line of the 200,000-line burst reaches the scrollback (ConPTY repaints from its own buffer), and the
+  reader ending after the child exits.
 - That `portable-pty` works with ConPTY when the host answers the cursor-position request (the session does): CI on
   Windows shows it or not.
 - The GPUI terminal on Linux and Windows (no display on the runners; Task 13 looks at rendering without hardware).
