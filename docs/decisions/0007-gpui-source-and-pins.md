@@ -140,8 +140,8 @@ may lack too.
 
 **Widget kit: deferred.** `gpui-kit` is not a dependency yet. Its styled layer (`gpui-component` 0.10.0) needs the 0BSD
 licence. The maintainer allowed 0BSD on 2026-11-17 (see "Maintainer decisions" below), so the licence no longer rules
-the kit out; the kit's tree still carries three more unmaintained notices than the five accepted below, which a trial
-that adopts it must bring to the maintainer. The choice
+the kit out; the kit's tree carries a few more unmaintained notices than GPUI's own, which under the scope rule below are
+warnings, not failures, unless the kit makes one of those crates a direct dependency of this workspace. The choice
 between the styled kit, `gpui-base` alone (which passes the policy) and plain GPUI belongs to the trial tasks (Tasks 10
 and 11), which build real screens. Whatever they choose, this pin is the snapshot `gpui-kit 0.10.0` requires, so adding
 `gpui-kit = { version = "=0.10.0", ... }` later moves no GPUI version.
@@ -162,17 +162,21 @@ still fails. Nothing is ignored here. `cargo audit` reports the five, and `paste
 
 Two questions this record raised were put to the maintainer, who decided both:
 
-- **The five advisories are accepted.** `deny.toml` ignores exactly RUSTSEC-2026-0192, -0206, -0370, -0371 and -0372,
-  each with its reason. Any other advisory, and any vulnerability, still fails the check. The list is reviewed at
-  every GPUI upgrade, and an entry is removed as soon as its crate is replaced or patched. The alternatives offered
-  were to stop failing on unmaintained notices for indirect dependencies altogether (rejected: future notices would
-  pass silently) and not to accept them (which would have ruled GPUI out).
+- **Unmaintained notices fail the check only for direct dependencies.** The maintainer first accepted the five
+  notices by name. The same day the advisory database gained a sixth in GPUI's tree (RUSTSEC-2026-0543, `chrono`,
+  which `gpui-pre` uses directly), which showed that naming each one would turn the check red, on `main` and on every
+  pull request, whenever any crate in that tree is marked unmaintained. Asked again, the maintainer chose the scope
+  rule instead: `deny.toml` sets `unmaintained = "workspace"`, so a notice fails only for a crate this workspace
+  depends on directly. Notices deeper in the tree are printed as warnings by `cargo audit` and are reviewed at every
+  GPUI upgrade. Vulnerabilities, unsound notices and yanked crates still fail everywhere. The alternatives offered
+  were to keep naming each notice (rejected for the reason above) and to leave the check failing. No advisory is
+  ignored by name.
 - **The 0BSD licence is allowed.** It is added to the licence allow list. It sets no conditions, so it is compatible
   with the project's MIT licence.
 
 ## Who decided
 
-A design call, within the maintainer's decision 0002. The advisory exceptions and the 0BSD allowance were decided by
+A design call, within the maintainer's decision 0002. The advisory scope rule and the 0BSD allowance were decided by
 the maintainer.
 
 ## Consequences
