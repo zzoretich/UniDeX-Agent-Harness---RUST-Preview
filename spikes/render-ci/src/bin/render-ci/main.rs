@@ -213,12 +213,22 @@ struct StderrLogger {
 
 impl log::Log for StderrLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        // The graphics crates log every frame at debug level; keep them at info unless trace is asked for.
-        let noisy = ["wgpu", "naga", "zbus", "calloop", "polling", "async_io"]
+        // The graphics crates log every frame at debug level and the D-Bus client logs its handshake at info; keep
+        // them quieter unless trace is asked for.
+        let target = metadata.target();
+        let cap = if ["zbus", "tracing"].iter().any(|t| target.starts_with(t)) {
+            log::LevelFilter::Warn
+        } else if ["wgpu", "naga", "calloop", "polling", "async_io"]
             .iter()
-            .any(|t| metadata.target().starts_with(t));
-        let level = if noisy && self.level < log::LevelFilter::Trace {
-            self.level.min(log::LevelFilter::Info)
+            .any(|t| target.starts_with(t))
+            || target == "gpui_linux::linux::x11::window"
+        {
+            log::LevelFilter::Info
+        } else {
+            log::LevelFilter::Trace
+        };
+        let level = if self.level < log::LevelFilter::Trace {
+            self.level.min(cap)
         } else {
             self.level
         };

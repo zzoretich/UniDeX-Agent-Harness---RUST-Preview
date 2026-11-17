@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 # Runs the automation round trip (render-ci-client driving render-ci --automation) on a CI runner.
 #
-#   ci/automation.sh <label> [atspi]
+#   ci/automation.sh <label> [atspi] [frame-optional]
 #
-# With `atspi` (Linux), the run happens inside a private D-Bus session whose AT-SPI bus reports
+# With `frame-optional` (Wayland, where the app cannot read its own window back), the frame steps are reported but
+# not required. With `atspi` (Linux), the run happens inside a private D-Bus session whose AT-SPI bus reports
 # org.a11y.Status.IsEnabled = true, which is what makes AccessKit build GPUI's accessibility tree on Linux (as a screen
 # reader being on would). Writes everything to out/<label>/. Exit code: the client's (0 = every required step passed).
 set -u
 
 label="$1"
-mode="${2:-}"
+shift
+mode=""
+frame_flag=""
+for flag in "$@"; do
+  case "$flag" in
+    atspi) mode=atspi ;;
+    frame-optional) frame_flag="--frame-optional" ;;
+    *)
+      echo "unknown option: $flag" >&2
+      exit 2
+      ;;
+  esac
+done
 out="out/${label}"
 mkdir -p "$out"
 client=./target/release/render-ci-client
@@ -19,7 +32,7 @@ if [ -x "${client}.exe" ]; then
   app="${app}.exe"
 fi
 
-echo "=== automation ${label} ${mode}"
+echo "=== automation ${label} ${mode} ${frame_flag}"
 started=$SECONDS
 rc=0
 if [ "$mode" = atspi ]; then
@@ -32,10 +45,11 @@ if [ "$mode" = atspi ]; then
       && echo "AT-SPI IsEnabled set to true" || echo "could not set AT-SPI IsEnabled"
     dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus \
       org.freedesktop.DBus.Properties.Get string:org.a11y.Status string:IsEnabled | tail -1
-    "$0" --app "$1" --out "$2" --log debug --a11y-wait-ms 8000
-  ' "$client" "$app" "$out" > "$out/client.stdout" 2> "$out/app.log" || rc=$?
+    "$0" --app "$1" --out "$2" --log debug --a11y-wait-ms 8000 ${3:+"$3"}
+  ' "$client" "$app" "$out" "$frame_flag" > "$out/client.stdout" 2> "$out/app.log" || rc=$?
 else
-  "$client" --app "$app" --out "$out" --log debug --a11y-wait-ms 8000 > "$out/client.stdout" 2> "$out/app.log" || rc=$?
+  "$client" --app "$app" --out "$out" --log debug --a11y-wait-ms 8000 ${frame_flag:+"$frame_flag"} \
+    > "$out/client.stdout" 2> "$out/app.log" || rc=$?
 fi
 echo "client exit code: ${rc} after $((SECONDS - started)) s"
 echo "----- client (${label}) -----"

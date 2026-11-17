@@ -2,7 +2,8 @@
 # The Wayland trial: a headless wlroots compositor (sway, headless back end, pixman software renderer), the app as a
 # Wayland client, and `grim` to capture the compositor's output (it holds nothing but this window).
 #
-#   ci/wayland.sh       run from spikes/render-ci after the build; writes out/linux-wayland/
+#   ci/wayland.sh       run from spikes/render-ci after the build; writes out/linux-wayland/ and
+#                       out/linux-wayland-automation/
 set -u
 mkdir -p out/linux-wayland
 runtime=$(mktemp -d)
@@ -31,6 +32,11 @@ export WAYLAND_DISPLAY="$socket"
 unset DISPLAY
 rc=0
 bash ci/scenario.sh linux-wayland wayland || rc=$?
+# The socket's action and tree on Wayland; the frame verb cannot work there (no in-app readback), so it is optional.
+arc=0
+bash ci/automation.sh linux-wayland-automation atspi frame-optional || arc=$?
+echo "Wayland automation exit code: ${arc}"
+[ "$arc" = 0 ] || rc=1
 kill "$sway_pid" 2> /dev/null
 wait "$sway_pid" 2> /dev/null
 echo "----- sway log (tail)"

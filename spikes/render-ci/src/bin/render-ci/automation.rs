@@ -599,7 +599,8 @@ mod endpoint {
             let sid = user_sid_string()?;
             // Protected DACL with one entry: generic all for this user. Nobody else, not even administrators.
             let sddl = format!("D:P(A;;GA;;;{sid})");
-            log::info!("automation: pipe DACL {sddl}");
+            // The SID itself is not logged: CI logs are public.
+            log::info!("automation: pipe DACL D:P(A;;GA;;;<this user's SID>)");
             let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
             let ok = unsafe {
                 ConvertStringSecurityDescriptorToSecurityDescriptorW(

@@ -115,7 +115,7 @@ jobs:
           VK_DRIVER_FILES: /nonexistent/none.json
           VK_ICD_FILENAMES: /nonexistent/none.json
         run: bash ci/scenario.sh linux-x11-gl x11
-      - name: Scenario, Wayland under headless sway (exploratory)
+      - name: Wayland under headless sway, scenario and automation (exploratory)
         if: ${{ !cancelled() }}
         run: |
           # Exploratory: a failure here is reported as a warning and does not fail the job, because the question is
@@ -128,6 +128,9 @@ jobs:
       - name: Release build has no automation socket
         if: ${{ !cancelled() }}
         run: |
+          # GitHub runs bash with -e; turn it off so a zero count from grep (exit 1) is checked below instead of
+          # ending the step early. Every command's result is checked explicitly.
+          set +e
           set -u
           started=$SECONDS
           cargo build --release --locked --bin render-ci --target-dir target/plain || exit 1

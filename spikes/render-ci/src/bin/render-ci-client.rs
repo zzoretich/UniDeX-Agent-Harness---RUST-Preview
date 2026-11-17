@@ -1,7 +1,7 @@
 //! Drives `render-ci --automation` through its socket and checks the three things design 10.3 asks of it: an action
 //! changes the app's state, the element tree can be read back, and a frame can be captured.
 //!
-//!   render-ci-client --app <path to render-ci> --out <dir> [--log <level>] [--a11y-wait-ms <n>]
+//!   render-ci-client --app <path to render-ci> --out <dir> [--log <level>] [--a11y-wait-ms <n>] [--frame-optional]
 //!
 //! It starts the app as its own child, reads the endpoint from the child's stdout, and runs:
 //! hello, wait for a first render, tree, a11y_activate, tree again, frame (before), click "count", wait until the
@@ -126,12 +126,14 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let Some(app) = arg_value(&args, "--app") else {
         eprintln!(
-            "usage: render-ci-client --app <render-ci> --out <dir> [--log <level>] [--a11y-wait-ms <n>]"
+            "usage: render-ci-client --app <render-ci> --out <dir> [--log <level>] [--a11y-wait-ms <n>] [--frame-optional]"
         );
         std::process::exit(2);
     };
     let out = PathBuf::from(arg_value(&args, "--out").unwrap_or_else(|| "automation-out".into()));
     let log_level = arg_value(&args, "--log").unwrap_or_else(|| "info".into());
+    // Where the app cannot read its own window back (Wayland), the frame steps are reported but not required.
+    let frame_required = !args.iter().any(|a| a == "--frame-optional");
     let a11y_wait = Duration::from_millis(
         arg_value(&args, "--a11y-wait-ms")
             .and_then(|v| v.parse().ok())
@@ -285,7 +287,7 @@ fn main() {
         }
     };
     let (ok, detail) = frame_step(&mut conn, "frame-before", false);
-    steps.record("frame_before", ok, true, detail);
+    steps.record("frame_before", ok, frame_required, detail);
 
     // The action.
     let click = conn.request(json!({ "cmd": "click", "id": "count" }));
@@ -312,7 +314,7 @@ fn main() {
         json!({ "accesskit_shows_clicks_1": find_text(&tree2["accesskit"]["tree"], "Clicks: 1") }),
     );
     let (ok, detail) = frame_step(&mut conn, "frame-after", true);
-    steps.record("frame_after", ok, true, detail);
+    steps.record("frame_after", ok, frame_required, detail);
 
     let quit = conn.request(json!({ "cmd": "quit" }));
     let deadline = Instant::now() + Duration::from_secs(15);
