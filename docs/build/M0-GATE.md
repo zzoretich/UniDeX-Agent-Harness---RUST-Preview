@@ -37,8 +37,10 @@ Words used throughout:
 **In progress:**
 
 - Task 14, packaging and the nightly workflow: a draft pull request. Its first CI round built Linux and Windows
-  packages; the macOS package step and the Windows packaging trial failed (the second hit the two-hour limit). A second
-  round is running. Decision 0014 follows from it. Stage 2 completes this item.
+  packages; the macOS package step and the Windows packaging trial failed (the second hit the two-hour limit). In the
+  second round the Linux and Windows jobs were green in both workflows and the two-hour hang was gone; the macOS jobs
+  were not picked up by a hosted runner and are being re-run. A draft decision 0014 exists; stage 2 completes this
+  item.
 - Task 16, this gate: stage 1 is this report, the design updates and the document touch-ups described in this
   branch's commits. Stage 2 is listed at the top.
 
@@ -51,7 +53,7 @@ provider); that delayed several merges but changed no result.
 named cargo tools and the first push; that `cargo deny` fails an "unmaintained" notice only for a crate the workspace
 uses directly (decision 0007); that the 0BSD licence is allowed (decision 0007); running the Electron baseline early;
 downloading the CEF distribution for the browser trial and installing CMake and Ninja (decision 0012). Installing
-virtual machine software was not approved and was not asked yet (question 23).
+virtual machine software was not approved and was not asked yet (question 24).
 
 **What M0 did on the development Mac that the maintainer should know** (working notes):
 
@@ -74,14 +76,14 @@ ran); **not verified**.
 
 | Trial or study | Question | Answer | Evidence | Record |
 |---|---|---|---|---|
-| GPUI source | Which GPUI, pinned how? | The `gpui-pre` 0.3.12 snapshot from crates.io, pinned exactly once in the workspace; the widget kit is not adopted yet | Built and launched on the dev Mac (nobody looked at the window); CI builds the cookbook on all three platforms; source compared with upstream file by file | 0007 |
+| GPUI source | Which GPUI, pinned how? | The `gpui-pre` 0.3.12 snapshot from crates.io, pinned exactly once in the workspace; the widget kit is deferred (question 23) | Built and launched on the dev Mac (nobody looked at the window); CI builds the cookbook on all three platforms; source compared with upstream file by file | 0007 |
 | Chat view | Can GPUI carry a 5,000-message thread with a reply streaming in? | Yes on macOS, with one target missed: streaming and idle are well inside the targets; scrolling is not "no dropped frames" (up to 2 % of first-visit frames late); memory reaches the limit after a full scroll | Program, dev Mac (desktop, 100 Hz, busy machine); CI on three platforms: builds and windowless self-tests only; nothing drawn on Linux or Windows | 0008 |
 | Terminal | Our grid element over `alacritty_terminal`? | Works on macOS: 13 of 13 correctness checks, a 200,000-line burst with no slow frame | Program, dev Mac; CI headless checks on three platforms; nothing drawn on Linux or Windows | 0008 |
 | PTY crate | `portable-pty` or `alacritty_terminal`'s own PTY? | `alacritty_terminal`'s own PTY | Program, dev Mac; CI headless checks on three platforms. Two checks open: raw keystrokes on Windows (both crates), `vi` resize on Linux (intermittent) | 0009 |
 | Platform integration | Text entry, input methods, dead keys, menus, windows, dialogs, links, quit gate, accessibility | macOS works with listed gaps; Linux and Windows have the code but no link delivery, no second-launch hand-off and no native menu bar; Wayland cannot place a popover; Dock Quit bypasses a quit gate on macOS | macOS: 35 checks by program through the operating system's own entry points; Linux and Windows: source, plus CI build and headless tests. The 14 hands-on steps are owed | 0010 |
 | Screen readers | Does GPUI publish an accessibility tree? | On macOS, yes, for labelled controls and text fields; plain and styled text are not published | Program, dev Mac, through the OS accessibility API; VoiceOver itself not used; Linux and Windows: source only | 0010 |
 | Tray | Which tray crate? | `tray-icon` 0.26.1 on macOS and Windows; Linux backend waits on a licence decision | macOS: program (a synthetic click, not a person's); Windows: source and CI build, never run; Linux: type-checked in CI only | 0011 |
-| Embedded browser | Can Chromium run inside a GPUI window, off-screen in a helper process? | macOS yes; Linux only from a `.deb`, and not until its GPU process is shown confined; Windows yes under CEF's bootstrap; Chromium contacts its vendor by itself on every start observed | macOS: program, dev Mac (34 of 34 input checks at scale 1 after a script fix; 32 of 34 at scale 2 before it); Linux and Windows: CI headless only, nothing drawn, no input; Windows under an elevated account | 0012 |
+| Embedded browser | Can Chromium run inside a GPUI window, off-screen in a helper process? | macOS yes; Linux only from a `.deb`, and not until its GPU process is shown confined; Windows ran under CEF's bootstrap in CI, headless, under an elevated account, nothing drawn; Chromium contacts its vendor by itself on every start observed | macOS: program, dev Mac (34 of 34 input checks at scale 1 after a script fix; 32 of 34 at scale 2 before it; three of the 34 are weaker than their names); Linux and Windows: CI headless only, nothing drawn, no input; Windows under an elevated account | 0012 |
 | Rendering in CI | Can CI render the app and check frames without a GPU? | Yes: Linux X11 on software Vulkan and OpenGL, Windows Server on software Direct3D; frames checked automatically; an automation socket drives the app. Wayland passed but its check could not fail the job | CI on Linux and Windows, five runs; the socket also run by program on the dev Mac. Virtual machines: researched, not run | 0013 |
 | Vendor terms (study, not a trial) | May UniDeX drive Claude Code and Codex through ACP, and who pays? | Both only with API-key credentials until a vendor confirms otherwise | Primary sources read on 2026-11-16; a reviewer fetched every cited page. Not legal advice | 0006 |
 | Electron baseline (study) | How fast is the Electron app 2.7.0? | Warm start 724 ms (a lower bound for the shipped app), 625 idle wake-ups a minute, 239 MiB idle, scrolls at the display's rate, 304 to 641 ms to show a reply in a long thread | Program, dev Mac, development Electron binary with a mock keychain | baseline |
@@ -89,20 +91,26 @@ ran); **not verified**.
 
 ## c. Decisions for the maintainer
 
-27 decisions, in three groups. Each entry gives the question, why it arises, the options with their cost and risk, the
+28 decisions, in three groups. Each entry gives the question, why it arises, the options with their cost and risk, the
 build team's recommendation, and what happens if there is no answer. Where a question would change one of the design
-sections this gate updated (5.7, 5.8, 8, 9 and 13), the design carries a one-line pointer to it.
+sections this gate updated (5.7, 5.8, 8, 9 and 13), or contradicts approved text elsewhere (goal G4, section 5.10), the
+design carries a one-line pointer to it and its approved wording stands.
 
 | Group | Questions |
 |---|---|
 | Before M1 is planned | 1 to 5 |
-| Before the milestone that needs it | 6 to 22 |
-| Whenever convenient | 23 to 27 |
+| Before the milestone that needs it | 6 to 23 |
+| Whenever convenient | 24 to 28 |
 
-Changes the design already took (they settle what it left open and contradict nothing): the PTY crate (5.7), how
-browser frames travel and CEF on Windows (5.8), what "CI-verified" covers in decision 0013's words (8), the tray
-crate on macOS and Windows (8, 13), the GPUI pin (13), and that M0 measured on a desktop, not the reference laptop (9).
-Section 7 was corrected to match the checklist. If any of these should not stand, say so.
+Changes the design already took (each settles something it left open, or states a fact about M0 beside the approved
+text without changing it): the PTY crate (5.7), how browser frames travel and CEF on Windows (5.8), what "CI-verified"
+covers in decision 0013's words (8), the tray crate on macOS and Windows (8, 13), the GPUI pin (13), and that M0
+measured on a desktop, not the reference laptop (9). Section 7 was corrected to match the checklist. If any of these
+should not stand, say so.
+
+Where a record disagrees with text the maintainer approved, the design was not changed and the disagreement is a
+question: the widget kit (5.10, 13; question 23), the reference machine (9; question 3), goal G4 and design 3 (question
+6), and the rest are marked by pointers.
 
 ### Must be settled before M1 is planned
 
@@ -154,14 +162,13 @@ interactively (P22, P47, against 5's "every capability headless"); spend caps fr
 **If not answered.** The proposals stay "Proposed", M1 builds to the design only, and the security review at the M1 gate
 measures against the design. The other 30 proposals (one withdrawn, one demoted to a backstop) are decided before their
 own milestones (questions 13, 22). P38 (protected tags and a release environment that needs your approval) is scheduled
-for M0 in the threat model; M0 did not build its check (question 25).
+for M0 in the threat model; M0 did not build its check (question 26).
 
 #### 3. Which machine is the reference, and how is each speed target defined?
 
 **Why.** Design 9 names an Apple silicon laptop with 16 GB as the reference machine. Every M0 measurement was taken on
 an Apple silicon desktop with 16 GB and external displays at 100 Hz (and 60 Hz in the browser trial), under other load
-(baseline, decisions 0008 and 0012). Decision 0013 calls the development machine a laptop; the other records say
-desktop (see section e). A 120 Hz laptop display leaves 8.3 ms per frame instead of 10 (decision 0008). The baseline
+(baseline, decisions 0008 and 0012). A 120 Hz laptop display leaves 8.3 ms per frame instead of 10 (decision 0008). The baseline
 also proposes how each target is defined, because "cold start", "no periodic wake-ups" and "no dropped frames" cannot
 be checked as written. The first-token target has not been measured through a real provider (decision 0008).
 
@@ -202,11 +209,9 @@ blocks a gate (design 9), and M1 has a real chat window.
 
 **Recommendation (build team).** C.
 
-Whatever the answer, two things follow from decision 0008 and need no decision: the chat needs a cache of prepared
-messages with eviction (memory reached 145 to 149 MiB after scrolling the whole thread, at the 150 MB limit), and the
-widget kit for message bodies stays provisional until its cached form, selection across messages, link activation and
-row stability are measured. Design 5.10's "GPUI with the pinned widget kit" waits on that measurement (decision 0007
-deferred the kit).
+Whatever the answer, one thing follows from decision 0008 and needs no decision: the chat needs a cache of prepared
+messages with eviction (memory reached 145 to 149 MiB after scrolling the whole thread, at the 150 MB limit). The widget
+kit for message bodies is a separate decision (question 23).
 
 **If not answered.** The target stays as written, and M1's chat window would likely miss it at its gate, as the trial
 did.
@@ -297,7 +302,7 @@ Linux `vi` sometimes did not see a resize (both crates in one run, one crate in 
 passed (decision 0009). Neither separates the two crates; both are open for the real terminal.
 
 **Options.** A. Investigate both in CI at the start of the terminal work. B. Wait for a Windows tester or a virtual
-machine (question 23). C. Accept both as known risks and label Windows terminal input unverified.
+machine (question 24). C. Accept both as known risks and label Windows terminal input unverified.
 
 **Recommendation (build team).** A, then B for a hands-on Windows check when possible.
 
@@ -536,9 +541,42 @@ macOS Keychain key protecting the profile's cookies and saved passwords with a f
 not carry it forward. It needs Chromium's own Keychain item, read by a helper signed with a stable identity; macOS may
 then ask the person to allow access, and that prompt names the helper, not the app.
 
+#### 23. Is the widget kit adopted for chat message bodies? (before M1's chat window is built)
+
+**Why.** Design 5.10 says "GPUI with the pinned widget kit", and design 3 notes that the kit is published as
+`gpui-kit`. Decision 0007 pinned the GPUI snapshot the kit requires and deferred the kit itself: its styled layer needs
+the 0BSD licence (since allowed by the maintainer) and its tree carries more unmaintained notices. Decision 0008 then
+measured it. It recommends not adopting the kit for the thread list or the terminal. For message bodies it recommends,
+provisionally, the kit's unstyled layer (`gpui-base`) and its markdown `TextView`, for selection, copy, link handling,
+code-block hooks and a parse that runs in the background while a reply streams, all of which GPUI lacks. The measured
+cost was worse than our own renderer's in places: while resizing, 27 to 40 intervals over 1.5 times the refresh interval
+against 12 to 23; a token p99 of about 21 ms against 16 to 18 ms; start-up 17 ms later. Memory after a full scroll was
+smaller. Two limits: only the form that drops its parse when a row leaves the view was measured, not the cached form
+recommended; and selection and links were not exercised. Before the recommendation is final decision 0008 lists four
+measurements: the cached form in the scroll, jump, stream and resize scenarios; selection and copy within and across
+messages in the virtualised list; link activation; and that a message whose parse lands a frame later does not shift the
+rows around it. None has been made. Until this is answered, the design's wording and decision 0008 do not agree, so the
+design was not changed; it carries a pointer.
+
+**Options.**
+- A. Adopt `gpui-base` and its markdown view for message bodies once the four measurements pass. Cost: 33 more crates, a
+  parse that lands a frame later during a stream, a renderer we do not control (decision 0008), and a short
+  measurement task first. Risk: the measurements may show it worse than our own renderer, which then wins.
+- B. Do not adopt it: message bodies use our own renderer over GPUI's styled text (the `plain` form in the trial), and
+  selection, copy, links and the streaming parse are built by us. Cost: that work, not estimated. Risk: it is larger
+  than the kit's, though the renderer measured better.
+- C. Decide at the M1 gate, building the chat window so the message-body renderer can be swapped. Cost: a boundary
+  in M1's chat code. Risk: rework if the answer arrives late.
+
+**Recommendation (build team).** C with A's measurements as an early M1 task: adopt the kit for message bodies only if
+all four pass, otherwise B. The kit stays out of the thread list and the terminal either way (decision 0008).
+
+**If not answered.** The kit is not a dependency (decision 0007), design 5.10's wording stands, and M1's chat window uses
+our own renderer, the form the trial measured as sound.
+
 ### Whenever convenient
 
-#### 23. A Linux virtual machine on the development Mac
+#### 24. A Linux virtual machine on the development Mac
 
 **Why.** Design 8 says M0 checks whether virtual machines can render the app and, if so, they become a hands-on step
 for Tier 2. M0 did not run one: installing the software needs your approval (decision 0013). A virtual machine is the
@@ -558,11 +596,12 @@ labelled as an Arm check. B. Decline: Tier 2 stays CI-only. C. Decide at M4 toge
 the only route Microsoft authorizes and needs a yearly licence plus Windows 11 Pro; UTM's DirectX driver is a month old
 and experimental).
 
-**Recommendation (build team).** A now, Windows at M4 (decision 0013).
+**Recommendation (build team).** A, at your convenience and before the first gate that wants hands-on Linux items (it
+is a trial and nothing else waits on it); Windows at M4 (decision 0013).
 
 **If not answered.** No virtual machine, and design 8's sentence about virtual machines stays unfulfilled.
 
-#### 24. A faster frame path for the browser needs a GPUI change
+#### 25. A faster frame path for the browser needs a GPUI change
 
 **Why.** The browser's frames are copied twice on the CPU and uploaded on the UI thread. Drawing CEF's shared textures
 directly would save about 2 to 3 ms of the UI thread and 3 to 4 ms of other threads per large frame, but needs an
@@ -575,7 +614,7 @@ same fork could expose what the Windows OS web view needs to sit under app UI (d
 
 **If not answered.** A.
 
-#### 25. Turn on private vulnerability reporting, and other repository settings
+#### 26. Turn on private vulnerability reporting, and other repository settings
 
 **Why.** `SECURITY.md` tells reporters to use GitHub's private vulnerability reporting and offers no email address.
 That is a repository setting only the maintainer can turn on and keep on (threat model 7). If you accept P38 (question
@@ -585,11 +624,12 @@ scheduled P38's check for M0 and M0 did not build it.
 **Options.** Turn it on (a few minutes), or leave it off, in which case a reporter who follows `SECURITY.md` finds no
 way to report privately.
 
-**Recommendation (build team).** Turn it on now, unless it already is.
+**Recommendation (build team).** Turn it on, unless it already is. It takes minutes and nothing waits on it, so it sits
+in this group; the sooner it is on, the sooner `SECURITY.md` is true.
 
 **If not answered.** Unchanged.
 
-#### 26. Delete one early CI run's logs? (optional)
+#### 27. Delete one early CI run's logs? (optional)
 
 **Why.** The public log of one Windows job in the first rendering run (run 44128026417, job 134197065060) prints a
 security descriptor that includes the identifier of the hosted runner's built-in administrator account. That account
@@ -602,7 +642,7 @@ figures. Delete them if you prefer.
 
 **If not answered.** Kept.
 
-#### 27. The provider name removed from the local term list (optional)
+#### 28. The provider name removed from the local term list (optional)
 
 **Why.** The privacy gate also checks a private, uncommitted list of personal terms. One term on it was a model
 provider's company name, which this product must name in code and documents, so the gate could never pass; it was
@@ -622,7 +662,7 @@ written joined, hyphenated or underscored, so a two-word term whose joined form 
 |---|---|---|---|
 | The cookbook window | Run `cargo run -p udx-cookbook --example hello_window`; expect a window titled "UniDeX cookbook" with a label and a button that counts clicks | `crates/udx-cookbook/README.md`, "Run an example" | A few minutes, most of it the first build |
 | The platform trial's 14 steps | Input methods, dead keys, press-and-hold, the tray, menus, a second window, open and save dialogs, VoiceOver, quit | `spikes/platform/CHECKLIST.md` | About 15 minutes plus a first build of a few minutes |
-| The embedded browser | Look at real Chromium in the GPUI window: typing, an input method, the overlay card, scrolling | `spikes/browser/measure-macos.sh` and decision 0012 | Not estimated in the records |
+| The embedded browser | Start the trial app with the real browser on a test page (its options are in `spikes/browser/app/src/main.rs`), then type in a form, use an input method, scroll a long page and watch the app's overlay card draw over the page | No look-at-it procedure exists yet: `spikes/browser/measure-macos.sh` runs scripted scenarios and is not one. Stage 2 or a later task must write one before the check can be done | The records give none; the build team's guess is 10 to 15 minutes of looking once the app is built, plus a build time that was not estimated |
 | The trial package | Download the unsigned macOS package from the nightly workflow and open it by hand | Stage 2 (decision 0014) | Stage 2 |
 
 Three things to know before starting:
@@ -632,31 +672,32 @@ Three things to know before starting:
   1b092db, which takes more steps.
 - **The platform checklist decides question 12.** Step 13 (VoiceOver) is what narrows the screen-reader exception on
   macOS.
-- **The browser check waits for your word.** Every start of the trial browser contacts Chromium's vendor's servers and
-  can download components, and no control exists yet (question 21). Its build needs the CEF distribution already
-  unpacked in the trial's worktree.
+- **The browser check waits for your word, and for a procedure.** Every start of the trial browser contacts Chromium's
+  vendor's servers and can download components, and no control exists yet (question 21), so it is not run until you say
+  so. Its build needs the CEF distribution already unpacked in the trial's worktree, and the written steps do not exist
+  yet (see the table).
 
 ## e. What stayed unknown
 
 | Area | Not verified in M0 | What would verify it |
 |---|---|---|
-| GPUI | That windows look right on real Linux and Windows desktops and GPUs; the start-up cost of compiling shaders at run time; whether CI caches stay within the repository's quota; that the executor, Linux event loop and renderer substituted in the snapshot behave like Zed's own (decision 0007) | A Tier 2 tester or a virtual machine (question 23); a timed start-up; watching cache sizes; the snapshot comparison at each upgrade |
-| Chat | Anything visual on Linux and Windows; glyph fallback, right-to-left text and wrapping as a person sees them on macOS; a 120 Hz display; a quiet machine; presentation time; a real provider's first token; rich rows (tool cards, images, diffs); selection across messages, link clicks, syntax highlighting; the widget kit's cached form (decision 0008) | The cookbook window and the gate's hands-on check; measurements on the reference machine (question 3); M1's mock-provider timing |
+| GPUI | That windows look right on real Linux and Windows desktops and GPUs; the start-up cost of compiling shaders at run time; whether CI caches stay within the repository's quota; that the executor, Linux event loop and renderer substituted in the snapshot behave like Zed's own (decision 0007) | A Tier 2 tester or a virtual machine (question 24); a timed start-up; watching cache sizes; the snapshot comparison at each upgrade |
+| Chat | Anything visual on Linux and Windows; glyph fallback, right-to-left text and wrapping as a person sees them on macOS; a 120 Hz display; a quiet machine; presentation time; a real provider's first token; rich rows (tool cards, images, diffs); selection across messages, link clicks, syntax highlighting; the widget kit's cached form (decision 0008) | The cookbook window and the gate's hands-on check; measurements on the reference machine (question 3); M1's mock-provider timing; the four kit measurements (question 23) |
 | Terminal | Windows raw keystrokes; Linux `vi` resize; the terminal drawn on Linux and Windows; PowerShell and WSL; input methods in the terminal; many terminals for days (decisions 0008, 0009) | Question 9; a Windows tester or guest |
 | Platform | Every step of the platform checklist; Linux and Windows beyond compiling; Windows input methods that use only the Text Services Framework; Wayland compositors without the text-input protocol; Narrator and Orca; restoring native window state; notifications from an unbundled app (decision 0010) | Section d; a tester or guest; M4's real screens |
 | Tray | The Windows icon (never run); either Linux backend; which Linux desktops show the icon and what happens with no tray host; a person's click on macOS; whether the unsound GTK code path is reachable (decision 0011) | Question 11; the platform checklist step 8; a tester |
 | Browser | The maintainer's look on macOS; the full input set at scale 2 after the script fix; a real input source and its candidate window; the Linux GPU process on GPU hardware; a setting that sandboxes the network service; confining the browser process; containing clipboard writes; a control for the background traffic and what was downloaded; component size on Linux and Windows; anything drawn or typed on Linux and Windows; Windows under a normal account; codecs, camera, printing, drag and drop, page accessibility; 120 Hz; the slow start-ups; cold start; the Linux equivalent of the mock keychain (decision 0012) | Questions 18 to 22; section d; a Linux machine with a GPU |
-| Rendering in CI | Client editions of Windows (the runner is Windows Server 2025); the flake rate beyond five runs; which font the Linux runner drew with; the Windows pipe against a second local user; input through the OS; scales other than 1; whether GPUI's test-support feature changes run-time behaviour; a 2 pixel capture offset on Linux; everything about virtual machines (decision 0013) | More runs; the real test harness in M1; question 23 |
+| Rendering in CI | Client editions of Windows (the runner is Windows Server 2025); the flake rate beyond five runs; which font the Linux runner drew with; the Windows pipe against a second local user; input through the OS; scales other than 1; whether GPUI's test-support feature changes run-time behaviour; a 2 pixel capture offset on Linux; everything about virtual machines (decision 0013) | More runs; the real test harness in M1; question 24 |
 | Speed | The reference laptop; the first token through a real provider; an idle floor for an empty native window; the signed Electron release's start-up; trackpad scrolling (baseline, decisions 0008 and 0012) | Question 3; M1's measurements |
 | Vendor terms | Whether UniDeX counts as a product running Claude Code; how the Claude adapter reports a keyless Console sign-in; an isolated Codex credential store through the adapter; which pool a Codex personal access token bills; the bundled vendor binaries; OpenAI's clause after 2026-11-20 (decision 0006) | Question 6; Anthropic's and OpenAI's answers; an M5 check |
+| Acceptance checklist | 13 rows carry a milestone chosen by judgement and marked "?" (the checklist's column notes): APP9 (M4), ST-IMPORT (M4), C1 and C3 (M1), P6 (M6), BR28 (M9), CX4 (M8), CH6 (M4), TM4 and TM20 (M8), TM22 (M4), LS3 (M6), LS6 (M11) | The architect of each row's milestone confirms or moves it when that milestone is planned; the maintainer decides only if he wants one moved |
 | Packaging | Stage 2 (decision 0014) | Stage 2 |
 
 Records that disagree:
 
-- **The development machine.** Decisions 0008 and 0012 and the baseline's "Conditions" say M0 measured on an Apple
-  silicon desktop; decision 0013 calls the development machine "an Apple silicon laptop with 16 GB". The desktop is
-  what the measurements record. The baseline's first paragraph also calls its machine "the reference machine", while
-  its "Conditions" and "Comparison" say it is not the laptop design 9 names. Question 3 settles both.
+- **The measurement machine and the reference machine.** The baseline's first paragraph calls its machine "the
+  reference machine", while its "Conditions" and "Comparison" say it is a desktop and not the laptop design 9 names.
+  The baseline is left as it is; question 3 settles which machine is the reference.
 - **One token figure.** `docs/build/LEDGER.md` gives Task 3's reviewer 216k; the working notes say "193k+"
   at the time the task finished. This report uses the figure in `docs/build/LEDGER.md`.
 
@@ -744,27 +785,32 @@ Each of these would otherwise have shipped (working notes; the first is also a n
 
 ### Proposed budgets (the build team's proposal)
 
-Per task, all roles together, as a hard stop that reports to the controller. The reasoning: each figure is near the
-top of what that kind of task used in M0, plus room for one more fix round, because several M0 figures are missing.
+Per task, all roles together, as a hard stop that reports to the controller. Each figure is the highest recorded total
+for that kind of task in M0 (the table above) plus about 20 %, rounded to the nearest 50k. The margin is there because
+several recorded totals are lower bounds; it does not pay for an extra fix round, which cost 140k to 614k each in M0, so
+a task that needs one stops and reports. These are caps, not forecasts: most M0 tasks of each kind used less.
 
-| Task type | Budget | Per role | Basis in M0 |
+| Task type | Budget | Per role | Highest recorded in M0, and the arithmetic |
 |---|---|---|---|
-| Well-specified code unit (Sonnet test author and builder, Opus reviewer): a provider client, a tool, a CLI verb | 700k | test author 150k, builder 250k with its fix rounds, reviewer 250k with re-reviews, 50k reserve | Tasks 2 and 3: 0.45M to 0.83M |
-| Core code (Opus builder): engine loop, sandbox, permission cards, the GPUI chat window | 1.3M | builder 600k, reviewer 350k, fix agent 300k, 50k reserve | Opus builders 0.38M to 0.6M; Tasks 9 to 11 0.8M+ to 1.1M+ |
-| Document (Sonnet) | 400k | builder 200k, reviewer 200k | Tasks 5 and 7 |
-| Research document (Opus) | 900k | builder 450k, reviewer 300k, fix 150k | Tasks 6, 8, 15 |
-| CI or packaging | 900k | builder 300k, reviewer 300k, fixes 300k | Task 4 (1.07M with a mutation sub-task) |
-| Trial | 1.2M; 2.2M for a high-risk one | builder 600k a phase | Tasks 10 to 12 |
+| Well-specified code unit (Sonnet test author and builder, Opus reviewer): a provider client, a tool, a CLI verb | 1.0M | test author 150k, builder 300k with its fix rounds, reviewers 500k with re-reviews, 50k reserve | Task 2: 825k (3 fix rounds); Task 3: 445k. 825k x 1.2 = 990k, so 1.0M |
+| Core code (Opus builder): engine loop, sandbox, permission cards, the GPUI chat window | 1.3M | builder 600k, reviewer 350k, fix agent 300k, 50k reserve | Tasks 9, 10, 11: 800k+, 1,098k+, 839k+. 1,098k x 1.2 = 1,318k, so 1.3M |
+| Document (Sonnet) | 600k | builder 250k, reviewer 300k, 50k reserve | Task 7: 494k+ (Task 5: 101k+). 494k x 1.2 = 593k, so 600k |
+| Research document (Opus) | 1.2M | builder 500k, reviewer 350k, fix agent 250k, 100k reserve | Tasks 6, 8, 15: 1,006k+, 697k+, 731k+. 1,006k x 1.2 = 1,207k, so 1.2M |
+| CI or packaging | 1.3M | builders and test author 450k, reviewers with re-reviews 700k, 150k reserve | Task 4: 1,067k with a mutation-test sub-task. 1,067k x 1.2 = 1,280k, so 1.3M |
+| Trial | 1.3M; 2.6M for a high-risk one | ordinary: builder 600k, reviewer 250k, fix agent 300k, re-reviewer 100k, 50k reserve; high-risk: two builder phases of 600k, reviewer 400k, fix agents 650k, re-reviewers 150k, 200k reserve | Task 10: 1,098k+ (Tasks 11, 13: 839k+, 475k+); Task 12: about 2,173k+. 1,098k x 1.2 = 1,318k, so 1.3M; 2,173k x 1.2 = 2,608k, so 2.6M |
 
-**M1 as a whole: 18 million tokens**, with a check-in at 9 million. Reasoning, to be replaced by the M1 architect's
+**M1 as a whole: 22 million tokens**, with a check-in at 11 million. Reasoning, to be replaced by the M1 architect's
 real task list: design 6 puts one hosted and one local provider, the engine loop, core tools, the shell sandbox,
 permission cards, a session log, a GPUI chat window, `unidex chat`, the first evaluation run and signed macOS
 nightlies in M1. Read as tasks: an architect pass (0.5M); seven core tasks, the engine loop, streaming into GPUI, the
-sandbox on each of three platforms, permission cards and the chat window (7 × 1.3M = 9.1M); eight well-specified tasks,
+sandbox on each of three platforms, permission cards and the chat window (7 x 1.3M = 9.1M); eight well-specified tasks,
 two provider clients, file tools, shell and web tools, the session log, `unidex chat`, the mock provider with golden
-tests, the evaluation harness (8 × 0.7M = 5.6M); two CI tasks, signed nightlies and the automation-socket harness (2 ×
-0.9M = 1.8M); two documents, the threat model update and the gate report (2 × 0.4M = 0.8M); and the gate's security
-review (0.5M). Total 18.3M. For comparison M0's fifteen tasks used about 11M recorded.
+tests, the evaluation harness (8 x 1.0M = 8.0M); two CI tasks, signed nightlies and the automation-socket harness (2 x
+1.3M = 2.6M); two documents, the threat model update and the gate report (2 x 0.6M = 1.2M); and the gate's security
+review (0.5M). Total 0.5 + 9.1 + 8.0 + 2.6 + 1.2 + 0.5 = 21.9M, called 22M. It is a cap: M0's fifteen tasks used about
+11M recorded, and the earlier draft of these figures gave 18.3M. If you prefer a lower cap, the earlier figures (700k
+for a code unit, 400k for a document, 900k for a research document and for a CI task) are below the highest recorded M0
+totals by 125k, 94k, 106k and 167k respectively, so tasks as large as those would stop and report.
 
 ### Pacing
 
@@ -784,7 +830,7 @@ with a findings file. The build team proposes the same pacing for M1.
    depends on them.
 3. Question 5 (identity and signing, completed in stage 2). M1 promises signed macOS nightlies.
 4. The platform checklist and, if you allow it, the browser check (section d), before stage 2 deletes the trials.
-5. Question 25 (private vulnerability reporting): minutes, and it makes `SECURITY.md` true.
+5. Question 23 (the widget kit), before M1's chat window is built; M1's architect can plan around it (option C).
 
 **What M1's plan needs from M0's findings, beyond those answers** (decisions 0008, 0009 and 0013): the chat's message
 cache with eviction; GPUI's frame readback exists only with its test-support feature, so test builds compile GPUI
@@ -794,6 +840,10 @@ Windows' software renderer as hardware, so software rendering is detected by ada
 missing on Linux, so the app names or ships its fonts; the real harness makes Wayland a hard check; the engine's own
 child processes are waited on by process id (the terminal's signal handler); and a re-read of OpenAI's usage policies
 after 2026-11-20 if M1's hosted provider is OpenAI (question 6).
+
+**Whenever convenient, nothing waits on them:** questions 24 to 28. Question 26 (private vulnerability reporting) takes
+minutes and makes `SECURITY.md` true; question 24 (a virtual machine) is best answered before the first gate with
+hands-on Linux items.
 
 **Then, before each later milestone is planned:** questions 13 and 6 to 8 (M2, M3, M5); 9 to 12 (M4); 14 to 16 (M6);
 17 (M8); 18 to 22 (M7).
