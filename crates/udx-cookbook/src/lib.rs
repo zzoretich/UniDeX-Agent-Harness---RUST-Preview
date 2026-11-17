@@ -7,3 +7,4 @@
 
 pub mod channel;
 pub mod stats;
+pub mod text_model;
