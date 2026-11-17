@@ -4,6 +4,8 @@
 all-features = true
 
 [licenses]
+# Check dev-dependencies too: the cookbook takes GPUI as one, and without this its whole tree skips the licence check.
+include-dev = true
 # Everything not listed here is denied.
 allow = [
     "MIT",
@@ -32,9 +34,11 @@ yanked = "deny"
 #
 # Decided by the maintainer on 2026-11-17 (decision 0007): an "unmaintained" notice fails the check only for a crate
 # this workspace depends on directly. Notices deeper in a dependency's tree (GPUI's, for example) do not fail it;
-# `cargo audit` prints them as warnings, and they are reviewed at every GPUI upgrade. Vulnerabilities, unsound
-# notices and yanked crates fail everywhere.
+# `cargo audit` prints them as warnings (cargo-deny does not print out-of-scope notices at all), and they are
+# reviewed at every GPUI upgrade. Vulnerabilities, unsound notices and yanked crates fail everywhere.
 unmaintained = "workspace"
+# The default scope for unsound notices is "workspace"; "all" makes them fail for the whole dependency tree.
+unsound = "all"
 
 [sources]
 unknown-registry = "deny"
