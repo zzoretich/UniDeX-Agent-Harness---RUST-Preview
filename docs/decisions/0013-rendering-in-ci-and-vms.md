@@ -46,15 +46,18 @@ Throwaway code in `spikes/render-ci/` (a standalone Cargo workspace, not a membe
 
 ## Results
 
-Evidence: workflow run 44128026417 on commit `d03c3e1` (round 1; artifacts `render-ci-linux`, `render-ci-windows`).
-Every scenario below logged its own renderer, adapter and check results; the numbers are from those logs. The run's
-Linux job failed only on the release-build check, which was a fault in the check (below), not a finding.
+Evidence: workflow run 44128026417 on commit `d03c3e1` (round 1), and workflow run 44132309583 on commit `e192261`
+(round 2: the round 1 code plus the fixes below), run four times (attempts 1 to 4; jobs listed under "Stability and
+cost"). Artifacts `render-ci-linux` and `render-ci-windows` hold the frames, JSON and logs. Every scenario logged its
+own renderer, adapter and check results, and the figures here come from those logs, read for every attempt, not from
+the step results. Round 1's Linux job failed only on the release-build check, which was a fault in the check (below);
+all four round 2 attempts were green on both jobs.
 
 | Platform | Display | Renderer and adapter (as GPUI logged them) | In-app frame | Display capture | Socket round trip |
 |---|---|---|---|---|---|
 | Linux, X11 + Vulkan | Xvfb 21.1.22, 1280 x 800 x 24, no window manager, no compositor | wgpu Vulkan on lavapipe: "llvmpipe (LLVM 21.1.8, 256 bits)", Mesa 26.0.8, device type CPU | X11 GetImage: all checks pass | `xwd` of the root window: all checks pass | passes; AccessKit tree with AT-SPI on |
-| Linux, X11 + OpenGL | same | wgpu GL through EGL on llvmpipe, OpenGL 4.5 core (Vulkan drivers hidden with `VK_DRIVER_FILES`) | X11 GetImage: pass | `xwd`: pass | not run |
-| Linux, Wayland | sway 1.11, headless back end, pixman renderer | wgpu Vulkan on lavapipe | not possible (see below) | `grim`: all checks pass | action and tree only (added in round 2) |
+| Linux, X11 + OpenGL | same | wgpu GL through EGL on llvmpipe, OpenGL 4.5 core (Vulkan drivers hidden with `VK_DRIVER_FILES`) | X11 GetImage: pass | `xwd`: pass | not run here (the socket does not depend on the renderer; the X11 + Vulkan row covers it) |
+| Linux, Wayland | sway 1.11, headless back end, pixman renderer | wgpu Vulkan on lavapipe | not possible (see below) | `grim`: all checks pass | action and tree pass, AccessKit tree with AT-SPI on; frame not possible |
 | Windows | the runner's interactive desktop: console session 2, 1024 x 768, display adapter "Microsoft Hyper-V Video" | Direct3D 11 at feature level 11.1 on "Microsoft Basic Render Driver" (WARP, Microsoft's software rasteriser), with and without DirectComposition | `render_to_image`: pass | screen pixels under the window's client rectangle (.NET `CopyFromScreen`): pass | passes; AccessKit tree |
 
 What each row shows, and how it could have been weaker than it looks:
@@ -68,34 +71,54 @@ What each row shows, and how it could have been weaker than it looks:
   last, Vulkan before GL) and took the first that could configure the window's surface. Software adapters are accepted
   at start; only device-loss recovery rejects them. Mesa printed "DRI3 error: Could not get DRI3 device" (Xvfb has no
   DRI3) and fell back to software presentation. GPUI also logged "Found no xinput mouse pointers" (Xvfb has a virtual
-  core pointer but no XInput pointer device). Time to first render: 2.17 s on the first launch of the job, of which
-  1.94 s was the text system parsing 53 font faces; 0.22 s on the next launch.
+  core pointer but no XInput pointer device). Time to first render on X11: 232 to 466 ms over the round 2 attempts
+  (Vulkan and OpenGL alike); 2.17 s once in round 1, when the text system took 1.94 s to parse 53 font faces from a
+  cold disk cache (1 to 206 ms in every later launch).
 - **Fonts.** On Linux GPUI maps its default UI font (".SystemUIFont") to "IBM Plex Sans", which the runner does not
   have; GPUI warned and fell back to an installed font (DejaVu was installed for this reason; which face it chose is
   not logged). The text check passed with the fallback. The app must name fonts it ships on Linux.
 - **Windows.** The session is interactive (`UserInteractive` true; the process's session is the active console
   session; not a remote session). DXGI enumerated WARP as an adapter and GPUI took it; GPUI's own description says
   `is_software_emulated: false` for it, so that flag cannot be trusted to detect software rendering on Windows. Time to
-  first render 77 ms. DirectComposition on and off made no difference here.
-- **Wayland.** The window rendered (render count 5, lavapipe) and `grim` captured it, but the app cannot read its own
-  window back: GPUI's Wayland window does not implement `render_to_image`, and Wayland gives a client no way to read
-  the screen. sway also logged that it could not start Xwayland (not installed; irrelevant here).
+  first render 77 to 124 ms. DirectComposition on and off made no difference here.
+- **Wayland.** The window rendered (render count 5, lavapipe; time to first render 1.2 to 2.2 s) and `grim` captured
+  it, but the app cannot read its own window back: GPUI's Wayland window does not implement `render_to_image`, and
+  Wayland gives a client no way to read the screen. The automation run on Wayland (round 2) clicked the button, saw the
+  state change and read the AccessKit tree; its two frame steps are reported as warnings, by design. sway also logged
+  that it could not start Xwayland (not installed; irrelevant here).
 - **The AccessKit tree did not come from a screen reader.** It came from activating accessibility per platform (below).
   On Linux the AT-SPI bus was told `IsEnabled = true` before the app started; on Windows the app sent itself a UI
   Automation root query; on macOS it asked its own content view for its accessibility children.
 
 ### Stability and cost
 
-Stability across three runs: to be filled in from the re-runs requested after round 2 (run ids and per-step times).
+Five runs in all: round 1 (run 44128026417) and four attempts of run 44132309583 (jobs: attempt 1 Linux 134212393494,
+Windows 134212394071; attempt 2 Linux 134221676932, Windows 134221676569; attempt 3 Linux 134229304590, Windows
+134229303883; attempt 4 Linux 134238190583, Windows 134238191369). In every one:
 
-Round 1 job times (cold, no cache; standard 2-core hosted runners): Linux 10 min 52 s (packages 45 s, build 283 s,
-scenarios and automation 34 s in total, the extra build for the release check 265 s); Windows 5 min 55 s (build 296 s,
-diagnostics including `dxdiag` 12 s, scenarios and automation 20 s). The trial itself costs well under a minute per
-platform once built; almost all of the time is building GPUI. Standard hosted runners are free for public
-repositories (GitHub's Actions billing documentation); at the documented private-repository rates for 2-core runners
-(Linux $0.006 and Windows $0.010 per minute; builds there would also be slower) a run like round 1 would cost about
-$0.12. A real harness that reuses the CI build and a
-warm cache would add roughly the scenario time, plus Xvfb and Mesa packages (45 s, or less with a cached image).
+- the same adapters were chosen (lavapipe on Vulkan, llvmpipe on GL when Vulkan was hidden, lavapipe on Wayland, WARP
+  on Windows);
+- every in-app frame and every display capture passed every check, with the five sampled colours matching the
+  expected values exactly (not only within tolerance), the same text measurements each time (Linux: 9.6 percent ink
+  over 278 logical pixels; Windows: 6.7 percent over 240; the fonts differ, each platform is deterministic) and the
+  same window positions in the display captures;
+- every automation round trip passed (three per attempt: X11, Wayland without frames, Windows), with a 7-node AccessKit
+  tree before and after the click;
+- the release build carried no marker (round 2 onwards) and refused `--automation` with exit code 2.
+
+What varied: time to first render (above) and job duration. The only warnings were the three expected Wayland ones
+(no in-app readback; two frame steps). No step was retried and nothing flaked; five runs cannot rule out a rare flake.
+
+Job durations, cold (no cache), standard hosted runners: Linux 11 min 8 s to 14 min 7 s over the four round 2 attempts
+(build 300 to 390 s; packages 13 to 34 s; three scenarios and two automation runs 32 to 33 s; the second
+build for the release check 282 to 369 s); Windows 7 min 4 s to 7 min 50 s (build 362 to 382 s; diagnostics with
+`dxdiag` 11 to 28 s; two scenarios and the automation run 20 to 21 s). The trial's own work is about half a minute per
+platform; the rest is building GPUI, twice on Linux. Standard hosted runners are free for public repositories
+(GitHub's Actions billing documentation), so on every pull request this costs about 20 minutes of runner time and
+nothing in money; at the documented private-repository rates (Linux $0.006 and Windows $0.010 per minute, for 2-core
+runners on which builds would be slower) one run would cost about $0.15. A real harness that reuses the build of the
+main CI job and its cache would add roughly the half minute of scenarios plus the Linux packages, and would keep the
+release-build check for nightly artifacts.
 
 ## The frame check
 
@@ -125,7 +148,8 @@ Safety against the threat model:
   checks that the marker string the socket code carries is absent (present in the test build) and that `--automation`
   is refused with exit code 2. This is a sketch of P37's release check. In round 1 the check itself was faulty: GitHub
   runs bash with `-e`, so `grep -c` returning 1 for a count of zero ended the step before the comparison; locally the
-  release binary had 0 occurrences and the test binary 1, and the step now turns `-e` off and checks every result.
+  release binary had 0 occurrences and the test binary 1, and the step now turns `-e` off and checks every result. In
+  all four round 2 attempts it reported "test build 1, release build 0" and exit code 2 for `--automation`.
 - Off unless the app is started with `--automation`.
 - Never a TCP port. Unix: a fresh directory created with mode 0700 (creation fails if the name exists, so a planted
   directory is never reused; owner and mode are verified after creation), the socket created under umask 0177 and
@@ -177,7 +201,7 @@ display capture); `x11-utils` (`xdpyinfo`, diagnostics); `mesa-vulkan-drivers` (
 loader); `vulkan-tools` (`vulkaninfo`, diagnostics); `libgl1-mesa-dri`, `libegl1`, `libegl-mesa0` (llvmpipe through
 EGL); `mesa-utils` (`glxinfo`, `eglinfo`, diagnostics); `fonts-dejavu-core` (a known font); `dbus`, `at-spi2-core`
 (the session bus and AT-SPI bus); `sway`, `grim` (the headless Wayland compositor and its capture). Versions are the
-runner image's, unpinned; round 1 got Xvfb 21.1.22, Mesa 26.0.8 with LLVM 21.1.8, sway 1.11, grim 1.4.0, at-spi2-core
+runner image's, unpinned; every run (round 1 and the four round 2 attempts) got Xvfb 21.1.22, Mesa 26.0.8 with LLVM 21.1.8, sway 1.11, grim 1.4.0, at-spi2-core
 2.60.4. Windows: nothing installed; PowerShell, .NET and `dxdiag` are on the image.
 
 The only action added is `actions/upload-artifact`, pinned to `cf430e030ddbb5b0abf93d22962f4752f3646cd9` (v7.0.2).
@@ -284,7 +308,7 @@ both are marked as such above.
 
 ## What remains unverified
 
-- Stability across runs (pending the re-runs) and how often software rendering or Xvfb timing flakes.
+- The flake rate beyond five runs, and behaviour on other runner image versions (Mesa, Xvfb and Windows images change).
 - Which fallback font GPUI used on the Linux runner.
 - Whether the automation socket's Windows peer handling holds against a second local user (only the DACL was relied
   on; not tested with another account).
