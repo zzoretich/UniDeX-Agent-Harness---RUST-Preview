@@ -1,0 +1,5 @@
+[alias]
+xtask = "run --package xtask --"
+
+[env]
+UNIDEX_TEST_ROOT = { value = "target/test-root", relative = true, force = true }

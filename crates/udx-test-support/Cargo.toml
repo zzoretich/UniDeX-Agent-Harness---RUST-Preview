@@ -1,0 +1,10 @@
+[package]
+name = "udx-test-support"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+udx-core = { path = "../udx-core" }
+tempfile = "3"

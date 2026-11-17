@@ -1,0 +1,91 @@
+use clap::{Args, Parser, Subcommand};
+use std::process::ExitCode;
+use xtask::privacy::{Mode, Options};
+
+#[derive(Parser)]
+#[command(name = "xtask", about = "UniDeX repository tooling")]
+struct Cli {
+    #[command(subcommand)]
+    command: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Scan for personal information. Exit 0 clean, 1 findings, 2 error.
+    Privacy(PrivacyArgs),
+    /// Manage git hooks.
+    Hooks {
+        #[command(subcommand)]
+        action: HooksCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum HooksCmd {
+    /// Write the pre-commit and commit-msg hooks.
+    Install,
+}
+
+#[derive(Args)]
+#[command(group(clap::ArgGroup::new("mode").required(true).args(["staged", "all", "range", "stdin"])))]
+struct PrivacyArgs {
+    /// Scan the staged version of each staged file.
+    #[arg(long)]
+    staged: bool,
+    /// Scan every tracked and untracked-but-not-ignored file.
+    #[arg(long)]
+    all: bool,
+    /// Scan every commit in A..B: files they touch and their messages.
+    #[arg(long, value_name = "A..B")]
+    range: Option<String>,
+    /// Scan standard input under this label.
+    #[arg(long, value_name = "LABEL")]
+    stdin: Option<String>,
+    /// Fail with exit 2 when there is no local term list.
+    #[arg(long)]
+    require_local: bool,
+    /// With --stdin: clean the text as a git commit message file first.
+    #[arg(long)]
+    git_message: bool,
+    /// Print findings as a JSON array.
+    #[arg(long)]
+    json: bool,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match cli.command {
+        Cmd::Privacy(a) => {
+            let mode = if a.staged {
+                Mode::Staged
+            } else if a.all {
+                Mode::All
+            } else if let Some(r) = a.range {
+                Mode::Range(r)
+            } else {
+                Mode::Stdin(a.stdin.unwrap_or_default())
+            };
+            let code = xtask::privacy::run(&Options {
+                mode,
+                require_local: a.require_local,
+                json: a.json,
+                git_message: a.git_message,
+            });
+            ExitCode::from(code as u8)
+        }
+        Cmd::Hooks {
+            action: HooksCmd::Install,
+        } => match xtask::hooks::install() {
+            Ok(paths) => {
+                for p in paths {
+                    println!("installed {}", p.display());
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("hooks: {e}");
+                ExitCode::from(1)
+            }
+        },
+    }
+}

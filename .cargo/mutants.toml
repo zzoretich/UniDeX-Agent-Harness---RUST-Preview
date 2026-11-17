@@ -1,0 +1,17 @@
+# A mutant's tests are stopped (and the mutant counted as a timeout) after
+# `timeout_multiplier` times the time the unmutated suite took, but never
+# before `minimum_test_timeout` seconds. The suite takes a few seconds, so an
+# endless-loop mutant ends quickly; the floor covers a slow or cold runner.
+timeout_multiplier = 5
+minimum_test_timeout = 30
+
+# Each exclusion is an equivalent mutant: it changes no observable behaviour.
+exclude_re = [
+    # `lines[at + 1..]` -> `lines[at * 1..]`: the search then starts on the
+    # scissors line itself, which always begins with the token the search
+    # skips, so the first line it accepts is the same one.
+    "mod\\.rs:\\d+:\\d+: replace \\+ with \\* in clean_git_message$",
+    # `Terms::generic()` is `Terms::default()` already, so returning
+    # `Default::default()` is the same value.
+    "replace Terms::generic -> Terms with Default::default\\(\\)",
+]

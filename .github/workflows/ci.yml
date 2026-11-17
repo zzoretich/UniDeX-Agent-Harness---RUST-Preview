@@ -1,0 +1,294 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Pull request runs share a group per ref, so a newer push cancels the older
+  # run. Every push to main gets a group of its own (its run id), so it is
+  # never pended or cancelled and its commit range is always scanned.
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Caching is added when GPUI arrives; the workspace is small until then.
+#
+# Runner labels are fixed (never -latest). Source: the runner-images README
+# (github.com/actions/runner-images), general-availability table:
+#   ubuntu-26.04 (Ubuntu LTS), macos-26 (Apple silicon), windows-2025.
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    steps:
+      # Before checkout, so line endings never change file contents.
+      - name: Keep line endings as committed
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Test
+        shell: bash
+        run: cargo test --workspace --locked
+
+  deny:
+    name: deny
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny@0.21.0
+      - name: Check licences, bans, advisories and sources
+        run: cargo deny --locked check
+
+  audit:
+    name: audit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit@0.23.0
+      - name: Audit the lockfile
+        run: cargo audit
+
+  mutants:
+    name: mutants
+    # Pull requests only. The job always runs so the required check reports;
+    # it skips the work when the diff does not touch the mutated crates.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    # A full local run (237 mutants, 2 jobs) took 8 minutes 44 seconds. Three
+    # times that, rounded up to 15 minutes, covers slower runners and the
+    # cargo-mutants install; see .cargo/mutants.toml for the per-mutant timeout.
+    timeout-minutes: 30
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide whether the diff touches the mutated crates
+        id: changed
+        shell: bash
+        run: |
+          set -eu
+          # Exit code 0: untouched. 1: touched. Anything else is an error.
+          rc=0
+          git diff --quiet "origin/${BASE_REF}...HEAD" -- crates/udx-core xtask || rc=$?
+          case "$rc" in
+            0) run=false ;;
+            1) run=true ;;
+            *) echo "git diff failed with exit code ${rc}" >&2; exit "$rc" ;;
+          esac
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          echo "touches udx-core or xtask: ${run}"
+      - name: Install the pinned toolchain
+        if: steps.changed.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install cargo-mutants
+        if: steps.changed.outputs.run == 'true'
+        run: cargo install --locked cargo-mutants@27.1.0
+      - name: Mutation tests
+        if: steps.changed.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -eu
+          # The result is decided from the report files, not only the exit
+          # code. Exit 3 means at least one mutant timed out (a hang counts
+          # as detected) and can also hide missed mutants, because cargo-mutants
+          # checks timeouts before misses; that is why missed.txt is read.
+          rc=0
+          cargo mutants -p udx-core -p xtask --no-shuffle -j 2 || rc=$?
+          if [ -s mutants.out/missed.txt ]; then
+            echo "Missed mutants:"
+            cat mutants.out/missed.txt
+            echo "::error::$(wc -l < mutants.out/missed.txt | tr -d ' ') mutant(s) missed"
+            exit 2
+          fi
+          case "$rc" in
+            0|3)
+              if [ ! -d mutants.out ]; then
+                echo "::error::cargo mutants exited ${rc} but wrote no mutants.out" >&2
+                exit 1
+              fi
+              if [ "$rc" = 3 ]; then
+                n=0
+                if [ -f mutants.out/timeout.txt ]; then
+                  echo "Mutants that timed out:"
+                  cat mutants.out/timeout.txt
+                  n="$(wc -l < mutants.out/timeout.txt | tr -d ' ')"
+                fi
+                echo "::warning::${n} mutant(s) timed out; listed above"
+              fi
+              ;;
+            *) echo "cargo mutants failed with exit code ${rc}" >&2; exit "$rc" ;;
+          esac
+
+  privacy:
+    name: privacy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      BASE_REF: ${{ github.base_ref }}
+      PUSH_BEFORE: ${{ github.event.before }}
+      HEAD_SHA: ${{ github.sha }}
+      PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      GITLEAKS_VERSION: 8.30.1
+      # SHA-256 of gitleaks_8.30.1_linux_x64.tar.gz, from the checksums file
+      # published with the v8.30.1 release.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install gitleaks
+        shell: bash
+        run: |
+          set -eu
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --proto '=https' --tlsv1.2 -sSfL -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/gitleaks"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/gitleaks" gitleaks
+          echo "${RUNNER_TEMP}/gitleaks" >> "$GITHUB_PATH"
+      - name: Privacy scan of the whole tree
+        shell: bash
+        env:
+          CI: "1"
+        run: cargo xtask privacy --all
+      - name: Work out the commit range
+        id: range
+        shell: bash
+        run: |
+          set -eu
+          range=""
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            # The pull request head, not the merge ref: GitHub's synthetic
+            # merge commit is not the author's work. It is the second parent
+            # of the merge commit, so its objects are present.
+            range="origin/${BASE_REF}..${PR_HEAD}"
+          elif [ "${EVENT_NAME}" = "push" ]; then
+            # An all-zero "before" (new branch) has no range to scan.
+            case "${PUSH_BEFORE}" in
+              ""|*[!0]*) [ -n "${PUSH_BEFORE}" ] && range="${PUSH_BEFORE}..${HEAD_SHA}" ;;
+            esac
+          fi
+          echo "range=${range}" >> "$GITHUB_OUTPUT"
+          echo "commit range: ${range:-none}"
+      - name: Privacy scan of the commit range
+        if: steps.range.outputs.range != ''
+        shell: bash
+        env:
+          CI: "1"
+          RANGE: ${{ steps.range.outputs.range }}
+        run: cargo xtask privacy --range "${RANGE}"
+      - name: Secret scan of the commit range
+        if: ${{ !cancelled() && steps.range.outputs.range != '' }}
+        shell: bash
+        env:
+          RANGE: ${{ steps.range.outputs.range }}
+        run: |
+          gitleaks git --no-banner --redact --config .gitleaks.toml \
+            --log-opts="${RANGE}" .
+      - name: Flag changes to files that govern the checks
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          set -eu
+          # One annotation per group. `git diff --quiet` exits 0 when
+          # untouched and 1 when touched; anything else is an error.
+          flag() {
+            label="$1"
+            shift
+            rc=0
+            git diff --quiet "origin/${BASE_REF}...HEAD" -- "$@" || rc=$?
+            case "$rc" in
+              0) ;;
+              1) echo "::warning::This pull request changes ${label}. Review it closely: it can weaken the checks." ;;
+              *) echo "git diff failed with exit code ${rc}" >&2; exit "$rc" ;;
+            esac
+          }
+          flag "privacy-allow.toml (review every new exemption)" privacy-allow.toml
+          flag ".gitleaks.toml" .gitleaks.toml
+          flag "xtask/src/privacy/" xtask/src/privacy
+          flag ".github/workflows/" .github/workflows
+          flag "deny.toml" deny.toml
+          flag ".cargo/mutants.toml" .cargo/mutants.toml

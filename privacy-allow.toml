@@ -1,0 +1,119 @@
+# Exceptions to the privacy gate. An entry exempts one rule on the files its glob matches,
+# and only for the exact matched strings listed in `values`. `LocalTerm` and
+# `LocalFileTracked` can never be exempted.
+
+[[allow]]
+path = "docs/design/plans/2026-11-16-m0-foundations.md"
+rule = "Email"
+values = [
+    "jane.roe@corp.io",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "docs/design/plans/2026-11-16-m0-foundations.md"
+rule = "HomePath"
+values = [
+    "/Users/jroe",
+    "/home/jroe",
+    "C:\\Users\\jroe",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "docs/design/plans/2026-11-16-m0-foundations.md"
+rule = "PrivateAddress"
+values = [
+    "10.0.0.0",
+    "10.1.2.3",
+    "100.64.0.0",
+    "100.64.0.7",
+    "169.254.0.0",
+    "169.254.0.9",
+    "172.16.0.0",
+    "172.20.0.5",
+    "192.168.0.0",
+    "192.168.1.10",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "docs/design/plans/2026-11-16-m0-foundations.md"
+rule = "PrivateHost"
+values = [
+    "box.tail0a1b2c.ts.net",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "docs/design/plans/2026-11-16-m0-foundations.md"
+rule = "SessionLink"
+values = [
+    "claude.ai/artifact/…",
+    "claude.ai/code/artifact/…",
+    "claude.ai/code/session_",
+    "claude.ai/code/session_AbC123",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "xtask/tests/**"
+rule = "Email"
+values = [
+    "icon@2x.io",
+    "jane.roe@corp.io",
+    "noreply@github.com.example.io",
+    "other.person@corp.io",
+    "someone@github.com",
+    "x@y.io",
+    "xnoreply@github.com",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "xtask/tests/**"
+rule = "HomePath"
+values = [
+    "/HOME/jroe",
+    "/Users/jos",
+    "/Users/jroe",
+    "/home/jroe",
+    "/users/jroe",
+    "/users/octocat",
+    "C:\\Users\\Jane",
+    "C:\\Users\\Jane Roe",
+    "C:\\Users\\jroe",
+    "C:\\\\Users\\\\jroe",
+    "c:\\users\\jroe",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "xtask/tests/**"
+rule = "PrivateAddress"
+values = [
+    "0010.1.2.3",
+    "10.1.2.0003",
+    "10.1.2.3",
+    "100.64.0.7",
+    "169.254.0.9",
+    "172.20.0.5",
+    "192.168.1.10",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "xtask/tests/**"
+rule = "PrivateHost"
+values = [
+    "box.tail0a1b2c.ts.net",
+]
+reason = "invented test vectors"
+
+[[allow]]
+path = "xtask/tests/**"
+rule = "SessionLink"
+values = [
+    "claude.ai/code/session_AbC123",
+]
+reason = "invented test vectors"

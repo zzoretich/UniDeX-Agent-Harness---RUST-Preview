@@ -1,0 +1,6 @@
+# Secret scanning uses the stock gitleaks rules. Personal-information checks
+# live in `cargo xtask privacy`, not here.
+title = "UniDeX gitleaks config"
+
+[extend]
+useDefault = true
