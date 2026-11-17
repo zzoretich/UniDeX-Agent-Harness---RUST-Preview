@@ -49,7 +49,7 @@ editor crates in particular).
 | Point | `portable-pty` 0.9.0 | `alacritty_terminal::tty` 0.26.0 |
 |---|---|---|
 | Builds and headless check, macOS (local, release, 3 runs) | Builds; every hard check passes in all 3 runs | Builds; every hard check passes in all 3 runs |
-| Builds and headless check, Linux (x86_64, CI) | Builds; 46 passed, 0 failed, 2 warnings (the `vi` resize check, below) | Same: builds; 46 passed, 0 failed, 2 warnings (the `vi` resize check) |
+| Builds and headless check, Linux (x86_64, CI) | Builds; run 44093008374: 46 passed, 0 failed, 2 warnings (the `vi` resize check, below); run 44097237928: 47 passed, 1 warning (the same check) | Builds; run 44093008374: 46 passed, 2 warnings (the same check); run 44097237928: that check passed |
 | Builds and headless check, Windows (CI) | Builds; 38 passed, 0 failed, 2 warnings (the raw keystroke round trip, below) | Same: builds; 38 passed, 0 failed, 2 warnings (the raw keystroke round trip) |
 | Builds and headless check, macOS (CI, same workflow run) | Builds; 48 passed, 0 failed, 0 warnings | Same: 48 passed, 0 failed, 0 warnings |
 | Licence | MIT. New transitive crates: `nix` 0.28 (MIT), `serial2` (BSD-2-Clause OR Apache-2.0), `shared_library` 0.1.9 (Apache-2.0/MIT, last released 2018), `winreg` 0.10 (MIT), `shell-words` (MIT/Apache-2.0) | Apache-2.0. New transitive crates: `vte` 0.15 (Apache-2.0 OR MIT), `rustix-openpty` (Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT), `signal-hook` (MIT OR Apache-2.0), `miow` (MIT OR Apache-2.0), `home`, `cursor-icon`, `windows-sys` 0.59 |
@@ -103,9 +103,11 @@ A design call, within design section 5.7 (the PTY crate is chosen in the M0 tria
   the 80x24 size, a resize to 100x30, the 200,000-line burst arriving complete, 10,000 lines of scrollback, exit
   codes 7 and 3, the reader ending after the child exits, and `mode con` reporting 90 columns and 20 lines after a
   resize.
-- The `vi` resize check on Linux. On both backends `vi` (vim-tiny 9.1) switched to the alternate screen, showed typed
-  text and quit correctly, but after a resize to 70 by 18 it still reported 80 columns and 24 lines and the check
-  timed out. The other Linux resize checks passed on both backends (the child helper at 100x30 and `stty size`
+- The `vi` resize check on Linux, which is intermittent in CI. In run 44093008374 (commit 332cbf2), on both backends,
+  `vi` (vim-tiny 9.1) switched to the alternate screen, showed typed text and quit correctly, but after a resize to 70
+  by 18 it still reported 80 columns and 24 lines and the check timed out (46 passed, 2 warnings). In run 44097237928
+  (commit d6a7e38, same checks) it timed out on `portable-pty` only (47 passed, 1 warning). No conclusion about either
+  backend follows from one run each. The other Linux resize checks passed on both backends (the child helper at 100x30 and `stty size`
   reporting 20 90), so the PTY layer does carry the resize; why `vi` did not see it was not determined. On macOS the
   same check passed on both backends, locally and in CI.
 - That `portable-pty` works with ConPTY when the host answers the cursor-position request (the session does): the
@@ -113,7 +115,9 @@ A design call, within design section 5.7 (the PTY crate is chosen in the M0 tria
   but the raw key round trip, the one check on which a ConPTY flag choice would matter for input, failed there on both
   backends.
 - Nothing visual on Linux and Windows: the runners have no display, so no window, frame or glyph was verified there.
-- The macOS CI job ran the same workflow and passed with no warnings (see the table above).
+- The macOS CI job ran the same workflow in run 44093008374 and passed with no warnings (see the table above). In run
+  44097237928 the macOS job did not run: no hosted runner picked it up (a capacity message from the CI provider, not a
+  result of the trial). The macOS result recorded here is from run 44093008374.
 - The GPUI terminal on Linux and Windows (no display on the runners; Task 13 looks at rendering without hardware).
 - Real-world shells on Windows beyond `cmd.exe` (PowerShell, WSL), a side-loaded `conpty.dll`, and how either crate
   behaves under a screen reader.
@@ -131,7 +135,7 @@ CI annotation and a step summary entry, so none passes unseen. Why each is soft,
 | Scrollback stays at 10,000 lines after the 200,000-line burst | ConPTY repaints from its own buffer, so what reaches the emulator is a finding there. Hard on Unix | pass | pass (hard) | pass both |
 | Shell resize reported by `mode con` (Windows only; Unix uses `stty size`, hard) | The output format of `mode con` is unproven | not applicable | not applicable | pass both |
 | Reader ends after the child exits | Marked soft on every platform because end-of-file timing differs by platform (on Windows the reader ends only after the session closes the master) | pass | pass | pass both |
-| `vi` on the alternate screen: draws the file; typed text appears; resize reported by `vi`; quitting leaves the alternate screen (Unix only) | Depends on a `vi` being installed and on its behaviour; soft on every Unix platform | pass all four, both backends | pass three; the resize check WARN on both backends (timed out, `vi` reported 80x24) | not run |
+| `vi` on the alternate screen: draws the file; typed text appears; resize reported by `vi`; quitting leaves the alternate screen (Unix only) | Depends on a `vi` being installed and on its behaviour; soft on every Unix platform | pass all four, both backends | pass three; the resize check intermittent: WARN on both backends in run 44093008374 (timed out, `vi` reported 80x24), on `portable-pty` only in run 44097237928 | not run |
 
 ## Revisit when
 

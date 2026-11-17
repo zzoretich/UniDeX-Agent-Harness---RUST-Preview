@@ -343,8 +343,9 @@ A design call from the M0 trial (Task 10), within decision 0002 and design secti
   their windowless self-tests pass (`--selftest`: every message's text runs cover its text on character boundaries;
   GPUI keystrokes map to the expected bytes). `headless-check` (markdown, keys, the emulator, both PTY backends with real
   child processes) passed with 48 of 48 on macOS, 46 passed and 0 failed on Linux with 2 warnings, and 38 passed and 0
-  failed on Windows with 2 warnings. The Linux warnings are the `vi` resize check on both backends (`vi` still reported
-  80x24 after a resize to 70x18, and the check timed out); the Windows warnings are the 33-key raw keystroke round trip
+  failed on Windows with 2 warnings. The Linux warnings are the `vi` resize check, which is intermittent (on both backends in that run, `vi`
+  still reported 80x24 after a resize to 70x18 and the check timed out; on `portable-pty` only in a later run,
+  44097237928); the Windows warnings are the 33-key raw keystroke round trip
   on both backends, which stopped at the key "z" with no reply, so it is an open question for the real terminal on
   Windows. Details are in [0009](0009-pty-crate.md). Task 13 looks at rendering without hardware.
 - What the frames look like on macOS: no screenshots were taken (the trial may not capture the screen), so glyph
