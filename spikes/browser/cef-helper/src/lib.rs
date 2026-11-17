@@ -10,3 +10,5 @@ mod keys;
 mod mac;
 
 pub use helper::run;
+#[cfg(target_os = "linux")]
+pub use helper::set_process_argv;

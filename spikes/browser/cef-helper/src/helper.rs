@@ -135,6 +135,38 @@ thread_local! {
     static CLOSING: Cell<bool> = const { Cell::new(false) };
 }
 
+/// Linux: the process's own `argc` and `argv` (see `main.rs`), given to CEF instead of the copy
+/// `Args` makes, so Chromium's process titles reach `/proc/<pid>/cmdline`.
+#[cfg(target_os = "linux")]
+static PROCESS_ARGV: Mutex<Option<(i32, usize)>> = Mutex::new(None);
+
+#[cfg(target_os = "linux")]
+pub fn set_process_argv(argc: std::ffi::c_int, argv: *mut *mut std::ffi::c_char) {
+    if argc > 0 && !argv.is_null() {
+        *PROCESS_ARGV.lock().unwrap() = Some((argc, argv as usize));
+    }
+}
+
+/// The arguments handed to CEF: the process's own on Linux when `main.rs` captured them and they
+/// match what the standard library read, otherwise the copy `Args` made.
+fn main_args(args: &Args, raw: &[String]) -> MainArgs {
+    process_main_args(raw).unwrap_or_else(|| args.as_main_args().clone())
+}
+
+#[cfg(target_os = "linux")]
+fn process_main_args(raw: &[String]) -> Option<MainArgs> {
+    let (argc, argv) = (*PROCESS_ARGV.lock().unwrap())?;
+    (argc as usize == raw.len()).then(|| MainArgs {
+        argc,
+        argv: argv as *mut *mut std::ffi::c_char,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_main_args(_raw: &[String]) -> Option<MainArgs> {
+    None
+}
+
 /// Runs this process in its role (CEF's browser process or one of its sub-processes) and
 /// returns the exit code. `sandbox_info` is the Windows bootstrap's sandbox information, null
 /// elsewhere.
@@ -177,7 +209,8 @@ fn run_inner(sandbox_info: *mut u8) -> ExitCode {
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
 
     if is_subprocess {
-        let code = execute_process(Some(args.as_main_args()), None::<&mut App>, sandbox_info);
+        let main_args = main_args(&args, &raw);
+        let code = execute_process(Some(&main_args), None::<&mut App>, sandbox_info);
         return ExitCode::from(code.clamp(0, 255) as u8);
     }
 
@@ -290,8 +323,9 @@ fn run_browser_process(raw: &[String], args: &Args, sandbox_info: *mut u8) -> an
             }
         );
     }
+    let main_args = main_args(args, raw);
     if initialize(
-        Some(args.as_main_args()),
+        Some(&main_args),
         Some(&settings),
         Some(&mut app),
         sandbox_info,

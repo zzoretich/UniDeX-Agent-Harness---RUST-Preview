@@ -14,6 +14,10 @@
 //! `chrome-sandbox` helper and the zygotes, whose forked children install seccomp-bpf
 //! themselves), the crash handler, and a process Chromium starts with
 //! `--service-sandbox-type=none`. Each exempt process is still listed with its state.
+//!
+//! A zygote is told from the processes it forks, which share its command line unless Chromium
+//! rewrites their process title, by its single thread; a forked child's role comes from its
+//! thread names (`role_from_threads`), and every forked child is required to be sandboxed.
 
 use std::collections::HashMap;
 
@@ -85,12 +89,28 @@ impl ProcessTree {
 
     fn one(&mut self, pid: i32) -> Option<ProcSample> {
         let (cpu_ns, footprint, resident) = os::rusage(pid)?;
-        let (kind, sandbox_type) = self
+        let (mut kind, sandbox_type) = self
             .kinds
             .entry(pid)
             .or_insert_with(|| kind_from_command(&os::command(pid)))
             .clone();
-        let (sandboxed, sandbox_detail) = os::sandboxed(pid);
+        // Linux: a process forked from a zygote keeps the zygote's command line unless Chromium
+        // rewrote its process title. A zygote is single-threaded; a forked child is not, and its
+        // thread names tell its role (the role is still printed with the evidence).
+        let threads = os::thread_names(pid);
+        if kind.starts_with("zygote") && threads.len() > 1 {
+            kind = role_from_threads(&threads).to_string();
+        }
+        let (sandboxed, mut sandbox_detail) = os::sandboxed(pid);
+        if !threads.is_empty() {
+            let mut names: Vec<&str> = Vec::new();
+            for name in &threads {
+                if names.len() < 12 && !names.contains(&name.as_str()) {
+                    names.push(name);
+                }
+            }
+            sandbox_detail.push_str(&format!(" threads={} [{}]", threads.len(), names.join(",")));
+        }
         Some(ProcSample {
             pid,
             kind,
@@ -101,6 +121,21 @@ impl ProcessTree {
             sandboxed,
             sandbox_detail,
         })
+    }
+}
+
+/// The role of a process forked from a zygote, from the names Chromium gives its threads: the
+/// GPU process runs the display compositor and a watchdog, a renderer Blink's compositor and its
+/// tile workers. Anything else forked from a zygote is "forked-child", which the sandbox rule
+/// still requires to be sandboxed.
+fn role_from_threads(threads: &[String]) -> &'static str {
+    let has = |name: &str| threads.iter().any(|t| t == name);
+    if has("VizCompositorTh") || has("GpuWatchdog") {
+        "gpu-process"
+    } else if has("Compositor") || has("CompositorTileW") {
+        "renderer"
+    } else {
+        "forked-child"
     }
 }
 
@@ -223,6 +258,10 @@ mod os {
         buffer
     }
 
+    pub fn thread_names(_pid: i32) -> Vec<String> {
+        Vec::new()
+    }
+
     pub fn command(pid: i32) -> String {
         std::process::Command::new("ps")
             .args(["-o", "command=", "-p", &pid.to_string()])
@@ -318,6 +357,20 @@ mod os {
         out
     }
 
+    /// The names of the process's threads (`/proc/<pid>/task/<tid>/comm`, at most 15 bytes).
+    pub fn thread_names(pid: i32) -> Vec<String> {
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+            return Vec::new();
+        };
+        let mut names = Vec::new();
+        for task in tasks.flatten() {
+            if let Ok(name) = std::fs::read_to_string(task.path().join("comm")) {
+                names.push(name.trim_end().to_string());
+            }
+        }
+        names
+    }
+
     pub fn command(pid: i32) -> String {
         read(pid, "cmdline")
             .map(|c| c.replace('\0', " "))
@@ -334,6 +387,9 @@ mod os {
         (None, "not read on this platform".into())
     }
     pub fn children(_pid: i32) -> Vec<i32> {
+        Vec::new()
+    }
+    pub fn thread_names(_pid: i32) -> Vec<String> {
         Vec::new()
     }
     pub fn command(_pid: i32) -> String {

@@ -4,8 +4,11 @@
 # of them own (lines starting "listening:"). Chromium's Windows sandbox runs renderers with a
 # restricted token at Untrusted integrity (0x0000) inside a job. Writes a verdict for the workflow
 # to $env:RUNNER_TEMP\windows-sandbox-verdict.txt: "ok: ..." when at least one renderer exists
-# and every renderer runs at Untrusted or Low integrity with a restricted token, "fail: ..."
-# otherwise. Read-only: it opens processes and tokens for query only.
+# and every required process runs at Untrusted or Low integrity with a restricted token or in an
+# AppContainer, "fail: ..." otherwise. Required: every process of the tree but CEF's browser
+# process, processes that are not the helper's, the crash handler, and any process Chromium
+# itself starts with --service-sandbox-type=none (listed, not required: the same rule as on
+# Linux). Read-only: it opens processes and tokens for query only.
 $ErrorActionPreference = 'Continue'
 
 Add-Type -TypeDefinition @"
@@ -101,7 +104,9 @@ function Switch-Value($line, $name) {
 }
 
 $renderers = 0
-$sandboxedRenderers = 0
+$required = 0
+$sandboxed = 0
+$unconfined = @()
 foreach ($p in $tree) {
     $line = [string]$p.CommandLine
     $kind = Switch-Value $line '--type='
@@ -113,10 +118,14 @@ foreach ($p in $tree) {
     $sandboxType = Switch-Value $line '--service-sandbox-type='
     $state = [SandboxProbe]::Describe([int]$p.ProcessId)
     $typeText = if ($null -ne $sandboxType) { " sandbox-type=$sandboxType" } else { "" }
-    Write-Output ("process {0} parent {1} {2} {3}{4} {5}" -f $p.ProcessId, $p.ParentProcessId, $p.Name, $kind, $typeText, $state)
-    if ($kind -eq 'renderer') {
-        $renderers++
-        if ($state -match 'integrity=0x(0000|1000)' -and $state -match 'restricted=True') { $sandboxedRenderers++ }
+    $isRequired = -not ($kind -in @('browser', 'other', 'crashpad-handler') -or $sandboxType -eq 'none')
+    $isSandboxed = ($state -match 'integrity=0x(0000|1000)') -and ($state -match 'restricted=True' -or $state -match 'appcontainer=True')
+    $rule = if ($isRequired) { 'required' } else { 'not required' }
+    Write-Output ("process {0} parent {1} {2} {3}{4} {5} [{6}]" -f $p.ProcessId, $p.ParentProcessId, $p.Name, $kind, $typeText, $state, $rule)
+    if ($kind -eq 'renderer') { $renderers++ }
+    if ($isRequired) {
+        $required++
+        if ($isSandboxed) { $sandboxed++ } else { $unconfined += "$kind ($($p.ProcessId))" }
     }
 }
 Write-Output ("processes in the tree: {0}" -f $tree.Count)
@@ -128,10 +137,11 @@ foreach ($s in @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinu
     }
 }
 
-if ($renderers -gt 0 -and $sandboxedRenderers -eq $renderers) {
-    $verdict = "ok: $renderers of $renderers renderers at Untrusted or Low integrity with a restricted token"
+$counts = "$sandboxed of $required required processes sandboxed (Untrusted or Low integrity, restricted token or AppContainer), $renderers renderers"
+if ($renderers -gt 0 -and $required -gt 0 -and $sandboxed -eq $required) {
+    $verdict = "ok: $counts"
 } else {
-    $verdict = "fail: $sandboxedRenderers of $renderers renderers at Untrusted or Low integrity with a restricted token"
+    $verdict = "fail: $counts; not sandboxed: $($unconfined -join ' ')"
 }
 Write-Output "sandbox verdict: $verdict"
 Set-Content -Path (Join-Path $env:RUNNER_TEMP 'windows-sandbox-verdict.txt') -Value $verdict
