@@ -7,7 +7,8 @@
 # Run from spikes/render-ci after `cargo build --release --features automation`. Writes everything to out/<label>/.
 # Exit code: 0 when the app's own check passed and the display capture (if one was taken) passed its check. On
 # Wayland the app cannot read its own window back (GPUI has no readback there and a client cannot capture the
-# screen), so only the display capture decides.
+# screen), so only the display capture decides; that downgrade applies only to exit code 1 together with the
+# "no in-app readback" message in scenario.json, and any other app failure fails the scenario.
 set -u
 
 label="$1"
@@ -87,7 +88,11 @@ fi
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 if [ "$app_rc" != 0 ]; then
-  if [ "$capture" = wayland ]; then
+  # Only the known case is downgraded: on Wayland the app exits 1 after writing scenario.json whose frame error says
+  # "no in-app readback on this display server" (capture.rs). Any other non-zero exit, or exit 1 without that
+  # message (for example the app's own frame check failing where a readback exists), fails the step.
+  if [ "$capture" = wayland ] && [ "$app_rc" = 1 ] \
+    && grep -q -F "no in-app readback on this display server" "$out/scenario.json" 2> /dev/null; then
     echo "::warning title=Scenario ${label}::the app's own readback is not available on Wayland (exit ${app_rc}); judged on the display capture only"
   else
     exit 1
