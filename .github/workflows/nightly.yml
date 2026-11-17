@@ -1,0 +1,227 @@
+name: nightly
+
+# Nightly trial packages of the cookbook window (the example target `hello_window` of udx-cookbook, for now),
+# built with cargo-packager 0.11.8 (decision 0014) on macOS, Linux and Windows. Each platform's package is attached
+# to the workflow run as an artifact and nowhere else: the workflow publishes nothing (no release, no tag, no
+# upload), its token is read-only, and it references no secret.
+#
+# The packages are UNSIGNED trial builds, named so, and are not releases. Signing is not set up: when the
+# maintainer supplies signing identities as CI secrets, the macOS signing and notarization settings go in
+# packaging/Packager.toml and the secrets are passed through the environment of the "Package" step of the macOS
+# job, in this file and only there. Windows signing is likewise a setting of the "Package" step (cargo-packager signs
+# the program, the uninstaller and the installer itself), not a later step. Before any secret is added: it must not be
+# available to pull_request runs, the -vv flag on "Package" (it traces the whole configuration) must go, and the
+# per-platform signing environment needs a condition on the operating system (decision 0014). Until then there is
+# no secret to miss.
+#
+# Triggers:
+#   schedule            once a day, and only when there has been a commit in the last 25 hours (see "Decide").
+#   workflow_dispatch   a manual run, always builds.
+#   pull_request        only when this file or packaging/ changes, so the workflow can be exercised before it
+#                       reaches the default branch.
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/nightly.yml"
+      - "packaging/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+# Same hardening as ci.yml: persist-credentials false, every action pinned to a full commit SHA, fixed runner
+# labels (never -latest; source: github.com/actions/runner-images), no event text in any script.
+#
+# Linux: GPUI's build scripts and links need pkg-config, libfontconfig-dev, libxcb1-dev and libxkbcommon-x11-dev
+# (decision 0007). Versions are the runner image's; apt packages are not pinned.
+#
+# Tools installed here, on the runner only:
+#   cargo-packager 0.11.8   `cargo install --locked --version`: cargo checks every downloaded crate against the
+#                           checksum in the registry index and builds with the crate's own lockfile. There is no
+#                           separate published hash of cargo-packager itself. On first use cargo-packager
+#                           downloads NSIS (Windows); it verifies the NSIS archive and nsis_tauri_utils.dll
+#                           against hashes compiled into the tool (SHA-1), and WiX the same way (not used here).
+#                           NOT hash-checked, and fetched on every run: on Windows the NSIS ApplicationID plugin
+#                           (its DLL is shipped inside the installer), and on macOS the create-dmg shell script
+#                           (pinned to a commit in its URL, executed on the runner). Before any build is released
+#                           to users each must be hash-checked or supplied from a verified copy; decision 0014
+#                           lists what is and is not verified.
+
+jobs:
+  decide:
+    name: decide
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Decide whether to build
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -eu
+          # A scheduled run on an idle repository would spend the scarce macOS runner for nothing, so it builds
+          # only when the newest commit is at most 25 hours old: the schedule is every 24 hours, and the extra
+          # hour allows a short late start. It is approximate: a run that starts more than an hour late, or is
+          # dropped, leaves a commit unbuilt by the schedule, and a commit made in the hour before a run is built
+          # twice. A day with no commit is skipped; the day after a commit builds it. A
+          # failed nightly is not retried by the next one (use workflow_dispatch). Every other event builds.
+          run=true
+          if [ "${EVENT_NAME}" = "schedule" ]; then
+            now=$(date +%s)
+            last=$(git log -1 --format=%ct)
+            age=$((now - last))
+            echo "newest commit is ${age} seconds old"
+            if [ "${age}" -gt 90000 ]; then
+              run=false
+            fi
+          fi
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          echo "build: ${run}"
+
+  package:
+    name: package (${{ matrix.name }})
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            os: macos-26
+          - name: linux
+            os: ubuntu-26.04
+          - name: windows
+            os: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Before checkout, so line endings never change file contents.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Install the Linux packages GPUI builds against
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libfontconfig-dev libxcb1-dev libxkbcommon-x11-dev
+      - name: Build the cookbook window in release mode
+        run: cargo build --release --locked -p udx-cookbook --example hello_window
+      - name: Stage the program
+        run: |
+          set -eu
+          ext=""
+          if [ "$RUNNER_OS" = Windows ]; then ext=".exe"; fi
+          mkdir -p target/packaging/bin
+          cp "target/release/examples/hello_window${ext}" "target/packaging/bin/unidex-rust-preview${ext}"
+          ls -l target/packaging/bin
+      - name: Install cargo-packager
+        timeout-minutes: 25
+        run: |
+          set -eu
+          cargo install --locked --version 0.11.8 cargo-packager
+          cargo packager --version
+      # The signing secrets, once they exist, are passed here and only here (see the header).
+      - name: Package
+        timeout-minutes: 20
+        run: |
+          set -eu
+          case "$RUNNER_OS" in
+            macOS) formats=dmg ;;
+            Linux) formats=deb ;;
+            Windows) formats=nsis ;;
+            *) echo "unexpected runner OS: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          cargo packager --release -c packaging/Packager.toml --formats "$formats" -vv
+          echo "everything under target/packaging/out:"
+          find target/packaging/out | sort
+      - name: Collect the unsigned packages
+        timeout-minutes: 5
+        run: |
+          set -eu
+          ver=$(sed -n 's/^version = "\(.*\)"$/\1/p' packaging/Packager.toml)
+          if [ -z "$ver" ]; then echo "no version in packaging/Packager.toml" >&2; exit 1; fi
+          out=target/packaging/artifacts
+          rm -rf "$out"
+          mkdir -p "$out"
+          base="unidex-rust-preview-${ver}-nightly-unsigned"
+          # Each package is looked up by its exact extension in the output folder; exactly one is expected.
+          pick() {
+            n=$(find target/packaging/out -maxdepth 1 -type f -name "$1" | wc -l | tr -d ' ')
+            if [ "$n" != 1 ]; then echo "expected exactly one $1, found $n" >&2; exit 1; fi
+            find target/packaging/out -maxdepth 1 -type f -name "$1"
+          }
+          case "$RUNNER_OS" in
+            macOS)
+              cp "$(pick '*.dmg')" "$out/${base}-macos-$(uname -m).dmg" ;;
+            Linux)
+              cp "$(pick '*.deb')" "$out/${base}-linux-$(uname -m).deb"
+              stage="target/packaging/tarball/${base}-linux-$(uname -m)"
+              rm -rf target/packaging/tarball
+              mkdir -p "$stage"
+              cp target/packaging/bin/unidex-rust-preview "$stage/"
+              cp LICENSE "$stage/"
+              tar -C target/packaging/tarball --sort=name --owner=0 --group=0 --numeric-owner \
+                -czf "$out/${base}-linux-$(uname -m).tar.gz" "${base}-linux-$(uname -m)" ;;
+            Windows)
+              cp "$(pick '*.exe')" "$out/${base}-windows-x86_64-setup.exe" ;;
+          esac
+      - name: Show what was built
+        timeout-minutes: 10
+        run: |
+          set -eu
+          cd target/packaging/artifacts
+          for f in *; do
+            echo "== $f"
+            ls -l "$f"
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+            file "$f" || true
+            case "$f" in
+              *.deb) dpkg-deb --info "$f"; dpkg-deb --contents "$f" ;;
+              *.tar.gz) tar -tzvf "$f" ;;
+              *.dmg)
+                mnt="$RUNNER_TEMP/dmg-mount"
+                mkdir -p "$mnt"
+                # "Y" answers the agreement prompt if an image ever carries one; without it hdiutil cancels.
+                hdiutil attach -readonly -nobrowse -noverify -mountpoint "$mnt" "$f" <<< "Y"
+                find "$mnt" -maxdepth 3 | sort
+                codesign -dv "$mnt"/*.app 2>&1 || true
+                hdiutil detach "$mnt" ;;
+              *.exe) 7z l "$f" | tail -n 30 ;;
+            esac
+          done
+      - name: Attach the packages to the run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unidex-rust-preview-nightly-unsigned-${{ matrix.name }}
+          path: target/packaging/artifacts/*
+          if-no-files-found: error
+          retention-days: 7
