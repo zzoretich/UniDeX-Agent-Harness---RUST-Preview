@@ -12,3 +12,4 @@ meaning. To change one, write a new record and set the old one's status to "supe
 | [0004](0004-embedded-chromium.md) | Embedded Chromium, rendered off-screen | accepted |
 | [0005](0005-platform-tiers.md) | Platform support in tiers | accepted |
 | [0007](0007-gpui-source-and-pins.md) | GPUI source and pins | accepted |
+| [0012](0012-embedded-browser-trial.md) | Embedded browser trial | proposed (trial in progress) |
