@@ -1,0 +1,45 @@
+[package]
+name = "spike-cef-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The CEF helper process: owns CEF entirely (its own NSApplication on macOS, its own message
+# loop), renders one windowless browser, paints `OnPaint` frames into the shared slots, maps the
+# forwarded input onto CEF's off-screen input calls, and relays DevTools calls through
+# `SendDevToolsMessage`. Same protocol as the stand-in.
+#
+# The CEF dependency is optional so that nothing in this workspace fetches CEF by accident:
+#   --features dox   type-check only; the bindings' build script does nothing (no download)
+#   --features cef   a real build; the bindings' build script downloads the CEF distribution
+#                    unless CEF_PATH points at an extracted copy (phase B, see decision 0012)
+
+[[bin]]
+name = "spike-cef-helper"
+path = "src/main.rs"
+required-features = ["cef"]
+
+[features]
+cef = ["dep:cef"]
+dox = ["cef", "cef/dox"]
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+spike-protocol.workspace = true
+# Apache-2.0 OR MIT. Pinned exactly: its version names the CEF build it downloads
+# (156.6.0+156.0.30 is CEF 156.0.30, Chromium 156.0.8078.96).
+cef = { version = "=156.6.0", optional = true, default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+# On macOS the wrapper is built with sandbox support; the sub-processes then enter Chromium's
+# sandbox through libcef_sandbox.dylib. On Windows the sandbox needs CEF's bootstrap executable
+# loading the client as a DLL (see decision 0012), which this trial does not build yet.
+[target.'cfg(target_os = "macos")'.dependencies]
+cef = { version = "=156.6.0", optional = true, default-features = false, features = ["sandbox"] }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder", "NSEvent", "NSRunningApplication"] }
+objc2-foundation = "0.3"

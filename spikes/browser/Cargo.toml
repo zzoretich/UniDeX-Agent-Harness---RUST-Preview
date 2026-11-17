@@ -1,0 +1,42 @@
+# Task 12 trial: Chromium inside a GPUI window. Throwaway code (decision 0012).
+#
+# A workspace of its own, so it is NOT a member of the repository's workspace and the root
+# Cargo.toml is untouched. Build from this folder:
+#
+#   cargo build --release          # protocol, stand-in and app; needs no CEF
+#
+# `cef-helper` is a member but not a default member, and its CEF dependency is optional:
+#
+#   cargo check -p spike-cef-helper --features dox   # type-checks against the CEF bindings, downloads nothing
+#   cargo build -p spike-cef-helper --features cef   # phase B only: the bindings' build script fetches CEF
+#                                                    # unless CEF_PATH points at an extracted copy
+
+[workspace]
+resolver = "3"
+members = ["protocol", "standin", "app", "cef-helper"]
+default-members = ["protocol", "standin", "app"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# Copied exactly from the repository's root Cargo.toml (decision 0007).
+[workspace.dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+
+# Versions already in GPUI's tree, so the lockfile adds nothing new for them.
+anyhow = "1"
+futures = "0.3.34"
+image = { version = "0.25", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_Threading"] }
+
+spike-protocol = { path = "protocol" }
+
+[profile.release]
+debug = 1
