@@ -193,21 +193,6 @@ pub fn commit_identities(root: &Path, sha: &str) -> Result<(String, String)> {
     ))
 }
 
-/// The prefix git treats as a comment in commit messages (default `#`).
-pub fn comment_prefix(root: &Path) -> String {
-    match git(root, &["config", "--get", "core.commentChar"]) {
-        Ok(b) => {
-            let v = String::from_utf8_lossy(&b).trim().to_string();
-            if v.is_empty() || v == "auto" {
-                "#".to_string()
-            } else {
-                v
-            }
-        }
-        Err(_) => "#".to_string(),
-    }
-}
-
 /// The top level of the main worktree, when `root` is a linked worktree.
 pub fn main_worktree_root(root: &Path) -> Option<PathBuf> {
     let out = git(

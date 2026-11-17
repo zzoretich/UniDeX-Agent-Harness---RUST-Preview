@@ -119,8 +119,10 @@ impl Allow {
     }
 
     /// A finding inside the allow file whose text is one of its declared values.
+    /// Only the generic rules, and only for the rule of the declaring entry.
     fn is_own_value(&self, f: &Finding) -> bool {
         f.path == ALLOW_FILE
+            && !matches!(f.rule, RuleId::LocalTerm | RuleId::LocalFileTracked)
             && self.0.iter().any(|a| {
                 a.values
                     .iter()
@@ -157,17 +159,28 @@ fn load_local(root: &Path) -> Result<Option<String>, String> {
     Ok(None)
 }
 
-/// Mirrors git's message cleanup: cut at the scissors line, blank comment lines.
-pub fn clean_git_message(text: &str, comment: &str) -> String {
-    let scissors = format!("{comment} ------------------------ >8 ------------------------");
-    let mut out = Vec::new();
-    for line in text.lines() {
-        if line == scissors {
-            break;
-        }
-        out.push(if line.starts_with(comment) { "" } else { line });
+/// For a git commit message file: drops the verbose diff git appends after
+/// its scissors line (`git commit -v`) and nothing else. Comment-looking lines
+/// and a scissors line without a diff after it are kept and scanned.
+pub fn clean_git_message(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some((at, token)) = lines.iter().enumerate().find_map(|(i, l)| {
+        let (tok, rest) = l.split_once(' ')?;
+        let ok = (1..=8).contains(&tok.chars().count())
+            && !tok.chars().any(char::is_whitespace)
+            && rest.strip_prefix(&"-".repeat(24))?.strip_prefix(" >8 ")? == "-".repeat(24);
+        ok.then(|| (i, tok.to_string()))
+    }) else {
+        return text.to_string();
+    };
+    let next = lines[at + 1..]
+        .iter()
+        .find(|l| !l.is_empty() && !l.starts_with(&token));
+    if next.is_some_and(|l| l.starts_with("diff --git ")) {
+        lines[..at].join("\n")
+    } else {
+        text.to_string()
     }
-    out.join("\n")
 }
 
 /// Runs the gate and returns the process exit code.
@@ -225,8 +238,7 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                 .read_to_end(&mut buf)
                 .map_err(|e| format!("cannot read stdin: {e}"))?;
             if opts.git_message {
-                let text =
-                    clean_git_message(&String::from_utf8_lossy(&buf), &git::comment_prefix(&root));
+                let text = clean_git_message(&String::from_utf8_lossy(&buf));
                 add(None, false, scan_text(label, &text, &terms));
             } else {
                 add(None, false, scan_bytes(label, &buf, &terms));

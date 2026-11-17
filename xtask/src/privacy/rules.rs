@@ -65,8 +65,6 @@ static HOME_WINDOWS_PLAIN: LazyLock<Regex> = LazyLock::new(|| {
     ))
     .unwrap()
 });
-static URL_SCHEME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"([A-Za-z][A-Za-z0-9+.-]*)://").unwrap());
 static RETINA: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)@[0-9]+x\.(?:png|jpe?g|gif|webp|svg|ico|icns|pdf)$").unwrap()
 });
@@ -116,14 +114,20 @@ fn home_allowed(name: &str) -> bool {
     PLACEHOLDER_HOMES.contains(&name.trim().to_lowercase().as_str())
 }
 
-/// True when the match sits inside a URL whose scheme is not `file`.
+/// True when the match lies inside an `http://` or `https://` URL: one is
+/// reached scanning backwards before any URL-ending delimiter.
 fn inside_url(line: &str, start: usize) -> bool {
-    let token_start = line[..start].rfind(char::is_whitespace).map_or(0, |i| {
-        i + line[i..].chars().next().map_or(1, char::len_utf8)
-    });
-    URL_SCHEME
-        .captures_iter(&line[token_start..start])
-        .any(|c| !c[1].eq_ignore_ascii_case("file"))
+    const DELIMS: &[char] = &[
+        '"', '\'', ',', '<', '>', '(', ')', '[', ']', '{', '}', '|', ';', '\\', '`',
+    ];
+    let before = &line[..start];
+    let seg_start = before
+        .rfind(|c: char| c.is_whitespace() || DELIMS.contains(&c))
+        .map_or(0, |i| {
+            i + before[i..].chars().next().map_or(1, char::len_utf8)
+        });
+    let seg = before[seg_start..].to_ascii_lowercase();
+    seg.contains("http://") || seg.contains("https://")
 }
 
 /// Home paths on one line. Matches may overlap, so each search resumes one

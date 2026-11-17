@@ -548,53 +548,60 @@ fn urls_are_not_home_paths_but_file_urls_are() {
 // I4
 const SCISSORS: &str = "# ------------------------ >8 ------------------------";
 
-#[test]
-fn git_message_flag_cuts_at_the_scissors_line() {
-    let repo = new_repo();
-    let msg = format!("fix a thing\n# a comment\n{SCISSORS}\n+ path /Users/jroe/x\n");
-    let ok = xtask(repo.path())
-        .args(["privacy", "--stdin", "msg", "--git-message"])
-        .write_stdin(msg.clone())
-        .assert()
-        .code(0);
-    drop(ok);
-    xtask(repo.path())
-        .args(["privacy", "--stdin", "msg"])
-        .write_stdin(msg)
-        .assert()
-        .code(1);
+fn git_message_run(dir: &Path, msg: &str, flag: bool) -> i32 {
+    let mut args = vec!["privacy", "--stdin", "msg"];
+    if flag {
+        args.push("--git-message");
+    }
+    xtask(dir)
+        .args(args)
+        .write_stdin(msg.to_string())
+        .output()
+        .unwrap()
+        .status
+        .code()
+        .unwrap()
+}
+
+fn verbose_message(above: &str) -> String {
+    format!(
+        "{above}\n# Please enter the commit message for your changes.\n# Lines starting with '#' will be ignored.\n{SCISSORS}\n# Do not modify or remove the line above.\n# Everything below it will be ignored.\ndiff --git a/x b/x\n+ path /Users/jroe/x\n"
+    )
 }
 
 #[test]
-fn git_message_flag_still_scans_above_the_scissors_line() {
+fn git_message_flag_cuts_a_verbose_diff_after_the_scissors_line() {
     let repo = new_repo();
-    let msg = format!("see /Users/jroe/x\n{SCISSORS}\n+ more\n");
-    xtask(repo.path())
-        .args(["privacy", "--stdin", "msg", "--git-message"])
-        .write_stdin(msg)
-        .assert()
-        .code(1);
+    let msg = verbose_message("fix a thing");
+    assert_eq!(git_message_run(repo.path(), &msg, true), 0);
+    assert_eq!(git_message_run(repo.path(), &msg, false), 1);
 }
 
 #[test]
-fn git_message_flag_drops_comment_lines_and_honours_comment_char() {
+fn git_message_flag_still_scans_above_a_verbose_scissors_line() {
     let repo = new_repo();
-    xtask(repo.path())
-        .args(["privacy", "--stdin", "msg", "--git-message"])
-        .write_stdin("subject\n# On branch main, /Users/jroe/x\n")
-        .assert()
-        .code(0);
-    git(repo.path(), &["config", "core.commentChar", ";"]);
-    xtask(repo.path())
-        .args(["privacy", "--stdin", "msg", "--git-message"])
-        .write_stdin("subject\n; comment /Users/jroe/x\n")
-        .assert()
-        .code(0);
-    xtask(repo.path())
-        .args(["privacy", "--stdin", "msg", "--git-message"])
-        .write_stdin("subject\n# not a comment now /Users/jroe/x\n")
-        .assert()
-        .code(1);
+    let msg = verbose_message("see /Users/jroe/x");
+    assert_eq!(git_message_run(repo.path(), &msg, true), 1);
+}
+
+#[test]
+fn git_message_flag_scans_comment_like_lines() {
+    let repo = new_repo();
+    assert_eq!(
+        git_message_run(repo.path(), "#12 moved to /Users/jroe/x\n", true),
+        1
+    );
+    assert_eq!(
+        git_message_run(repo.path(), "subject\n# note /Users/jroe/x\n", true),
+        1
+    );
+}
+
+#[test]
+fn git_message_flag_keeps_text_after_a_scissors_line_without_a_diff() {
+    let repo = new_repo();
+    let msg = format!("subject\n{SCISSORS}\nordinary text /Users/jroe/x\n");
+    assert_eq!(git_message_run(repo.path(), &msg, true), 1);
 }
 
 #[test]
@@ -790,4 +797,51 @@ fn range_scans_author_and_committer_emails() {
         text.contains("author") && text.contains("committer"),
         "{text}"
     );
+}
+
+// N2
+#[test]
+fn urls_only_guard_http_matches_inside_the_url() {
+    for ok in [
+        "https://example.com/users/octocat",
+        "https://example.com/home/page",
+        "[docs](https://example.com/users/octocat)",
+    ] {
+        assert!(!flagged(ok), "{ok}");
+    }
+    for bad in [
+        r#"{"url":"https://example.com/a","cwd":"/Users/jroe"}"#,
+        "https://example.com/a,/Users/jroe/x",
+        r#"<a href="https://example.com/a">x</a><code>/Users/jroe/x</code>"#,
+        "file:///Users/jroe/x",
+        "vscode://file/Users/jroe/x",
+        "ssh://git@example.com/home/jroe/repo.git",
+    ] {
+        assert!(flagged(bad), "{bad}");
+    }
+}
+
+// N1
+#[test]
+fn a_local_term_in_the_allow_file_is_never_exempt() {
+    let repo = new_repo();
+    write(repo.path(), ".gitignore", "privacy-terms.local.txt\n");
+    write(repo.path(), "privacy-terms.local.txt", "jane.roe@corp.io\n");
+    write(repo.path(), "a.md", "harmless\n");
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("other.md", "Email", "\"jane.roe@corp.io\""),
+    );
+    git(repo.path(), &["add", "-A"]);
+    for args in [vec!["privacy", "--all"], vec!["privacy", "--staged"]] {
+        let (code, text) = run(repo.path(), &args);
+        assert_eq!(code, 1, "{args:?}: {text}");
+        assert!(
+            text.contains("LocalTerm") && text.contains("privacy-allow.toml"),
+            "{text}"
+        );
+    }
+    git(repo.path(), &["commit", "-q", "--no-verify", "-m", "add"]);
+    assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 1);
 }
