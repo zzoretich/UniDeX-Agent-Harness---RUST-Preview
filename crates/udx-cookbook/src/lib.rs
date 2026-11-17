@@ -6,7 +6,9 @@
 //! is upgraded.
 
 pub mod channel;
+pub mod frames;
 pub mod links;
 pub mod stats;
 pub mod text_model;
 pub mod window_state;
+pub mod wire;

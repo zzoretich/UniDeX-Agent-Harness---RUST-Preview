@@ -8,8 +8,9 @@ publish = false
 # Small GPUI examples on the pinned snapshot, under `examples/`. CI builds them on
 # macOS, Linux and Windows. See README.md and docs/decisions/0007-gpui-source-and-pins.md.
 #
-# Only the examples use GPUI, so it is a dev-dependency here. A crate that draws UI
-# lists the same two lines under [dependencies].
+# Only the examples (and one library test) use GPUI, so it is a dev-dependency here; the
+# library itself uses only the standard library. A crate that draws UI lists the same two
+# lines under [dependencies].
 
 [dev-dependencies]
 gpui.workspace = true
