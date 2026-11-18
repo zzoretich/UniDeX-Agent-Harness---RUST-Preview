@@ -1,0 +1,1 @@
+fn f<'a>(x: &'a str) { let c = '"'; let d = '\\'; let e = '\''; let h = std::env::home_dir(); }

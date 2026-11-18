@@ -1,0 +1,2 @@
+use std::env::{*};
+fn f() { let t = temp_dir(); }

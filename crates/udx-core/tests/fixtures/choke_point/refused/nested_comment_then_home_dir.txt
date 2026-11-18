@@ -1,0 +1,2 @@
+/* outer /* nested */ still a comment */
+let h = std::env::home_dir();

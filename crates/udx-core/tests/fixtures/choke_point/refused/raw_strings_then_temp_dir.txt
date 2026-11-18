@@ -1,0 +1,2 @@
+let s = r##"a "# b"##; let t = br#"x"#; let u = c"y";
+let h = std::env::temp_dir();

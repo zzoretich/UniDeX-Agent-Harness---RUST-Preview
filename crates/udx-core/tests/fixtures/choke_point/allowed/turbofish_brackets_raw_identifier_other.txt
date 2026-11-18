@@ -1,0 +1,5 @@
+let l = std::env::var::<&str>("RUST_LOG");
+const N: &str = env![ "CARGO_PKG_NAME" ];
+struct Wire { r#type: u8 }
+use std::env::{args, var};
+let c = 'x'; fn f<'a>(x: &'a str) {}

@@ -87,28 +87,35 @@ fn lex(src: &str) -> Vec<Tok> {
             let id: String = b[st..i].iter().collect();
             let raw_prefix = matches!(id.as_str(), "r" | "br" | "cr");
             let plain_prefix = matches!(id.as_str(), "b" | "c");
-            if (raw_prefix && (at(i) == '"' || at(i) == '#')) || (plain_prefix && at(i) == '"') {
-                if raw_prefix {
-                    let mut h = 0;
-                    while at(i) == '#' {
-                        h += 1;
-                        i += 1;
+            let hashes = if raw_prefix {
+                (0..).take_while(|k| at(i + k) == '#').count()
+            } else {
+                0
+            };
+            if raw_prefix && at(i + hashes) == '"' {
+                // A raw string: r"..", r#".."#, br##".."##, cr"..".
+                i += hashes + 1;
+                let st = i;
+                while i < n {
+                    if b[i] == '"' && (0..hashes).all(|k| at(i + 1 + k) == '#') {
+                        break;
                     }
-                    i += 1; // the opening quote
-                    let st = i;
-                    while i < n {
-                        if b[i] == '"' && (0..h).all(|k| at(i + 1 + k) == '#') {
-                            break;
-                        }
-                        i += 1;
-                    }
-                    out.push(Tok::Str(b[st..i.min(n)].iter().collect()));
-                    i += 1 + h;
-                } else {
-                    let (s, ni) = plain_string(&b, i + 1);
-                    out.push(Tok::Str(s));
-                    i = ni;
+                    i += 1;
                 }
+                out.push(Tok::Str(b[st..i.min(n)].iter().collect()));
+                i += 1 + hashes;
+            } else if id == "r" && hashes == 1 && (at(i + 1).is_alphabetic() || at(i + 1) == '_') {
+                // A raw identifier, r#type: an identifier, never a string.
+                i += 1;
+                let st = i;
+                while i < n && is_ident_char(b[i]) {
+                    i += 1;
+                }
+                out.push(Tok::Id(b[st..i].iter().collect()));
+            } else if plain_prefix && at(i) == '"' {
+                let (s, ni) = plain_string(&b, i + 1);
+                out.push(Tok::Str(s));
+                i = ni;
             } else if id == "b" && at(i) == '\'' {
                 i += 1;
                 i += if at(i) == '\\' { 2 } else { 1 };
@@ -278,12 +285,30 @@ fn violations(src: &str) -> Vec<String> {
             v.push(format!("OS lookup: {id}"));
         }
         // 3. A read of a user variable by its literal name.
-        let is_call = (id == "var" || id == "var_os") && next(1).is_some_and(|x| x.is_p("("));
+        // `var::<T>(..)`: step over an optional turbofish before the open parenthesis.
+        let mut k = 1;
+        if next(1).is_some_and(|x| x.is_p("::")) && next(2).is_some_and(|x| x.is_p("<")) {
+            let mut depth = 0;
+            k = 2;
+            while let Some(x) = next(k) {
+                if x.is_p("<") {
+                    depth += 1;
+                } else if x.is_p(">") {
+                    depth -= 1;
+                    if depth == 0 {
+                        k += 1;
+                        break;
+                    }
+                }
+                k += 1;
+            }
+        }
+        let is_call = (id == "var" || id == "var_os") && next(k).is_some_and(|x| x.is_p("("));
         let is_macro = (id == "env" || id == "option_env")
             && next(1).is_some_and(|x| x.is_p("!"))
-            && next(2).is_some_and(|x| x.is_p("("));
+            && next(2).is_some_and(|x| x.is_p("(") || x.is_p("[") || x.is_p("{"));
         let arg = if is_call {
-            next(2)
+            next(k + 1)
         } else if is_macro {
             next(3)
         } else {
@@ -314,6 +339,14 @@ fn violations(src: &str) -> Vec<String> {
                 }
                 if p.first().is_some_and(|f| USER_CRATES.contains(&f.as_str())) {
                     v.push(format!("use of user-folder crate {}", p[0]));
+                }
+                // A glob of std::env imports home_dir and temp_dir without naming them.
+                let env_glob = p.len() >= 2
+                    && p.last().is_some_and(|l| l == "*")
+                    && p[p.len() - 2] == "env"
+                    && (p[0] == "std" || p.len() == 2);
+                if env_glob {
+                    v.push(format!("use glob of std::env: {}", p.join("::")));
                 }
             }
             i = j.max(i + 1);
@@ -487,6 +520,7 @@ fn choke_point_rule_accepts_sanctioned_accessor() {
         "use_then_bare_user_var.txt",
         "method_var_reads_test_root.txt",
         "home_as_map_key.txt",
+        "turbofish_brackets_raw_identifier_other.txt",
     ] {
         assert!(names.contains(must), "missing allowed fixture {must}");
     }
@@ -518,6 +552,19 @@ fn choke_point_rule_refuses_direct_lookups() {
         "env_var_userprofile_method.txt",
         "std_env_var_os_xdg_config_home.txt",
         "env_macro_home.txt",
+        "raw_identifier_then_home_dir.txt",
+        "raw_identifier_fn_then_var_home.txt",
+        "raw_strings_then_temp_dir.txt",
+        "lifetimes_and_chars_then_home_dir.txt",
+        "nested_comment_then_home_dir.txt",
+        "use_std_env_glob.txt",
+        "use_std_env_glob_braced.txt",
+        "turbofish_var_home.txt",
+        "turbofish_var_os_userprofile.txt",
+        "env_macro_brackets_home.txt",
+        "env_macro_braces_home.txt",
+        "option_env_macro_brackets_home.txt",
+        "option_env_macro_braces_appdata.txt",
     ] {
         assert!(names.contains(must), "missing refused fixture {must}");
     }
@@ -533,6 +580,7 @@ fn choke_point_rule_refuses_direct_lookups() {
 fn choke_point_no_direct_user_folder_access() {
     // The scanner's own helper must be sound before the tree is judged by it.
     assert!(!violations("let h = std::env::home_dir();").is_empty());
+    assert!(!violations("struct S { r#type: u8 } fn f() { std::env::home_dir(); }").is_empty());
     assert!(violations("let h = home_dir(env);").is_empty());
 
     let root = workspace_root();
@@ -571,6 +619,18 @@ fn choke_point_no_remove_dir_all() {
         .filter(|t| t.is_id("remove_dir_all"))
         .count();
     assert_eq!(seen, 1);
+    // A raw identifier, a raw string and a lifetime before the call must not hide it.
+    for hidden in [
+        "fn g() { let r#loop = 1; std::fs::remove_dir_all(p); }",
+        "struct S { r#type: u8 } fn f() { std::fs::remove_dir_all(p); }",
+        "const S: &str = r#\"x\"#; fn f<'a>(x: &'a str) { std::fs::remove_dir_all(p); }",
+    ] {
+        let seen = without_cfg_test(lex(hidden))
+            .iter()
+            .filter(|t| t.is_id("remove_dir_all"))
+            .count();
+        assert_eq!(seen, 1, "{hidden}");
+    }
 
     let root = workspace_root();
     let mut files = Vec::new();
@@ -579,7 +639,7 @@ fn choke_point_no_remove_dir_all() {
     for f in files {
         let r = rel(&root, &f);
         let in_test_folder = r.split('/').any(|c| c == "tests") || r.ends_with("/tests.rs");
-        if in_test_folder || r.starts_with("crates/udx-cookbook/") {
+        if in_test_folder {
             continue;
         }
         if REMOVE_DIR_ALL_ALLOW.iter().any(|a| r.ends_with(a)) {
@@ -601,16 +661,26 @@ fn choke_point_no_direct_chrono() {
     // A dependency on chrono is named at the start of a line, in a dependency table header, or as a renamed package.
     fn names_chrono(manifest: &str) -> bool {
         manifest.lines().any(|l| {
-            let l = l.trim();
+            // Quotes and spaces never change which crate a line names.
+            let l: String = l
+                .trim()
+                .chars()
+                .filter(|c| !matches!(c, '"' | '\'' | ' '))
+                .collect();
             if l.starts_with('#') {
                 return false;
             }
-            let key_is_chrono = l.strip_prefix("chrono").is_some_and(|rest| {
+            let not_name_char = |rest: &str| {
                 !rest.starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-')
-            });
+            };
+            let key_is_chrono = l.strip_prefix("chrono").is_some_and(not_name_char);
             let table_is_chrono =
                 l.starts_with('[') && l.trim_end_matches(']').ends_with(".chrono");
-            key_is_chrono || table_is_chrono || l.replace(' ', "").contains("package=\"chrono\"")
+            let renamed = l
+                .split("package=")
+                .skip(1)
+                .any(|rest| rest.strip_prefix("chrono").is_some_and(not_name_char));
+            key_is_chrono || table_is_chrono || renamed
         })
     }
     assert!(names_chrono("[dependencies]\nchrono = \"0.4\"\n"));
@@ -618,6 +688,10 @@ fn choke_point_no_direct_chrono() {
     assert!(names_chrono(
         "x = { package = \"chrono\", version = \"0.4\" }\n"
     ));
+    assert!(names_chrono("\"chrono\" = \"0.4\"\n"));
+    assert!(names_chrono("[dependencies.\"chrono\"]\n"));
+    assert!(names_chrono("x = { package = 'chrono' }\n"));
+    assert!(!names_chrono("x = { package = \"chrono-tz\" }\n"));
     assert!(!names_chrono(
         "# chrono is forbidden\n[dependencies]\nchrono-tz-like = \"1\"\n"
     ));

@@ -1,0 +1,1 @@
+const H: Option<&str> = option_env!["HOME"];
