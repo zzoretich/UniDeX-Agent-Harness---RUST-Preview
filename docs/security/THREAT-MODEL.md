@@ -960,8 +960,9 @@ cap with a clear event, and a call estimated over the cap is never sent.
 
 Routines, duties and `run-due` run with no one to ask (design 5.2, 5.9).
 
-**Proposed, not yet in the design (P41). Rewritten.** **Accepted (P41), 2026-11-17, for its M1 part only (the definition of an unattended run;
-the rest of P41 stays for M6).**
+**Proposed, not yet in the design (P41). Rewritten.**
+**Accepted (P41), 2026-11-17, for its M1 part only (the definition of an unattended run; the rest of P41 stays
+for M6).**
 When the user turns a routine on, it declares the tools, folders,
 fixed URL prefixes (scheme, host, port and path prefix) and engines it needs, and the app pins the hash of its prompt
 and schedule with that declaration. `run-due` refuses a routine whose hash changed and notifies; anything outside the
