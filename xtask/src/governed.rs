@@ -314,11 +314,7 @@ pub fn run(req: &Request, out: &mut dyn Write) -> Result<usize, String> {
             let _ = writeln!(text, "Examined base {base} and head {head}.\n");
         }
         if let Some(msg) = &incomplete {
-            let _ = writeln!(
-                text,
-                "{}\n",
-                escape_cell(msg).replace("&#40;", "(").replace("&#41;", ")")
-            );
+            let _ = writeln!(text, "{msg}\n");
         }
         if let Some((changed, listed)) = req.counts {
             let _ = writeln!(

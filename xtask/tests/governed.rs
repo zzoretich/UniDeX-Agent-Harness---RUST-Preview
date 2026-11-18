@@ -533,12 +533,10 @@ fn governed_annotation_message_names_reason_and_record() {
     assert_eq!(lines.len(), 2, "{:?}", r.stdout);
     for l in lines {
         let msg = l
-            .splitn(2, "::")
-            .nth(1)
+            .split_once("::")
+            .and_then(|(_, rest)| rest.split_once("::"))
             .unwrap()
-            .splitn(2, "::")
-            .nth(1)
-            .unwrap();
+            .1;
         assert!(msg.contains("Governed file: "), "{msg:?}");
         assert!(msg.contains("decision 0025"), "{msg:?}");
         assert!(msg.contains("extra security review"), "{msg:?}");
