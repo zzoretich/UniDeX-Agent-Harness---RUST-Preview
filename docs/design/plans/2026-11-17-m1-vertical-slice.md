@@ -1817,6 +1817,9 @@ evaluation harness T28; 8.0M), the two CI tasks (nightlies T33, the automation-s
   the controller uses 150k per task. 48.0 x 0.85 = 40.8M; plus the gate at M0's 3.7M; plus 0.5M; plus 6.8M (45 x
   150k). 40.8 + 3.7 + 0.5 + 6.8 = 51.8M.
 
+**Decided (2026-11-18).** The maintainer approved the start of M1 with option (a) below: a milestone cap of 52M, full
+scope, check-ins at 11M, 22M and 33M. The options are kept as the record of what was asked.
+
 **The milestone cap: the maintainer's choice.** The architect proposed a cap of 45M. That cap is below the high end of
 this plan's own forecast: the high end is 51.8M, 6.8M over 45M, and the low end is 35.2M, 9.8M under it. So if spend
 tracks the high end, M1's scope as planned does not fit under 45M, and something has to give at a check-in. The
