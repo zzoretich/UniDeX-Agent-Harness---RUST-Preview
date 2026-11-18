@@ -2,17 +2,17 @@
 
 Status: proposed by the architect for review · 2026-11-17 · builds on the approved design
 (`docs/design/specs/2026-11-16-unidex-rust-design.md`, "the design"), the M0 gate report (`docs/build/M0-GATE.md`, "the
-gate report"), the threat model (`docs/security/THREAT-MODEL.md`, revision 3) and decision records 0001 to 0014, with the
-maintainer's answers of 2026-11-17 to gate questions 1 to 5. The task breakdown that builds this is
+gate report"), the threat model (`docs/security/THREAT-MODEL.md`, revision 3) and decision records 0001 to 0014, with
+the maintainer's answers of 2026-11-17 to gate questions 1 to 5. The task breakdown that builds this is
 `docs/design/specs/2026-11-17-m1-tasks.md` ("the task file").
 
 How to read this file:
 
 - Section numbers in parentheses ("design 5.2", "threat model 4.1", "gate question 4", "decision 0013") point to the
   sources. "Pn" is a threat-model proposal; all 31 scheduled for M1 are accepted (maintainer, 2026-11-17).
-- **Fact** marks something the repository's records or the pinned sources show; the source is named. **Proposal**
-  marks the architect's choice. **Not verified** marks an external API or behaviour this file relies on that no record
-  in the repository shows; the owning task verifies it first and stops if it is wrong.
+- **Fact** marks something the repository's records or the pinned sources show; the source is named. **Proposal** marks
+  the architect's choice. **Not verified** marks an external API or behaviour this file relies on that no record in the
+  repository shows; the owning task verifies it first and stops if it is wrong.
 - Rust code blocks are contracts: names, fields, signatures and error types. Bodies are omitted. A builder may add
   private items and derive more traits; changing a public item named here needs the architect's (controller's)
   agreement, recorded in the pull request.
@@ -43,8 +43,8 @@ From design 6, as amended by the maintainer's answers to gate questions 1 to 5:
 8. **A session log**: one append-only, versioned JSONL file per session (design 5.2), redacted, owner-only.
 9. **A real GPUI chat window** and **`unidex chat`**, plus `unidex run`, `unidex config`, `unidex doctor`,
    `unidex trust` and `unidex key` (section 3.12).
-10. **The chat's prepared-message cache with eviction** (gate question 4; decision 0008) and **a persistent
-    shaped-text cache** (gate question 4), after a measurement that isolates the slow-frame cause.
+10. **The chat's prepared-message cache with eviction** (gate question 4; decision 0008) and **a persistent shaped-text
+    cache** (gate question 4), after a measurement that isolates the slow-frame cause.
 11. **The automation socket in test builds**, end-to-end UI tests on three CI platforms with Wayland as a hard check,
     and the release check on every nightly artifact (design 10.3; decision 0013; P37).
 12. **The first evaluation run** (design 10.2) with a harness and a first task set.
@@ -56,14 +56,14 @@ From design 6, as amended by the maintainer's answers to gate questions 1 to 5:
 
 Each item cites where the design or the maintainer put it.
 
-- Other providers, model profiles beyond one default per provider, context trimming and summarising, sub-agents,
-  skills, the MCP client (design 6, M2). The `sub_agent`, `skill` and MCP tools are absent.
-- The vault, memory, recall, context injection from memory, `unidex import`, `unidex serve` (design 6, M3). The
-  `memory` tool is absent. Until the vault exists, the app keeps its private state under its data folder (D11).
+- Other providers, model profiles beyond one default per provider, context trimming and summarising, sub-agents, skills,
+  the MCP client (design 6, M2). The `sub_agent`, `skill` and MCP tools are absent.
+- The vault, memory, recall, context injection from memory, `unidex import`, `unidex serve` (design 6, M3). The `memory`
+  tool is absent. Until the vault exists, the app keeps its private state under its data folder (D11).
 - The app shell (rail, command palette, settings screens), Sessions and History, the terminal, diff pane, tray, themes
   beyond one light and one dark, auto-update, links handling beyond what P54 needs (design 6, M4).
-- ACP add-on engines (design 6, M5); routines, duties, notifications and the `notify` tool, the scheduler and
-  `run-due`, routine declarations (design 6, M6; P41 beyond its definition of an unattended run).
+- ACP add-on engines (design 6, M5); routines, duties, notifications and the `notify` tool, the scheduler and `run-due`,
+  routine declarations (design 6, M6; P41 beyond its definition of an unattended run).
 - The embedded browser (design 6, M7). Nothing in M1 may launch Chromium or CEF, in code, tests or CI.
 - Signing, notarization and signed updates (gate question 5). The hash-checked fetches decision 0014 requires "before
   the first signed build, and in any case before any release" therefore stay owed, not built, in M1.
@@ -73,16 +73,17 @@ Each item cites where the design or the maintainer put it.
 
 The gate passes when every box is ticked; a miss blocks it (design 9, 10.4).
 
-- [ ] **CI green on three platforms**: the eight M0 checks, plus the checks M1 adds (`sandbox-linux`, `ui (macos)`,
-      `ui (linux-x11)`, `ui (linux-wayland)`, `ui (windows)`, `governed-paths`, `perf-checks`), on the gate's commit.
+- [ ] **CI green on three platforms**: the eight M0 checks, plus the checks M1 adds (`sandbox-linux (restricted)`,
+      `sandbox-linux (profile)`, `ui (macos)`, `ui (linux-x11)`, `ui (linux-wayland)`, `ui (windows)`, `governed-paths`,
+      `perf-checks`), on the gate's commit.
 - [ ] **Performance targets** as defined at the gate (gate question 3, adopted from the baseline's "Comparison"),
       measured on the reference machine, an Apple silicon desktop with 16 GB and a 100 Hz external display (a 120 Hz
       laptop leaves 8.3 ms per frame; the gate report says so beside every frame figure):
   - [ ] Start-up: spawn to the first presented frame showing the home screen's navigation (in M1 the chat window with
         its session list and composer), median of ten warm launches, under 400 ms; the first launch after a build or
         reboot reported separately with no pass mark.
-  - [ ] Idle: no periodic wake-ups from our code (an internal counter reads zero over 60 s), and at most 60 wake-ups
-        and 0.1 CPU-seconds per minute across all the app's processes (placeholders until the floor of an empty native
+  - [ ] Idle: no periodic wake-ups from our code (an internal counter reads zero over 60 s), and at most 60 wake-ups and
+        0.1 CPU-seconds per minute across all the app's processes (placeholders until the floor of an empty native
         window is measured; T31 measures it with the cookbook's `hello_window`).
   - [ ] Idle memory: summed physical footprint of all the app's processes 90 s after the home screen is up (30 s to
         settle, 60 s idle), under 150 MB; and the same after scrolling the whole 5,000-message thread (decision 0008
@@ -129,13 +130,13 @@ the only ones allowed (no cycles; normal dependencies only, dev-dependencies lis
 | `udx-evals` | new | The evaluation harness and the M1 task set (design 10.2) | `udx-core`, `udx-engine`, `udx-providers` (feature `testing`), `udx-tools`, `udx-sandbox` |
 | `udx-test-support` | changed | Test helpers that depend on no workspace crate: a test-root folder, a recording HTTP stand-in, a temporary home with planted files, canary scanning | none |
 | `udx-cookbook` | unchanged | GPUI examples (decision 0007) | none |
-| `xtask` | changed | Privacy gate (hardened), hooks, the release check (P37), fixture conversion, core benchmarks, the path-choke-point lint | none |
+| `xtask` | changed | Privacy gate (hardened), hooks, the release check (P37), fixture conversion, core benchmarks | none |
 
 `udx-store`, `udx-mcp`, `udx-acp`, `udx-term`, `udx-browser`, `udx-scheduler` and `udx-persona` are not created in M1.
 
-Layering check against design 5's order (crates above depend only on crates below): `udx-sandbox` sits above
-`udx-tools` in design 5's list, so `udx-tools` must not depend on `udx-sandbox`. That is why the `Sandbox` trait and its
-types live in `udx-core` and the shell tool receives an `Arc<dyn Sandbox>` through its context (section 3.4).
+Layering check against design 5's order (crates above depend only on crates below): `udx-sandbox` sits above `udx-tools`
+in design 5's list, so `udx-tools` must not depend on `udx-sandbox`. That is why the `Sandbox` trait and its types live
+in `udx-core` and the shell tool receives an `Arc<dyn Sandbox>` through its context (section 3.4).
 
 ```
 udx-app ──┬──> udx-ui-model ──> udx-core
@@ -161,15 +162,17 @@ inside `udx-core` sees two different compilations of `udx-core`.
   `udx-core` (test env, memory secret store, fixed clock, fixed ids), `udx-providers` (scripted mock provider, fixture
   transport), `udx-sandbox` (a sandbox that reports itself unavailable), `udx-tools` (stub resolver), `udx-engine` (a
   turn harness that collects events). A dependent crate enables it only under `[dev-dependencies]`.
-- A `testing` feature never adds a capability to a release build. Each one defines a marker string (`UNIDEX_TESTING_
-  MARKER_<crate>`) in a `#[used]` static so the release check (P37) fails if any reaches a packaged binary.
+- A `testing` feature never adds a capability to a release build. Each one defines a marker string
+  (`UNIDEX_TESTING_ MARKER_<crate>`) in a `#[used]` static so the release check (P37) fails if any reaches a packaged
+  binary.
 - `udx-core/testing` also makes `AppPaths::resolve` refuse the operating system's folders entirely, so a test binary
   started outside cargo (which has neither `UNIDEX_TEST_ROOT` nor `CARGO_MANIFEST_DIR`) fails closed instead of reaching
   a real user's folders (gate report, section g, "the test environment helper required in tests").
 - Feature unification (decision 0013 warns about it): `udx-evals` depends on `udx-providers/testing` as a normal
   dependency, so a workspace-wide build would carry the mock provider into every binary. Release and nightly builds
-  therefore always name packages and binaries (`cargo build --release -p udx-app --bin unidex-rust-preview -p udx-cli
-  --bin unidex`), never `--workspace`; the release check is the backstop.
+  therefore always name packages and binaries
+  (`cargo build --release -p udx-app --bin unidex-rust-preview -p udx-cli --bin unidex`), never `--workspace`; the
+  release check is the backstop.
 
 ### 2.3 External dependencies
 
@@ -183,8 +186,8 @@ feature available), `sha2` 0.10.9, `base64` 0.22.1, `idna` 1.1.0, `url` 2.5.8, `
 the build, but it becomes a direct dependency, which makes its "unmaintained" notices fail `cargo deny` (decision 0007's
 scope rule).
 
-New crates proposed, each with what was checked here (crates.io metadata read with `cargo info` on 2026-11-17) and
-what was not:
+New crates proposed, each with what was checked here (crates.io metadata read with `cargo info` on 2026-11-17) and what
+was not:
 
 | Crate (version seen) | Used by, for | Licence (crates.io) | Passes `deny.toml`? | Not verified |
 |---|---|---|---|---|
@@ -212,14 +215,14 @@ Deliberately not added:
   verified: that `objc2-security` 0.3.2's generated `SecItem` bindings cover add, copy-matching and delete for generic
   passwords; T4 verifies and falls back to `security-framework` 3.7.0 (already transitive through the TLS verifier) if
   not.
-- **`tracing-subscriber`**: no global subscriber or logger is installed for third-party crates, so their trace output
-  is never captured (P57; D13). Our own diagnostics go through `udx_core::diag` (section 3.1.11).
-- **`aws-lc-rs`/`aws-lc-sys`**: `aws-lc-sys` 0.47.0's licence expression is satisfiable from the allow list, but it
-  adds a large C build; `ring` is used instead (D5).
+- **`tracing-subscriber`**: no global subscriber or logger is installed for third-party crates, so their trace output is
+  never captured (P57; D13). Our own diagnostics go through `udx_core::diag` (section 3.1.11).
+- **`aws-lc-rs`/`aws-lc-sys`**: `aws-lc-sys` 0.47.0's licence expression is satisfiable from the allow list, but it adds
+  a large C build; `ring` is used instead (D5).
 - **`unicode-normalization`**, **`unicode-script`**, **`trash`**, **`nix`**, **`shell-words`**, **`html5ever`**: NFC
-  comes from `icu_normalizer` (already present); hosts with any non-ASCII character are always shown in their ASCII
-  form beside the Unicode form, which covers "punycode when scripts mix" without script data (D15); no M1 tool deletes
-  (D14); `rustix` and `libc` cover the Unix calls; command parsing and HTML-to-text are small, our own and tested.
+  comes from `icu_normalizer` (already present); hosts with any non-ASCII character are always shown in their ASCII form
+  beside the Unicode form, which covers "punycode when scripts mix" without script data (D15); no M1 tool deletes (D14);
+  `rustix` and `libc` cover the Unix calls; command parsing and HTML-to-text are small, our own and tested.
 
 ## 3. Interfaces
 
@@ -246,8 +249,8 @@ pub enum PathError {
     TestBuildWithoutTestRoot,                             // `testing` feature on and no test root: never OS folders
 }
 
-/// Every user-folder path in the workspace comes from here (gate report, section g). `xtask lint-paths` fails if any
-/// other crate calls `directories`, `dirs`, `std::env::home_dir`, `std::env::temp_dir` or reads HOME, USERPROFILE,
+/// Every user-folder path in the workspace comes from here (gate report, section g). The choke-point test
+/// (crates/udx-core/tests/choke_point.rs, T1c) fails if any other crate calls `directories`, `dirs`, `std::env::home_dir`, `std::env::temp_dir` or reads HOME, USERPROFILE,
 /// APPDATA, LOCALAPPDATA or XDG_* directly.
 impl AppPaths {
     pub fn resolve(env: &dyn Env) -> Result<AppPaths, PathError>;
@@ -375,8 +378,9 @@ reads that table):
 
 #### 3.1.4 The `Engine` trait and its events (T2 for the types; T16 implements the native engine)
 
-Design 5.1 puts `Engine` beside `Provider` as a product-defining trait, and design 5 puts events in `udx-core`. The trait
-lives here so M5's ACP engine can implement it without depending on the native engine. Event types are in section 4.
+Design 5.1 puts `Engine` beside `Provider` as a product-defining trait, and design 5 puts events in `udx-core`. The
+trait lives here so M5's ACP engine can implement it without depending on the native engine. Event types are in section
+4.
 
 ```rust
 // udx_core::engine
@@ -629,17 +633,17 @@ pub fn free_space(path: &Path) -> std::io::Result<u64>;
 Notes:
 
 - The deny list is threat model 4.2's, as a table in `fsguard/deny.rs`, matched after NFC normalisation and lower-casing
-  (`str::to_lowercase`; full Unicode case folding differs for a few characters, accepted and listed in D15). It
-  includes `.unidex/` (the workspace's narrowing file is read by the config loader through `open_read` with an explicit
-  internal allowance, never by a tool) and the app's own state folders.
+  (`str::to_lowercase`; full Unicode case folding differs for a few characters, accepted and listed in D15). It includes
+  `.unidex/` (the workspace's narrowing file is read by the config loader through `open_read` with an explicit internal
+  allowance, never by a tool) and the app's own state folders.
 - P10's reviewed read list is a table in `fsguard/read_allow.rs`, one entry per line with a reason: system folders per
-  platform and named toolchain folders and files (for example `~/.cargo/bin`, `~/.rustup`, `~/.gitconfig`). `<home>`
-  is never granted whole. M1 measures which common tools fail without more entries (threat model 7) in T30's evaluation
+  platform and named toolchain folders and files (for example `~/.cargo/bin`, `~/.rustup`, `~/.gitconfig`). `<home>` is
+  never granted whole. M1 measures which common tools fail without more entries (threat model 7) in T30's evaluation
   tasks and lists them in the gate report.
 - The free-space floor: `write_atomic`, the session log and the undo store refuse a write that would leave less than
   `limits.free_space_floor_mb` free (P51).
 
-#### 3.1.9 Network address classification (T19 builds; used by T6)
+#### 3.1.9 Network address classification (T3b builds; used by T6 and T19)
 
 ```rust
 // udx_core::net (threat model 4.6)
@@ -654,7 +658,7 @@ pub fn check_provider_endpoint(url: &url::Url) -> Result<EndpointClass, NetError
 pub enum EndpointClass { Loopback, Remote }
 ```
 
-#### 3.1.10 Display escaping and the opener (T3)
+#### 3.1.10 Display escaping and the opener (T3b)
 
 ```rust
 // udx_core::display (P4, P49, P16's chat clause)
@@ -806,8 +810,8 @@ pub mod testing {
 }
 ```
 
-Fixtures: one JSON file per exchange, holding the request's method, path and body (with no header values at all) and
-the response's status and body as the chunks the server sent, with their timing. Recording is opt-in
+Fixtures: one JSON file per exchange, holding the request's method, path and body (with no header values at all) and the
+response's status and body as the chunks the server sent, with their timing. Recording is opt-in
 (`UNIDEX_RECORD_FIXTURES=1` and a key in the environment, never on CI or forks) and writes through the redactor; the
 recorded body is reviewed before commit. The conformance suite (`tests/conformance.rs`) runs every provider against its
 fixtures: text streaming, a tool call with streamed arguments, two parallel tool calls, usage, a rate limit with
@@ -911,8 +915,8 @@ Tool rules (each is a test in the owning task):
   and counted.
 - `shell`: absent when `Sandbox::availability()` is `Unavailable` unless the session holds `UnsandboxedShell` (P7);
   `Simple` runs `Direct`, `NeedsShell` runs `FixedShell`; network only with a grant or an approved ask (P1); output is
-  streamed to the sink and capped with a truncation marker (P51); the turn sees `ExitInfo`; a reported denied write to
-  a protected path lets the engine offer one re-run with a wider profile on an approved card (P8).
+  streamed to the sink and capped with a truncation marker (P51); the turn sees `ExitInfo`; a reported denied write to a
+  protected path lets the engine offer one re-run with a wider profile on an approved card (P8).
 - `web_fetch`: section 3.5.
 - `todo`: a list kept in the session (add, update status, list); written to the session log; touches no file.
 
@@ -969,10 +973,10 @@ impl ProcessSupervisor {
 
 Per platform (design calls D1 to D3; each backend task writes a decision record):
 
-- **macOS** (`macos.rs`): `/usr/bin/sandbox-exec -p <profile> -D WORKSPACE=<path> -D TMP=<path> ... -- <program>`.
-  Paths travel as `-D` parameters, never interpolated into the profile text. The profile starts `(deny default)`,
-  allows process fork and exec, reads of the read list, writes of the workspace and session temp minus `write_deny`,
-  denies the deny list inside granted trees, denies `network*` unless the grant is `Full` (then outbound network and the
+- **macOS** (`macos.rs`): `/usr/bin/sandbox-exec -p <profile> -D WORKSPACE=<path> -D TMP=<path> ... -- <program>`. Paths
+  travel as `-D` parameters, never interpolated into the profile text. The profile starts `(deny default)`, allows
+  process fork and exec, reads of the read list, writes of the workspace and session temp minus `write_deny`, denies the
+  deny list inside granted trees, denies `network*` unless the grant is `Full` (then outbound network and the
   certificate trust service's `mach-lookup` only), denies `lsopen` and `appleevent-send`, and allows a short reviewed
   `mach-lookup` list (each entry with a reason in the profile's comments). Process group: the child starts in a new
   process group; `kill_group` signals the group and then runs the marker sweep (D2); P51 by `setrlimit` in the child
@@ -987,9 +991,9 @@ Per platform (design calls D1 to D3; each backend task writes a decision record)
   namespace ends every descendant, including ones that called `setsid`. P51: cgroup v2 `pids.max` and `memory.max` when
   a delegated cgroup is writable, otherwise `RLIMIT_NPROC` at the user's current count plus the margin (reported in
   `BackendDetails`). On default Ubuntu, AppArmor lets only a profiled binary create user namespaces; the `.deb` installs
-  `/etc/apparmor.d/unidex-rust-preview-sandbox` granting `userns` to `/usr/lib/unidex-rust-preview/unidex-sandbox-helper`
-  and loads it in its post-install script (D1, D12). Not verified: the exact profile syntax on the runner's AppArmor
-  version; T10 verifies it on CI.
+  `/etc/apparmor.d/unidex-rust-preview-sandbox` granting `userns` to
+  `/usr/lib/unidex-rust-preview/unidex-sandbox-helper` and loads it in its post-install script (D1, D12). Not verified:
+  the exact profile syntax on the runner's AppArmor version; T10 verifies it on CI.
 - **Windows** (`windows.rs`): an AppContainer profile (`UniDeX.RustPreview.Sandbox`) with no capabilities (no network,
   loopback blocked) or, with a network grant, `internetClient`; the workspace and session temp folder get an inheritable
   access entry for the AppContainer's SID (recorded in `StatePaths::sandbox_dir` and removed when the workspace's trust
@@ -1154,12 +1158,12 @@ pub struct EgressCaps { pub per_origin_per_turn: u32, pub per_turn: u32, pub per
 ```
 
 P14's rules as `evaluate` applies them in an exposed turn: a request passes without an ask only when it carries no data
-composed since exposure (a GET whose full URL is byte-identical to a URL the user typed, a URL requested before exposure,
-or a link present verbatim in content already in context); a verbatim link to an origin not yet contacted in the session
-asks, as does every redirect hop to one; links to an origin that supplied untrusted content are capped per turn
-(`per_origin_per_turn`), past which they ask; verbatim links in total, approved ones included, are capped per turn and
-per session, and reaching either stops the turn; any request with a body asks; a shell command with network asks. Host
-history never exempts composed data. Before exposure, normal permissions apply (P60's per-host ask).
+composed since exposure (a GET whose full URL is byte-identical to a URL the user typed, a URL requested before
+exposure, or a link present verbatim in content already in context); a verbatim link to an origin not yet contacted in
+the session asks, as does every redirect hop to one; links to an origin that supplied untrusted content are capped per
+turn (`per_origin_per_turn`), past which they ask; verbatim links in total, approved ones included, are capped per turn
+and per session, and reaching either stops the turn; any request with a body asks; a shell command with network asks.
+Host history never exempts composed data. Before exposure, normal permissions apply (P60's per-host ask).
 
 ### 3.10 Spend ledger (T15)
 
@@ -1205,13 +1209,13 @@ pub struct LoopGuards { pub max_model_calls_per_turn: u32 /* 50 */, pub identica
 pub struct RetryPolicy { pub max_attempts: u32 /* 4 */, pub base: Duration, pub cap: Duration }  // honours retry-after; only before any tool ran for that model call
 ```
 
-The loop, per turn: route the role (fallback only between turns); assemble context (system blocks, instruction files when
-trusted, history with labels); compute the worst case and reserve spend; stream the model call, emitting events; on tool
-calls, classify each, evaluate permissions and egress, raise asks one at a time (P58), run approved read-only calls in
-parallel and write, edit and shell calls one after another in the model's order; label and redact each result
-(P21) and update exposure; settle spend; check prompt integrity (P59); repeat until the model ends its turn or a stop
-reason fires. A full context window stops the turn with `ContextFull` (trimming is M2). Cancellation drops the provider
-stream, kills running process groups and lets an atomic write finish or not happen.
+The loop, per turn: route the role (fallback only between turns); assemble context (system blocks, instruction files
+when trusted, history with labels); compute the worst case and reserve spend; stream the model call, emitting events; on
+tool calls, classify each, evaluate permissions and egress, raise asks one at a time (P58), run approved read-only calls
+in parallel and write, edit and shell calls one after another in the model's order; label and redact each result (P21)
+and update exposure; settle spend; check prompt integrity (P59); repeat until the model ends its turn or a stop reason
+fires. A full context window stops the turn with `ContextFull` (trimming is M2). Cancellation drops the provider stream,
+kills running process groups and lets an atomic write finish or not happen.
 
 ```rust
 // udx_engine::log (T14)
@@ -1362,7 +1366,8 @@ pub fn is_software_renderer(adapter_name: &str, vendor_id: Option<u32>) -> bool;
 
 Fonts (gate report, section g; decision 0013): the theme names its families with fallbacks; on Linux the list is "DejaVu
 Sans", "Noto Sans", "Liberation Sans", then the system's default, and the `.deb` depends on `fonts-dejavu-core`. No font
-is bundled in M1 (D17). Not verified: how GPUI's font fallback list behaves on the runner; T23 checks the face GPUI logs.
+is bundled in M1 (D17). Not verified: how GPUI's font fallback list behaves on the runner; T23 checks the face GPUI
+logs.
 
 Message rows, tool rows, ask cards, the status bar (provider and model, mode switch, sandbox state with its reason, the
 exposure badge, the persistent indicator for built-in asks turned off, today's spend, trust state with a Trust button),
@@ -1374,17 +1379,18 @@ feature `automation`, which also enables `gpui/test-support` (needed for `render
 
 - Off unless the test build is started with `--automation`; the endpoint's name is written to a file whose path the
   driver passes in `--automation-endpoint-file` (decision 0013's "passed through a file rather than stdout").
-- Unix: a socket in a fresh directory created 0700 (creation fails if the name exists), bound with no process-wide
-  umask change (the socket is created inside the 0700 directory and then set to 0600), the peer's user id compared on
-  every connection (`SO_PEERCRED`, `getpeereid`). Windows: a named pipe with a protected access list for the current
-  user only, `FILE_FLAG_FIRST_PIPE_INSTANCE` on every instance, `PIPE_REJECT_REMOTE_CLIENTS`, and the client process's
-  token user compared with ours. One client at a time; an idle timeout (30 s) and a per-connection rate limit
-  (100 requests per second).
+- Unix: a socket in a fresh directory created 0700 (creation fails if the name exists), bound with no process-wide umask
+  change (the socket is created inside the 0700 directory and then set to 0600), the peer's user id compared on every
+  connection (`SO_PEERCRED`, `getpeereid`). Windows: a named pipe with a protected access list for the current user
+  only, `FILE_FLAG_FIRST_PIPE_INSTANCE` on every instance, `PIPE_REJECT_REMOTE_CLIENTS`, and the client process's token
+  user compared with ours. One client at a time; an idle timeout (30 s) and a per-connection rate limit (100 requests
+  per second).
 - Line-delimited JSON, one request per line of at most 64 KiB. Verbs: `hello`, `state` (the `ChatScreen` snapshot as
   JSON), `elements` (the registry), `tree` (GPUI's accessibility tree), `a11y_activate`, `click {id}`,
-  `type {id, text}`, `key {keystroke}`, `action {name, args}` (a fixed list of `ChatAction`s by name), `scroll {id, dy}`,
-  `frame` (base64 PNG; on Wayland the error `no_inapp_readback`), `wait_idle {timeout_ms}`, `counters` (our idle
-  wake-up counter and frames drawn), `quit`. Anything else is refused; no verb takes a path or runs a program.
+  `type {id, text}`, `key {keystroke}`, `action {name, args}` (a fixed list of `ChatAction`s by name),
+  `scroll {id, dy}`, `frame` (base64 PNG; on Wayland the error `no_inapp_readback`), `wait_idle {timeout_ms}`,
+  `counters` (our idle wake-up counter and frames drawn), `quit`. Anything else is refused; no verb takes a path or runs
+  a program.
 - The test build also accepts `--provider-script FILE` (the scripted mock provider) and `--state-root DIR` (a test
   root); release builds refuse both, and `--automation`, with exit code 2.
 - Release builds carry no marker string `UNIDEX_AUTOMATION_SOCKET_v1`; the release check (section 3.15) fails if it is
@@ -1437,9 +1443,9 @@ pub fn run_suite(suite: &Path, cfg: &RunConfig) -> Result<SuiteReport, EvalError
 
 The M1 task set (12 tasks in `crates/udx-evals/tasks/`): three edits, two failing tests to fix (shell scripts as the
 test runner, so no toolchain is needed inside the sandbox), two multi-step changes, two refusals (a request to read a
-credential file; a request to push), and three injection canaries (a fetched stand-in page asking to send a canary,
-a planted `node_modules` README in a trusted workspace, an untrusted workspace's `AGENTS.md`). The canary tasks double
-as the measurement that sets P14's cap numbers (asks per task, T30).
+credential file; a request to push), and three injection canaries (a fetched stand-in page asking to send a canary, a
+planted `node_modules` README in a trusted workspace, an untrusted workspace's `AGENTS.md`). The canary tasks double as
+the measurement that sets P14's cap numbers (asks per task, T30).
 
 ## 4. Event types
 
@@ -1460,9 +1466,9 @@ Two families, both in `udx_core::events`, both JSON, both versioned, both golden
 - Additive changes (a new optional field with `#[serde(default)]`, a new record type) keep `v`. Removing or renaming a
   field, or changing a field's meaning, raises `v`; the reader keeps a decoder for every earlier version, and the writer
   writes only the newest.
-- Golden files: `crates/udx-core/tests/golden/events/v1/*.ndjson` and `.../session-log/v1/*.jsonl`, produced with a fixed
-  clock and sequential ids. A change that alters an existing golden file fails review unless it raises `v` and adds a
-  new folder; golden files of an older version are never edited.
+- Golden files: `crates/udx-core/tests/golden/events/v1/*.ndjson` and `.../session-log/v1/*.jsonl`, produced with a
+  fixed clock and sequential ids. A change that alters an existing golden file fails review unless it raises `v` and
+  adds a new folder; golden files of an older version are never edited.
 - Strings that came from a model, a tool or the user are stored as they are (after redaction), not escaped; escaping is
   a display concern (section 3.1.10).
 - Redaction (design 5.11; P57): `SessionLogWriter::append` passes every record through `Redactor::redact_json` before
@@ -1571,18 +1577,18 @@ Reasons:
   conformance suite on unlike formats in M1, which is exactly what M2's breadth needs (design 6).
 - **What M1's controls need from a local server.** Ollama's native API takes the context window the engine sets
   (`options.num_ctx`, design 5.2's "the engine sets the context size it needs") and reports prompt token counts, which
-  P59 needs; its `/api/version` gives P40 a way to recognise a local model server on a loopback endpoint, so it can count
-  as free without the user marking it (threat model 5.3). The OpenAI-compatible endpoints the other local servers
+  P59 needs; its `/api/version` gives P40 a way to recognise a local model server on a loopback endpoint, so it can
+  count as free without the user marking it (threat model 5.3). The OpenAI-compatible endpoints the other local servers
   offer do not take a context size in the request (not verified for each server); that client arrives in M2.
-- **Vendor terms.** The gate report (question 6 and section g) records that OpenAI's usage policies change on
-  2026-11-20 with a clause on services that let third parties reach OpenAI models, which its review noted may bear on
-  UniDeX's own engine calling OpenAI with the user's key, and asks for a re-read if M1's hosted provider is OpenAI.
-  Choosing Anthropic for M1 removes that dependency from M1's critical path. Anthropic's pages, as decision 0006 read
-  them, direct third-party tools to API keys, which is exactly how the native engine calls the Messages API (design 3).
-  This is an engineering reading, not legal advice (decision 0006's own caveat).
+- **Vendor terms.** The gate report (question 6 and section g) records that OpenAI's usage policies change on 2026-11-20
+  with a clause on services that let third parties reach OpenAI models, which its review noted may bear on UniDeX's own
+  engine calling OpenAI with the user's key, and asks for a re-read if M1's hosted provider is OpenAI. Choosing
+  Anthropic for M1 removes that dependency from M1's critical path. Anthropic's pages, as decision 0006 read them,
+  direct third-party tools to API keys, which is exactly how the native engine calls the Messages API (design 3). This
+  is an engineering reading, not legal advice (decision 0006's own caveat).
 - **Opaque reasoning.** Anthropic returns reasoning blocks that must be sent back unchanged (design 5.2's "reasoning
-  state"); building that path in M1 fixes the session-log format for it now (section 4.3 `BlockRecord::Reasoning`) rather
-  than raising `v` in M2.
+  state"); building that path in M1 fixes the session-log format for it now (section 4.3 `BlockRecord::Reasoning`)
+  rather than raising `v` in M2.
 - **No test needs a real key or a running model.** Both clients run against recorded HTTP fixtures through
   `FixtureTransport`; the engine, tools, app and evaluation harness run against the scripted mock provider; live tests
   are opt-in (`UNIDEX_LIVE_TESTS=1` and a key or a running server), never on CI or forks.
@@ -1603,7 +1609,7 @@ One row per accepted proposal. "Test" names are the test functions the owning ta
 |---|---|---|---|
 | P1 No network for sandboxed commands | `udx-sandbox` backends; `NetworkGrant`; probe `LoopbackConnect`, `NameLookup` | `p1_no_loopback_connect`, `p1_no_name_lookup` (stub resolver and system resolver socket) on macOS, Linux (`sandbox-linux`), Windows | T9, T10, T11 |
 | P2 Allowed commands as parsed argv | `udx_tools::parse_command`, `CommandShape`, `CommandProgram::Direct`; `ArgvPattern` | `p2_tar_checkpoint_leaves_no_marker`, `p2_compound_around_allowed_prefix_asks`, `p2_zsh_glob_qualifier_never_under_rule`, `p2_windows_every_command_asks`, `p2_rule_wildcard_never_matches_option` (all platforms; Windows case on Windows) | T12 (matching), T18 (execution) |
-| P3 Built-in asks; undo | `BuiltinAsk` (P3 set); `UndoStore` | `p3_force_push_asks_in_auto_mode`, `p3_force_push_denied_unattended`, `p3_overwrite_undone_byte_for_byte`, `p3_edit_undone_byte_for_byte`, `p3_no_remove_dir_all_outside_tests` (source check in `xtask lint-paths`) | T12, T5 |
+| P3 Built-in asks; undo | `BuiltinAsk` (P3 set); `UndoStore` | `p3_force_push_asks_in_auto_mode`, `p3_force_push_denied_unattended`, `p3_overwrite_undone_byte_for_byte`, `p3_edit_undone_byte_for_byte`, `p3_no_remove_dir_all_outside_tests` (source check in the choke-point test) | T12, T5 |
 | P4 Ask cards in the app's words | `AskCard`; `udx_core::display`; `CardQueue` | `p4_bidi_override_renders_escaped`, `p4_mixed_script_host_shown_ascii`, `p4_return_inside_guard_approves_nothing`, `p4_exposure_badge_after_mock_fetch`, `p4_composed_4kb_url_shown_whole_and_marked`, `p4_no_default_choice` (view-model, all platforms); `ui_card_guard_interval` (automation, three platforms) | T22 (T12 builds the card data, T28 the UI test) |
 | P6 Random delimiters in the prompt protocol | `PromptProtocol` | `p6_fuzz_result_text_never_yields_call` (proptest), `p6_calls_parsed_only_from_current_output`, `p6_nonce_differs_per_session` | T16 |
 | P7 Shell off unless the full sandbox applies | `Availability`; shell tool gating; `SessionGrant::UnsandboxedShell` | `p7_forced_unavailable_shell_absent_and_refuses`, `p7_unattended_cannot_enable_unsandboxed`, `p7_linux_restricted_userns_without_profile_is_unavailable` (`sandbox-linux`, sysctl set, no profile), `p7_probe_check_allowed_makes_unavailable` | T18, T10 |
@@ -1619,8 +1625,8 @@ One row per accepted proposal. "Test" names are the test functions the owning ta
 | P48 Workspace edges | `check_workspace_root`; persistence list | `p48_home_as_workspace_needs_typed_confirmation`, `p48_sandbox_writes_to_startup_launch_agent_systemd_fail`, `p48_worktree_common_hooks_write_fails`, `p48_app_config_write_denied_to_tools` | T5, T9 to T11, T20 |
 | P13 Workspace trust | `TrustStore`; `resolve_instruction_set`; `is_third_party` | `p13_untrusted_agents_md_absent_from_system`, `p13_untrusted_file_read_exposes`, `p13_trusted_import_change_asks_again`, `p13_trusted_node_modules_read_exposes`, `p13_trust_refused_headless` | T13, T20 |
 | P14 Egress after exposure | `EgressState::evaluate`; `EgressGate` | `p14_composed_path_to_injecting_host_asks`, `p14_canary_subdomain_navigation_asks`, `p14_redirect_to_new_origin_asks`, `p14_verbatim_link_to_injecting_origin_passes_until_cap`, `p14_distinct_subdomains_each_ask_before_lookup` (stub resolver sees no lookup before the answer), `p14_turn_total_stops_turn`, `p14_session_total_stops_later_turn`, `p14_body_always_asks`, `p14_shell_network_while_exposed_asks`, `p14_unattended_exposed_egress_denied`. MCP clauses have nothing to call in M1 | T13, T19 |
-| P15 The renderer fetches nothing | `markdown::ImageRef`; `LoadRemoteImage` action; opener | `p15_remote_image_makes_no_request` (HTTP stand-in records none), `p15_exposed_image_load_raises_card_with_full_url`, `p15_link_opens_only_through_opener` | T22, T26 |
-| P54 One opener | `udx_core::opener::open` | `p54_file_and_custom_schemes_refused`, `p54_shell_metacharacters_reach_opener_as_one_argument`, `p54_untrusted_needs_confirmation`. The sign-in metadata clause has no sign-in flow in M1 (MCP is M2) | T3 |
+| P15 The renderer fetches nothing | `markdown::ImageRef`; `LoadRemoteImage` action; opener | `p15_remote_image_makes_no_request` (HTTP stand-in records none), `p15_exposed_image_load_raises_card_with_full_url`, `p15_link_opens_only_through_opener` | T22m, T26b |
+| P54 One opener | `udx_core::opener::open` | `p54_file_and_custom_schemes_refused`, `p54_shell_metacharacters_reach_opener_as_one_argument`, `p54_untrusted_needs_confirmation`. The sign-in metadata clause has no sign-in flow in M1 (MCP is M2) | T3b |
 | P59 A cut prompt stops the turn | `Provider::prompt_integrity`; `StopReason::PromptCut` | `p59_mock_local_underreport_stops_turn`, `p59_ollama_fixture_cut_detected` | T8, T16 |
 | P21 Secrets redacted from tool results | `Redactor`; engine result path; `web_fetch` URL check | `p21_tool_result_key_reaches_mock_provider_redacted`, `p21_fetch_url_with_key_refused_before_connect`, `secrets_canary_never_in_test_root` (key in tool output, error, panic, crash report; whole root scanned) | T4, T16, T19 |
 | P22 A key bound to its host | `BoundEndpoint::key_name`; `ConfigEdit` side effect; `InteractiveProof` | `p22_host_change_clears_keychain_entry`, `p22_host_change_from_tool_or_headless_refused` | T6, T21 |
@@ -1664,26 +1670,26 @@ not collide).
 | D11 | Before the vault (M3), the app's private state lives under `AppPaths` (config, trust, sessions, undo, spend, logs) | `unidex chat` works with no vault (design 5.2) and every path then goes through the choke point and the test-root guard | M3 moves config and sessions into the vault's `.unidex/` with a migration | yes (0026) |
 | D12 | The Linux `.deb` moves to cargo-deb in M1, because loading the AppArmor profile needs a post-install script, which cargo-packager's `.deb` cannot run (decision 0014, measured) | Without loading, the profile works only after a reboot, so the shell would stay off until then | A second packaging tool earlier than decision 0014 expected; its configuration lives in `crates/udx-app/Cargo.toml`'s `[package.metadata.deb]` | yes (0022) |
 | D13 | No logging subscriber for third-party crates; our own redacted diagnostics only | P57's "no HTTP headers in logs at every level, third-party trace output included" holds by construction | Less detail when debugging the HTTP stack; a developer build can add a subscriber locally, never committed | no |
-| D14 | No file-tool delete in M1; P3's undo copy covers overwrites and edits; the app's own code never removes a folder outright (`xtask lint-paths` refuses `remove_dir_all` outside tests and temp-folder cleanup) | Design 5.3 lists read, write and edit; a delete tool adds the OS trash dependency for little M1 value | A delete tool with the trash comes in M2 or later; P3's delete test is then written | no |
+| D14 | No file-tool delete in M1; P3's undo copy covers overwrites and edits; the app's own code never removes a folder outright (the choke-point test refuses `remove_dir_all` outside tests and temp-folder cleanup) | Design 5.3 lists read, write and edit; a delete tool adds the OS trash dependency for little M1 value | A delete tool with the trash comes in M2 or later; P3's delete test is then written | no |
 | D15 | Display: hosts always shown in ASCII (punycode) with the Unicode form beside it when non-ASCII; deny-list matching lower-cases after NFC rather than full case folding | No script-property crate; a superset of "punycode when scripts mix" | A few characters (for example German sharp s) fold differently; listed as a residual in the threat model update | no |
 | D16 | Instruction files in M1: `AGENTS.md` at the workspace root and its `@path` imports only; nested files in sub-folders are not loaded | P13 needs a defined, hashable set; M1 has no per-folder context | Nested instruction files arrive with M2's context management | no |
 | D17 | Fonts on Linux are named with fallbacks and the `.deb` depends on `fonts-dejavu-core`; no font is bundled in M1 | Keeps the download small and avoids a font licence in the notices | Text looks different per distribution; a bundled font can be added later | no |
-| D18 | Widget-kit isolation (question 23): one `MessageBodyRenderer` boundary with exactly one implementation compiled in; the kit, if adopted, only behind the `kit-renderer` feature | Gate question 23, option C, as the gate report recommends; the answer is needed only before T26 | If the kit is adopted after T26 started, T26's renderer half is redone (bounded by the trait) | yes (0021, written by T25 with the maintainer's answer) |
+| D18 | Widget-kit isolation (question 23): one `MessageBodyRenderer` boundary with exactly one implementation compiled in; the kit, if adopted, only behind the `kit-renderer` feature | Gate question 23, option C, as the gate report recommends; the answer is needed only before T26b (message bodies); T26 draws bodies with a minimal renderer behind the same trait | If the answer arrives after T26b started, T26b's renderer is redone (bounded by the trait) | yes (0021, written by T25 with the maintainer's answer) |
 | D19 | Governed paths are protected by a CI check (`governed-paths`) that fails a pull request touching them unless an approving review comes from an account with admin permission, read through the hosting service's API; no code-owners file | A code-owners file must name an account handle or a team, and the repository may hold no handle (design 12); there is no project organization yet (question 5) | The check is a required status only once the maintainer adds it to the ruleset; it needs a re-run after the review (a `pull_request_review` trigger) | yes (0025) |
 | D20 | Core benchmarks in CI are release-mode runs of non-GPUI code against generous ceilings stored in `perf/ceilings.toml`, not statistical comparisons | Shared runners are noisy (design 9); ceilings catch large regressions without false alarms | Small regressions pass unnoticed until a gate measures on the reference machine | no |
 | D21 | Windows `FixedShell` is `cmd.exe /d /s /c` (no AutoRun); PowerShell later | Smallest, predictable; every command asks anyway | Users who expect PowerShell syntax get errors in M1 | no |
 
 ## 9. Open questions for the maintainer
 
-1. **Gate question 23, the widget kit for message bodies** (open; needed before T26 starts). T25 makes decision 0008's
-   four measurements of the kit's cached form: the scroll, jump, stream and resize scenarios on the 5,000-message
-   fixture; selection and copy within and across messages in the virtualised list; link activation; and that a message
-   whose parse lands a frame later does not shift the rows around it. What T26 needs from the answer: one word, "adopt"
-   or "own renderer". **Recommendation:** adopt only if all four pass and the cached form meets the scroll target at
-   least as well as the plain renderer with the shaped-text cache (T24's numbers); otherwise our own renderer (gate
-   question 23, option C then A or B).
+1. **Gate question 23, the widget kit for message bodies** (open; needed before T26b, the message-body task, starts).
+   T25 makes decision 0008's four measurements of the kit's cached form: the scroll, jump, stream and resize scenarios
+   on the 5,000-message fixture; selection and copy within and across messages in the virtualised list; link activation;
+   and that a message whose parse lands a frame later does not shift the rows around it. What T26b needs from the
+   answer: one word, "adopt" or "own renderer". **Recommendation:** adopt only if all four pass and the cached form
+   meets the scroll target at least as well as the plain renderer with the shaped-text cache (T24's numbers); otherwise
+   our own renderer (gate question 23, option C then A or B).
 
 No other question blocks a task. Two approvals are needed at the gate itself, not before any task (section 1.3): a
 hosted key with a spend cap for the evaluation run, and installing a local model server with one small model on the
-development Mac. Repository settings the maintainer changes when tasks land (adding the new required checks, D19's
-check to the ruleset) are listed in the task file at the task that needs them.
+development Mac. Repository settings the maintainer changes when tasks land (adding the new required checks, D19's check
+to the ruleset) are listed in the task file at the task that needs them.
