@@ -96,3 +96,13 @@ the current plan under `docs/design/plans/`.
 | 2026-11-18 | M1 | Architecture and plan, fix rounds 2 and 3 | fix author | Opus | 2 | 607k | done; round 2 fixed 2 partly resolved and 5 new important findings, round 3 fixed 2 more | #18 |
 | 2026-11-18 | M1 | Architecture and plan | re-reviewer | Opus | 3 | 598k | approved after three fix rounds; three clarifications carried to Tasks 2b, 6 and 24 | #18 |
 | 2026-11-18 | M1 | Start of M1 and its budget | maintainer's decision | not applicable | 1 | not applicable | M1's start approved; milestone cap of 52M tokens, full scope, check-ins at 11M, 22M and 33M | #18 |
+| 2026-11-18 | M1 | Task 1b path guard | test author | Sonnet | 1 | 165k | 21 tests written first | #19 |
+| 2026-11-18 | M1 | Task 1b path guard | builder | Sonnet | 3 | 244k | done after two fix rounds | #19 |
+| 2026-11-18 | M1 | Task 1b path guard | reviewer | Opus | 3 | 346k | approved: round 1 found 5 important and 15 minor findings, all important ones fixed; round 2 closed 6 notes | #19 |
+| 2026-11-18 | M1 | Task 1c governed paths | test author | Sonnet | 1 | 111k | 4 tests written first | #20 |
+| 2026-11-18 | M1 | Task 1c governed paths | builder | Sonnet | 3 | 224k | done after two fix rounds | #20 |
+| 2026-11-18 | M1 | Task 1c governed paths | reviewer | Opus | 2 | 294k | approved: round 1 found 1 critical, 3 important and 6 minor findings, all but one optional nit fixed | #20 |
+| 2026-11-18 | M1 | Task 1c governed paths | security reviewer | Opus | 3 | 330k | safe to merge: round 1 found 2 critical and 4 important ways to evade the flag, round 2 found 2 more, all fixed | #20 |
+| 2026-11-18 | M1 | Contract amendments after Tasks 1b and 1c | builder | Sonnet | 1 | 199k | done | #23 |
+| 2026-11-18 | M1 | Contract amendments after Tasks 1b and 1c | reviewer | Sonnet | 1 | 175k | approved, 6 minor notes left | #23 |
+| 2026-11-18 | M1 | Task 1c governed paths, checks after merge | controller | not applicable | 1 | not recorded | observed on two scratch pull requests (21 and 22, closed, branches deleted): the job ran from the base branch and passed; it flagged an edited, a renamed, a deleted and a mode-changed governed file and twelve new ones, and not an ungoverned file; the hosting service showed 10 of 16 annotations, the job log and summary all 16; the check attached to the pull request's head commit; a copy of the workflow edited to print nothing was still flagged; retargeting to the default branch started a new run against the new base; a commit marked to skip CI still started the run. Not checked: that the listed files match the head when a run starts seconds after a push | #20 |

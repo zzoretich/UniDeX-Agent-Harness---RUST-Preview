@@ -50,11 +50,25 @@ Every builder's brief carries this section and the Review Focus with the task's 
   - The privacy gate's own tests (`xtask/tests/`) keep their path-scoped allow entries, because they test the rules.
   - The allow files (`privacy-allow.toml`, `.gitleaks.toml`) are frozen after T2a. A task whose vector cannot follow
     the convention stops and reports.
-- **Governed paths: flag and review (D19, decided by the maintainer on 2026-11-17).** A pull request that touches the
-  privacy gate's code or tests, `privacy-allow.toml`, `.gitleaks.toml`, a workflow, `deny.toml` or `.cargo/` is flagged
-  by the base-branch check `governed-paths (flag)` (T1c). Every such pull request gets an extra security review by an
-  Opus reviewer limited to the governed files, and the controller reports each such change to the maintainer. Enforced
-  human approval is owed until a second account exists; no account handle goes into the repository.
+- **Governed paths: flag and review (D19, decided by the maintainer on 2026-11-17).** A pull request that touches a
+  governed path is flagged by the base-branch check `governed-paths (flag)` (T1c). The governed set, as decision record
+  0025 gives it (patterns anchored at the repository root, `*` never crossing a folder separator, letter case ignored;
+  the rows that begin `**/` apply at any depth): `xtask/**`, `privacy-allow.toml`, `.gitleaks.toml`, `.gitleaksignore`,
+  `.github/**`, `deny.toml`, `.deny.toml`, `**/.cargo`, `**/.cargo/**`, `**/.gitattributes`, `.gitmodules`,
+  `Cargo.toml` (the root manifest only), `rust-toolchain.toml`, `rust-toolchain`, `CODEOWNERS`, `docs/CODEOWNERS`,
+  `crates/udx-core/src/paths.rs`, `crates/udx-core/src/lib.rs` and
+  `docs/decisions/0025-governed-paths-review.md`. If this list and the record ever differ, the record is
+  authoritative. Two rules of the record widen it: any file whose name contains a non-ASCII character is flagged, and
+  names are also matched after case folding. `Cargo.lock` is deliberately not governed. Every flagged pull request gets
+  an extra security review by an Opus reviewer limited to the governed files, and the controller reports each such
+  change to the maintainer. Process rule (record 0025): a governed-paths run that failed, was cancelled, is missing, is
+  stale or reported an incomplete list counts as flagged; the run is identified by its workflow file and its
+  `pull_request_target` event, not by a check name; before every merge the controller also runs the base branch's
+  `cargo xtask governed --name-status` on the output of `git diff --name-status -z --find-renames` between the base
+  and the branch. Enforced human approval is owed until a second account exists; no account handle goes into the
+  repository. Because `xtask/**` and the root `Cargo.toml` are governed, the tasks that edit them or another governed
+  file (the shared-files table and each task's Files line) are each flagged, and the controller plans the extra
+  security review for each: T1a, T1b, T1c, T1d, T2a, T6, T11, T32, T33 and T35.
 - **Provenance (design 11.4).** Read permissively licensed code as reference only; copy nothing from code under any
   other licence; do not read or describe the editor GPUI comes from beyond what decision 0007 says. A fragment adapted
   from permissively licensed code carries its attribution in a comment and in the third-party notices.
@@ -327,18 +341,18 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     governed file and writes a job summary table of them, and exits 0 whether or not any were found. It exits nonzero
     only on its own error (an unreadable list, an API failure upstream). File names are data: every name is escaped
     for workflow commands (`%`, carriage return, newline, `:` and `,` in properties) before it is printed.
-  - The governed list, as one table in `governed.rs` with a reason per row: `xtask/src/privacy/**`,
-    `xtask/src/hooks.rs`, `xtask/src/governed.rs`, `xtask/tests/privacy*.rs`, `xtask/tests/secrets.rs`,
-    `xtask/tests/hooks.rs`, `xtask/tests/github_committer.rs`, `xtask/tests/governed.rs`, `privacy-allow.toml`,
-    `.gitleaks.toml`, `.github/workflows/**`, `deny.toml`, `.cargo/**`.
+  - The governed list, as one table in `governed.rs` with a reason per row: the set given in the Global Constraints
+    bullet "Governed paths: flag and review" (record 0025 is authoritative). The brief's first, shorter list was
+    widened during the task; see "As built" below.
   - The process rule (Global Constraints): every flagged pull request gets an extra Opus security review limited to
     the governed files, and the controller reports each such change to the maintainer.
   - Record 0025 states the decision with the maintainer's answer, and lists as owed, for the gate report, enforced
     human approval (a ruleset requirement, by a code-owners file or otherwise) once a second account exists (outside
     contributors or a bot account for the build agents). No account handle goes into the repository.
-- **Tests:** `governed_list_matches_record` (each listed path is flagged; near misses such as `xtask/src/release_check.rs`
-  and `docs/build/LEDGER.md` are not); `governed_names_escaped_in_annotations` (a file name holding a newline, `%` and
-  `::` cannot inject a workflow command); `governed_exits_zero_when_flagged`; `governed_fails_on_unreadable_list`.
+- **Tests:** `governed_list_matches_record` (each listed path is flagged; near misses such as
+  `crates/udx-core/src/state.rs` and `docs/build/LEDGER.md` are not); `governed_names_escaped_in_annotations` (a
+  file name holding a newline, `%` and `::` cannot inject a workflow command); `governed_exits_zero_when_flagged`;
+  `governed_fails_on_unreadable_list`.
 - **Done when.** The common commands. After merge (a `pull_request_target` workflow runs only from the base branch, so
   it cannot judge its own pull request), the controller observes and records in the ledger: a scratch pull request
   touching `deny.toml` shows the annotation and the summary and the check passes; a scratch pull request that edits
@@ -351,6 +365,22 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Repository settings.** None required. The maintainer may add `governed-paths (flag)` to the required checks; it
   fails only on its own error.
 - **Record.** 0025.
+- **As built (amended 2026-11-18).** The reviews added to the task's text, all recorded in decision record 0025, which
+  is the authority for the governed set and the process rule:
+  - The list the workflow hands over holds the previous name of a renamed or copied file as well as its new name, each
+    ended by a NUL byte, so a governed file moved out of the governed set is flagged under its old name.
+  - The workflow also runs on the `edited` event, so a change of the pull request's base branch is checked again.
+  - It passes the changed-file count from the event and the number of entries the API listed. When fewer were listed,
+    or when the number listed reaches 3000 (the hosting service's listing limit, not verified offline), the tool warns
+    that the list is incomplete, and the pull request counts as governed.
+  - A name is matched as given and after case folding, and any file whose name contains a non-ASCII character is
+    flagged, since such a name can alias a governed file on a case-folding checkout.
+  - A second input mode, `--name-status`, reads `git diff --name-status -z --find-renames` output, for the
+    controller's local check before every merge; it accepts only git's status letters, so a plain list is an error.
+  - The base and head commit ids from the event are validated (40 or 64 hexadecimal characters) and printed in the
+    job summary.
+  - The governed set grew to the table of the Global Constraints bullet, and the near-miss example in the test above
+    is no longer `xtask/src/release_check.rs`, which `xtask/**` now flags.
 
 ### Task 1d: Privacy gate: local secret scan, pre-push hook, installer, and base-branch CI coverage
 
@@ -456,9 +486,12 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     `new_optional_field_absent_keeps_golden` (an added `Option` field left `None` leaves the golden line unchanged).
   - `crate_map_arrows_exact`: from `cargo metadata`, each workspace crate's normal workspace dependencies equal A 2.1's
     table exactly; the graph of normal and dev-dependencies between workspace crates has no cycle, dev-dependencies
-    counted; and `udx-test-support` has no workspace dependency of any kind (A 2.2's rule). Run on synthetic metadata
-    holding a dev-dependency cycle, or with `udx-test-support` depending on `udx-core`, the check fails; with
-    `udx-tools` dev-depending on `udx-sandbox`, it passes.
+    counted; and `udx-test-support` has no workspace dependency of any kind (A 2.2's rule). A crate's dev-dependency on
+    itself is not an edge and is not a cycle: `udx-core` keeps `udx-core = { path = ".", features = ["testing"] }` so its
+    own tests get the `testing` feature, and the check accepts that self edge (and only a self edge). Run on synthetic
+    metadata holding a dev-dependency cycle, or with `udx-test-support` depending on `udx-core`, the check fails; with
+    `udx-tools` dev-depending on `udx-sandbox`, or `udx-core` on itself, it passes. T2a leaves the self edge in
+    `crates/udx-core/Cargo.toml` as T1b wrote it; what follows from feature unification is in A 2.2.
   - `fake_supervisor_records_registrations_and_kills`: registrations, unregistrations, `kill`, `end_session`,
     `end_all` and a free-space watch and its drop are recorded in order; `end_session` calls `kill_group` on that
     session's registered `RecordingKiller`s and on no other session's; `live` and `holding_network_or_credentials`
