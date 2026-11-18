@@ -1,7 +1,8 @@
 # UniDeX Rust Preview: threat model
 
 Status: M0 draft, revision 3 · 2026-11-17 · design draft 2, `docs/design/specs/2026-11-16-unidex-rust-design.md` ·
-small corrections at the M0 gate (P14 and section 7)
+small corrections at the M0 gate (P14 and section 7) · 31 proposals accepted for M1 and the five M1 conflicts of 7.1
+settled at the M0 gate, 2026-11-17
 
 Most of the code this document describes does not exist yet. It is what builders plan from and what the security
 review at each milestone gate checks against. Revision 2 answered an adversarial review: every attack and every
@@ -14,6 +15,10 @@ Markings:
 - **Proposed, not yet in the design (Pn)**, shortened to **Proposed (Pn)** after the first use in a section: this
   document's recommendation, undecided until the maintainer accepts it and the design is updated. Numbers are stable;
   new proposals continue from the highest number.
+- **Accepted (Pn), 2026-11-17**: the maintainer accepted the proposal at the M0 gate; M1 builds it. Placed beside the
+  proposal's own mark, whose text is unchanged. An accepted proposal keeps its original mark and text until the
+  milestone that builds it moves it into the design, as section 9 describes. For P41 only its M1 part, the definition of
+  an unattended run, is accepted now.
 - **Rewritten**: a proposal whose text changed after a review. **Demoted to a backstop** and **Withdrawn**: kept so
   that numbering stays stable, with the reason.
 - **Answered**: where this document disagrees with part of the review, and why.
@@ -127,10 +132,12 @@ control, the milestone and the tests. Tests are tagged with the control they pro
 - Permissions allow, ask or deny per tool, path and command, with modes; every decision is logged; in an unattended
   run "ask" is "deny" (design 5.2). Shell commands run inside `udx-sandbox` (design 5.11), with a profile that writes
   only to the workspace and a per-session temp folder and reads only what P10 allows.
-- **Proposed, not yet in the design (P1).** Sandboxed commands have no network by default, name lookups included:
+- **Proposed, not yet in the design (P1).** **Accepted (P1), 2026-11-17.**
+  Sandboxed commands have no network by default, name lookups included:
   blocking network sockets is not enough where lookups go through a local resolver's socket. Network is a separate
   permission, per command rule or per session, shown on the card. On Linux this needs a network namespace (7.1).
-- **Proposed (P2). Rewritten.** A command that a rule allows runs as its parsed argv, executed directly with no shell
+- **Proposed (P2). Rewritten.** **Accepted (P2), 2026-11-17.**
+  A command that a rule allows runs as its parsed argv, executed directly with no shell
   and no wildcard expansion, so a file name can never become an option. A command that needs a shell (a pipe, `;`,
   `&&`, `||`, substitution, redirection, a wildcard, a leading assignment) never runs under a rule: it asks, and then
   runs in a fixed `/bin/sh` with no startup files, never the user's interactive shell, so zsh glob qualifiers cannot
@@ -141,11 +148,13 @@ control, the milestone and the tests. Tests are tagged with the control they pro
   rule, which only the user can write (P47) but which would then admit an option the model supplies. So a wildcard in
   a rule never matches an argument that starts with `-` unless the rule marks it as matching options: a saved `rg *`
   does not admit `rg --pre=./x foo`.
-- **Proposed (P3).** Built-in asks in every mode, denied unattended: any `git push` (force and default-branch pushes
+- **Proposed (P3).** **Accepted (P3), 2026-11-17.**
+  Built-in asks in every mode, denied unattended: any `git push` (force and default-branch pushes
   flagged), history rewrites (`reset --hard`, `rebase`, `clean -fdx`, `branch -D`, `stash drop`), recursive deletes,
   package publishing, `sudo`, and the write commands of `gh` and cloud CLIs. File-tool deletes and overwrites keep a
   per-session undo copy under `.unidex/`, and the app never deletes a folder outright: it goes to the OS trash.
-- **Proposed (P4). Rewritten; partly withdrawn.** Ask cards lead with the action in app-written words. Command text,
+- **Proposed (P4). Rewritten; partly withdrawn.** **Accepted (P4), 2026-11-17.**
+  Ask cards lead with the action in app-written words. Command text,
   paths and hosts from the model are shown with control and bidirectional characters escaped and hosts in punycode
   when scripts mix. A card shows whether the turn is exposed (4.3). A card for an egress request (P14) shows the full
   decoded URL and a summary of any body, marks the parts the model composed, and never truncates the URL or the marked
@@ -154,12 +163,15 @@ control, the milestone and the tests. Tests are tagged with the control they pro
   content cannot press app controls anyway (4.9).
 - **Proposed (P5).** A sub-agent gets the intersection of its definition's tools and the parent session's current
   permissions, inherits the parent's exposure, and sub-agent depth and concurrency are capped.
-- **Proposed (P6).** The prompt-based tool protocol uses delimiters carrying a per-session random value; calls are
+- **Proposed (P6).** **Accepted (P6), 2026-11-17.**
+  The prompt-based tool protocol uses delimiters carrying a per-session random value; calls are
   parsed only from the assistant's current output, and tool results are escaped so they cannot contain a delimiter.
-- **Proposed (P7). Rewritten.** If the sandbox cannot be applied in full, P1 and P43 included, the shell tool is off.
+- **Proposed (P7). Rewritten.** **Accepted (P7), 2026-11-17.**
+  If the sandbox cannot be applied in full, P1 and P43 included, the shell tool is off.
   A platform that offers only Landlock and seccomp counts as unavailable, since they cannot deny IPC. The user may turn
   on unsandboxed shell for one attended session after a warning; unattended runs never get it.
-- **Proposed (P43). Rewritten.** Every sandbox profile (shell, stdio MCP servers, ACP adapters, the browser helper
+- **Proposed (P43). Rewritten.** **Accepted (P43), 2026-11-17.**
+  Every sandbox profile (shell, stdio MCP servers, ACP adapters, the browser helper
   where P33 holds) denies inter-process communication by default. macOS: `mach-lookup` denied except a short reviewed
   allow list (no launch services, Apple Events, pasteboard, event posting or security server; the certificate trust
   service only in a profile with network, so TLS verification works), with `lsopen` and `appleevent-send` denied.
@@ -167,7 +179,8 @@ control, the milestone and the tests. Tests are tagged with the control they pro
   the app's own sockets, which takes mount and network namespaces; seccomp refuses the `TIOCSTI` and `TIOCLINUX`
   ioctls; commands start under `setsid` with no controlling terminal. Windows: a job object with UI limits on a
   separate desktop, or an AppContainer, with no COM or WMI activation.
-- **Proposed (P47). Rewritten.** Rule sources and precedence. Permissions widen only from the app's settings, stored
+- **Proposed (P47). Rewritten.** **Accepted (P47), 2026-11-17.**
+  Rule sources and precedence. Permissions widen only from the app's settings, stored
   outside every workspace; a workspace file can only narrow them, trusted or not. "Allow always" saves exactly the
   rule the card displays: the exact argv by default, a wildcard only if the user edits one in, and a wildcard never
   matches an option (P2). Precedence: deny, P48's write-denied persistence locations included, then built-in asks (P3,
@@ -175,13 +188,16 @@ control, the milestone and the tests. Tests are tagged with the control they pro
   from the app's own screens, and a persistent indicator shows that it is off until the session ends; an allow rule
   never turns one off, and an unattended run never runs with one off. The app never starts an MCP server that a
   workspace file names.
-- **Proposed (P49).** The CLI escapes control characters in all model and tool text. Its asks read from the terminal
+- **Proposed (P49).** **Accepted (P49), 2026-11-17.**
+  The CLI escapes control characters in all model and tool text. Its asks read from the terminal
   device after discarding pending input, and need a typed word, not one key.
-- **Proposed (P50).** Each command runs in a session-owned process group it cannot leave with `setsid`: a cgroup on
+- **Proposed (P50).** **Accepted (P50), 2026-11-17.**
+  Each command runs in a session-owned process group it cannot leave with `setsid`: a cgroup on
   Linux, a job object on Windows, a process group with descendant tracking on macOS, which cannot stop a daemonising
   process (section 7). The UI lists live processes. Session end, app quit and the end of an unattended run kill the
   group; exposure or a revoked grant asks the user to confirm or kill the processes that hold network or credentials.
-- **Proposed (P51). Rewritten.** Per-command limits on process count, memory, CPU time and wall time; on macOS, where
+- **Proposed (P51). Rewritten.** **Accepted (P51), 2026-11-17.**
+  Per-command limits on process count, memory, CPU time and wall time; on macOS, where
   the process limit counts all of the user's processes, a command's limit is the user's current process count plus a
   margin. A cap on output kept in context and in the session log, with a truncation marker; a sized tmpfs for the
   per-session temp folder in the Linux sandbox. The store refuses writes below a free-space floor, and a live watch on
@@ -190,19 +206,23 @@ control, the milestone and the tests. Tests are tagged with the control they pro
   since the workspace is writable without a quota everywhere; a quota on the temp folder alone is therefore not worth
   its weight on macOS and Windows, where it would take a sized disk image or virtual disk. Residuals (section 7): an
   attended run can still fill the disk, and on macOS a fork bomb can still freeze the user's session.
-- **Proposed (P58).** Asks are rate-limited and a turn stops after a set number of denials. An agent sees only its own
+- **Proposed (P58).** **Accepted (P58), 2026-11-17.**
+  Asks are rate-limited and a turn stops after a set number of denials. An agent sees only its own
   session's asks, and at most one unanswered desktop notice per session waits (lesson L42). OS notification titles are
   written by the app, never by a model, so a notification cannot imitate a system dialog.
 
 **Milestone:** M1 (permissions, sandbox, cards, CLI asks; P1 to P4, P6, P7, P43, P47, P49 to P51, P58); M2 (sub-agents,
-P5). The Linux mechanism behind P1 and P43 must be decided before M1 starts (7.1).
+P5). The Linux mechanism behind P1 and P43 was decided on 2026-11-17: the `.deb` installs an AppArmor profile for the
+sandbox helper (7.1).
 
 **Tests:**
 - Design: engine golden tests with the scripted mock provider; a denied call is not executed and leaves a permission
   event naming the rule; an "ask" in a run marked unattended becomes a deny with no card. Sandbox tests on all three CI
   platforms: no write outside the workspace, no read of a planted file under a temp `<home>`; writes inside succeed.
 - P1: from the sandbox, a connection to a loopback listener the test opens fails, and a lookup of a test name reaches
-  neither the test's stub resolver nor the system resolver's socket. The Linux variant waits for the decision in 7.1.
+  neither the test's stub resolver nor the system resolver's socket. The Linux variant follows the decision of 2026-11-17
+  in 7.1
+  (the `.deb` installs an AppArmor profile; the feature is off where it is absent).
 - P2: a rule-allowed `tar czf o.tgz *` beside a planted `--checkpoint-action=exec=...` file leaves no marker; compound
   commands generated around an allowed prefix always ask; a zsh glob qualifier never runs under a rule; on Windows every
   command asks; a saved rule `rg *` does not admit `rg --pre=./x foo`.
@@ -219,7 +239,8 @@ P5). The Linux mechanism behind P1 and P43 must be decided before M1 starts (7.1
 - P43: an escape matrix run from inside the sandbox on each CI platform (`open`, `osascript`, `launchctl`;
   `systemd-run`, `gio open`, an X11 connection, `TIOCSTI`; `schtasks`, WMI, COM) leaves no marker file outside it. On
   each CI platform an https request from a networked sandboxed command succeeds with certificate checks on, while the
-  keychain lookup of P23's test fails from the same profile. The Linux variant waits for the decision in 7.1.
+  keychain lookup of P23's test fails from the same profile. The Linux variant follows the decision of 2026-11-17 in 7.1
+  (the `.deb` installs an AppArmor profile; the feature is off where it is absent).
 - P47: a workspace file allowing `npm *` changes nothing; "allow always" on `npm test` does not admit `npm exec`; a
   user allow on `git push` still asks; a server named in a workspace `.mcp.json` is never started; with P14's ask
   turned off for one session the indicator shows throughout, and the next session asks again.
@@ -263,7 +284,8 @@ repository's own configuration inside the workspace.
   app's own secret and backup files. It matches case-folded and in one Unicode form, on the path as asked and as
   resolved, and denied folders also by device and inode. Reads outside the workspace are labelled (design 5.11) and ask
   (P60); writes outside it need a rule naming the folder (workspace scoping, design 5.11).
-- **Proposed, not yet in the design (P8). Rewritten.** Protected paths inside the workspace. In the file tools, writes
+- **Proposed, not yet in the design (P8). Rewritten.** **Accepted (P8), 2026-11-17.**
+  Protected paths inside the workspace. In the file tools, writes
   to `.git/`, `.unidex/`, repository instruction files, agent project configuration (P44), `.mcp.json`, editor task and
   launch files, `.envrc`, `.husky/` and CI workflow folders ask in every mode and are denied unattended. A sandbox
   profile cannot ask, so it denies named sub-paths: `.git/hooks`, `.git/config`, `.git/info`, `.git/modules/*/hooks`,
@@ -272,7 +294,8 @@ repository's own configuration inside the workspace.
   reports a denied write to a protected path may the app offer to run that command again, on an ask, with a wider
   profile for that one run. The file tools never create links or set an executable bit; a new file is never
   executable.
-- **Proposed (P9). Rewritten.** The guard checks the opened handle, not a path string: each component is opened
+- **Proposed (P9). Rewritten.** **Accepted (P9), 2026-11-17.**
+  The guard checks the opened handle, not a path string: each component is opened
   relative to its parent without following links (`openat2` with `RESOLVE_BENEATH` on Linux, `O_NOFOLLOW_ANY` on macOS,
   reparse-point aware relative opens on Windows), and the final path read back from the handle is checked again.
   Windows forms are refused outright: UNC, `\\?\` and `\\.\` prefixes, device names, alternate data streams, trailing
@@ -280,7 +303,8 @@ repository's own configuration inside the workspace.
   rename that keeps the file's mode and extended attributes. A symlink is not replaced: the write goes to its target
   once the target passes the guard. A file with more than one hard link is not written through: the rename replaces
   only this name, and the card says the other names keep the old content.
-- **Proposed (P10). Rewritten.** The sandbox's read policy is an allow list on every platform: the workspace, the
+- **Proposed (P10). Rewritten.** **Accepted (P10), 2026-11-17.**
+  The sandbox's read policy is an allow list on every platform: the workspace, the
   per-session temp folder, system folders, and a reviewed list of toolchain folders and configuration files (compilers,
   package managers, `.gitconfig`). `<home>` is never granted whole; the vault is excluded, and its `.unidex/` even when
   the vault is the workspace (P45); the deny list still applies inside every granted tree.
@@ -293,7 +317,8 @@ repository's own configuration inside the workspace.
   `core.hooksPath` is set to an app-supplied folder whose wrappers run the repository's real hooks inside the sandbox,
   with the workspace profile and P23's environment. If a hook file or `core.hooksPath` changed during the session (P18
   records it), Commit first lists them and asks.
-- **Proposed (P48).** Workspace edges. `<home>`, its parent folders and the file system root are refused as a workspace
+- **Proposed (P48).** **Accepted (P48), 2026-11-17.**
+  Workspace edges. `<home>`, its parent folders and the file system root are refused as a workspace
   unless the user types a confirmation, and then the untrusted rules (P13) apply. P8 resolves and protects the
   configured `core.hooksPath`, a worktree's common git directory, module directories and the target of a `gitdir:`
   file. A fixed list of persistence locations is write-denied in every profile and in the file tools: shell startup
@@ -385,13 +410,15 @@ the user's data against leaving once content has spoken.
 - **Proposed, not yet in the design (P12). Rewritten.** Labelled sources also include ACP agent output, sub-agent
   results, handoff and cross-review payloads between engines, images and screenshots from any tool, MCP tool
   descriptions, and MCP prompts and resources; a turn started from an MCP prompt is exposed.
-- **Proposed (P13). Rewritten.** Workspace trust. A workspace is untrusted until the user marks it trusted. Untrusted:
+- **Proposed (P13). Rewritten.** **Accepted (P13), 2026-11-17.**
+  Workspace trust. A workspace is untrusted until the user marks it trusted. Untrusted:
   file contents are labelled and expose; repository instruction files and add-on agents' project configuration are not
   loaded; workspace configuration can only narrow (P47). Trusted: instruction files are shown on first load and again
   whenever the hash of their resolved set, nested files and `@` imports included, changes. Dependency and vendor folders
   (`node_modules/`, `vendor/`, `third_party/`, package caches), git-ignored paths, submodules and nested repositories
   stay labelled and expose even in a trusted workspace, and trust never extends into a submodule.
-- **Proposed (P14). Rewritten.** Egress after exposure. In an exposed turn a request runs without an ask only if it
+- **Proposed (P14). Rewritten.** **Accepted (P14), 2026-11-17.**
+  Egress after exposure. In an exposed turn a request runs without an ask only if it
   carries no data composed since exposure: a GET or navigation whose full URL is byte-identical to a URL the user typed,
   a URL requested before exposure, or a link present verbatim in content already in context. Everything else asks,
   whatever host it goes to: a URL the model built or changed in any part (subdomain, path, query, fragment); any request
@@ -409,7 +436,8 @@ the user's data against leaving once content has spoken.
   stops the turn with an event. The caps' default numbers and the names of the settings that change them are chosen in
   M1 from a measurement of how often the caps make a turn ask. An unattended run reaches only the fixed URL prefixes
   (scheme, host, port and path prefix) its routine declared (P41); anything else is denied.
-- **Proposed (P15). Rewritten.** The markdown renderer (chat, memory, notes, notifications, proposals) never fetches a
+- **Proposed (P15). Rewritten.** **Accepted (P15), 2026-11-17.**
+  The markdown renderer (chat, memory, notes, notifications, proposals) never fetches a
   remote resource by itself: a remote image is a placeholder showing its full decoded URL, and in output from an
   exposed turn loading it asks. Links open only through the app's single opener (P54), on an explicit action that shows
   the full URL first. An "open" action reveals, rather than opens, a file that would execute or an HTML file a model
@@ -420,10 +448,12 @@ the user's data against leaving once content has spoken.
   characters escaped.
 - **Proposed (P17).** A `unidex://` link only opens a screen. Starting a turn, running anything or changing a setting
   from a link needs a confirmation in the app that shows what the link asked for.
-- **Proposed (P54).** One opener for the whole app, used by the renderer, MCP sign-in flows, ACP agent requests,
+- **Proposed (P54).** **Accepted (P54), 2026-11-17.**
+  One opener for the whole app, used by the renderer, MCP sign-in flows, ACP agent requests,
   notifications and release notes: `http` and `https` only, no credentials in the address, never through a shell, and
   the full URL shown and confirmed whenever the source is untrusted.
-- **Proposed (P59).** Design 5.2 checks that a local server did not silently cut the prompt; when it did, the turn stops
+- **Proposed (P59).** **Accepted (P59), 2026-11-17.**
+  Design 5.2 checks that a local server did not silently cut the prompt; when it did, the turn stops
   rather than continuing without part of its instructions or labels.
 
 **Milestone:** M1 (labelling, exposure, P13 to P15, P54, P59); M2 (P12 for sub-agents and MCP); M4 (P16, P17); M5 and
@@ -551,15 +581,19 @@ M6 (routines and duties under P19).
   session log; API keys removed from the environment of every child process (design 5.10, 5.11). Section 5's "no secret
   in any log" extends redaction to every log and crash report: secrets live in a type that never prints its value, the
   panic hook scrubs, and the redactor matches each stored secret, its base64 and URL encodings and token-shaped strings.
-- **Proposed, not yet in the design (P21). Rewritten; egress scanning demoted to a backstop.** Stored secret values and
+- **Proposed, not yet in the design (P21). Rewritten; egress scanning demoted to a backstop.**
+  **Accepted (P21), 2026-11-17.**
+  Stored secret values and
   their encodings are redacted from tool results before they reach the model, so a model rarely holds one. *Demoted to
   a backstop:* scanning outbound arguments for stored secrets stays as a cheap last check, but hex, reversal or
   splitting across calls defeat it and it knows only stored secrets, so no channel counts on it.
-- **Proposed (P22). Rewritten; key re-entry withdrawn.** A key is bound to its provider's host. A base URL changes only
+- **Proposed (P22). Rewritten; key re-entry withdrawn.** **Accepted (P22), 2026-11-17.**
+  A key is bound to its provider's host. A base URL changes only
   on the settings screen or through the CLI's configuration command in an interactive terminal, never headless and
   never from a tool, and a change of host clears the stored key, which the user then enters again. `.unidex/config.toml`
   is protected (P8, P19). *Withdrawn:* re-confirming the same key after a change; clearing it replaces that.
-- **Proposed (P23). Rewritten.** Child processes start from a scrubbed environment: no SSH or GPG agent sockets, no
+- **Proposed (P23). Rewritten.** **Accepted (P23), 2026-11-17.**
+  Child processes start from a scrubbed environment: no SSH or GPG agent sockets, no
   cloud CLI or `GITHUB_TOKEN`-style variables, no loader variables (`LD_PRELOAD`, `DYLD_*`), and no markers a parent
   agent session left when it launched the app. The OS secret store is out of reach of sandboxed commands: the keychain
   service through P43's reviewed mach allow list, the Secret Service by denying the whole session bus (it cannot be
@@ -571,7 +605,8 @@ M6 (routines and duties under P19).
 - **Proposed (P55).** Scheduler definitions (launchd property lists, systemd units, scheduled tasks) never hold a
   secret. An unattended run that cannot reach the keychain fails and notifies; it does not fall back to environment
   variables (7.1).
-- **Proposed (P57).** The app marks itself non-dumpable on Linux, which also stops other same-user processes reading
+- **Proposed (P57).** **Accepted (P57), 2026-11-17.**
+  The app marks itself non-dumpable on Linux, which also stops other same-user processes reading
   its `/proc` environment; it opts out of Windows Error Reporting dumps; and it keeps HTTP headers out of logs at every
   level, third-party crates' trace output included.
 
@@ -614,7 +649,8 @@ and data leaving through the app's own requests.
   Host policy, P14 included, is evaluated before any lookup, so a name is resolved only once its request is allowed or
   approved. Provider calls to a local model server are configuration, not `web_fetch`, and are not affected.
 - The app makes no network call the user did not configure (design section 2, anti-goals).
-- **Proposed, not yet in the design (P24). Rewritten.** `web_fetch` caps body size, decompressed size and time per call.
+- **Proposed, not yet in the design (P24). Rewritten.** **Accepted (P24), 2026-11-17.**
+  `web_fetch` caps body size, decompressed size and time per call.
   An allow for a private address names a host and port, never "all private", and unattended runs do not inherit it. A
   provider endpoint that is not loopback must use `https` with certificate checks; no setting turns verification off.
 
@@ -827,7 +863,8 @@ the P33 and clipboard questions); M7.
   key. Metadata carries a version that must exceed the installed one and an expiry, so neither a downgrade nor a frozen
   feed is accepted. The Chromium component is checked against its pinned hash again before each load. Development and
   test builds never update; a setting turns updates off.
-- **Proposed (P37).** A release check on every packaged artifact asserts that the automation socket, test switches and
+- **Proposed (P37).** **Accepted (P37), 2026-11-17.**
+  A release check on every packaged artifact asserts that the automation socket, test switches and
   development overrides are compiled out, that debugging switches are refused, and that macOS entitlements match a
   reviewed list with a reason for each.
 - **Proposed (P38). Rewritten.** Dependency and release intake. `cargo-deny` admits crates.io and an explicit list of
@@ -836,8 +873,8 @@ the P33 and clipboard questions); M7.
   read-only tokens. Tags are protected and agent tokens cannot create tags or releases; the release job runs in a
   protected environment that needs the maintainer's approval, and only it holds signing secrets.
 
-**Milestone:** M0 (lockfile, deny, audit, pinned actions, privacy gate, P38); M1 (signed nightlies, P37); M4
-(auto-update, P36); M7 (Chromium component); M11 (installers).
+**Milestone:** M0 (lockfile, deny, audit, pinned actions, privacy gate, P38); M1 (nightlies, unsigned through M1; P37);
+M4 (auto-update, P36); M7 (Chromium component); M11 (installers).
 
 **Tests:**
 - Design: CI fails on a `cargo-deny` source or licence violation, on a vulnerability, yanked crate or unsound notice
@@ -857,9 +894,12 @@ the P33 and clipboard questions); M7.
 
 - **Fail closed.** A guard that errors or panics, a missing sandbox, a command that does not parse, an ask that times
   out: each ends in "no". A disabled feature's tools are absent or refuse with a reason, never silently do nothing.
-- **Least privilege by default.** **Proposed, not yet in the design (P60):** a new workspace starts untrusted (P13);
+- **Least privilege by default.** **Proposed, not yet in the design (P60):** **Accepted (P60), 2026-11-17.**
+  a new workspace starts untrusted (P13);
   reads inside it are allowed, reads outside it ask, writes and shell ask, `web_fetch` asks per host, MCP tools ask
-  until approved, and each session's browser is off until the user turns it on. **Proposed (P39):** files the app
+  until approved, and each session's browser is off until the user turns it on.
+  **Proposed (P39):** **Accepted (P39), 2026-11-17.**
+  files the app
   creates that hold secrets or private state are owner-only (mode 0600, or an owner-only ACL on Windows) and are
   created without following links. Tests: a view-model test of a new workspace asserts each P60 default; a store test
   asserts mode 0600 or the owner-only ACL on such files, and that creating one through a planted symlink fails.
@@ -904,7 +944,8 @@ Controls: a spend ledger with per-call and per-day caps, loop guards, and retrie
 output, at the model's price) and does not send a call that would pass the per-call cap or the day's remaining budget.
 P5 caps sub-agent fan-out and P26 gates sampling.
 
-**Proposed, not yet in the design (P40). Rewritten.** The caps are on from M1, since M1 already runs a hosted provider
+**Proposed, not yet in the design (P40). Rewritten.** **Accepted (P40), 2026-11-17.**
+The caps are on from M1, since M1 already runs a hosted provider
 and the first evaluation while the parity table puts cost tracking in M2. The worst case is reserved atomically in the
 shared SQLite store before each call and settled after, so the app, the CLI and `run-due` draw on one budget. A model
 with no known price refuses calls until the user sets a price or a cap. A loopback endpoint is often a proxy to a paid
@@ -923,7 +964,10 @@ cap with a clear event, and a call estimated over the cap is never sent.
 
 Routines, duties and `run-due` run with no one to ask (design 5.2, 5.9).
 
-**Proposed, not yet in the design (P41). Rewritten.** When the user turns a routine on, it declares the tools, folders,
+**Proposed, not yet in the design (P41). Rewritten.**
+**Accepted (P41), 2026-11-17, for its M1 part only (the definition of an unattended run; the rest of P41 stays
+for M6).**
+When the user turns a routine on, it declares the tools, folders,
 fixed URL prefixes (scheme, host, port and path prefix) and engines it needs, and the app pins the hash of its prompt
 and schedule with that declaration. `run-due` refuses a routine whose hash changed and notifies; anything outside the
 declaration is denied, and the run's log lists every denial for the user to review. A run with neither the app nor an
@@ -1003,8 +1047,8 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
   though still widely relied on. Linux Landlock depends on the kernel (file rules from 5.13, TCP rules from 6.7), does
   not restrict UDP, resolver sockets or connecting to an existing pathname socket, and may be missing in containers;
   seccomp filters calls, not paths. On Windows a restricted token strong enough to confine reads breaks ordinary tools,
-  and neither it nor a job object limits network; an AppContainer can, but many tools fail inside it. Open: the Linux
-  mechanism (7.1) and the Windows mechanism, decided in M1's sandbox design.
+  and neither it nor a job object limits network; an AppContainer can, but many tools fail inside it. The Linux
+  mechanism was decided on 2026-11-17 (7.1); open: the Windows mechanism, decided in M1's sandbox design.
 - **Compatibility of allow-list reads (P10).** Tools that read configuration from `<home>` will break until the
   reviewed list covers them; M1 measures how many.
 - **Same-user secret stores.** On Linux and Windows any process of the user can read unlocked secrets. The sandbox keeps
@@ -1060,22 +1104,24 @@ Every lesson in the Electron app's `SECURITY.md`, restated, with whether it appl
 | Conflict | Design passage | This document |
 |---|---|---|
 | Chromium's sandbox against confining the helper | 5.8 "Chromium's own sandbox stays on, on every platform"; anti-goal "turning off Chromium's sandbox" | P33 confines the helper's browser process, which may stop the renderer sandbox engaging; P33 yields wherever it does |
-| The Linux sandbox mechanism | 5.11 "Landlock and seccomp on Linux" | P1 and P43 need mount and network namespaces; Ubuntu restricts unprivileged user namespaces through AppArmor, so the `.deb` must ship an AppArmor profile for the sandbox helper, or P7 turns the shell off on default installs; under P43 and fail closed (section 5), stdio MCP servers (P27) and ACP adapters (P29) are then off there too |
+| The Linux sandbox mechanism | 5.11 "Landlock and seccomp on Linux" | P1 and P43 need mount and network namespaces; Ubuntu restricts unprivileged user namespaces through AppArmor, so the `.deb` must ship an AppArmor profile for the sandbox helper, or P7 turns the shell off on default installs; under P43 and fail closed (section 5), stdio MCP servers (P27) and ACP adapters (P29) are then off there too. **Decided 2026-11-17, in this document's favour:** the `.deb` installs an AppArmor profile for the sandbox helper, so namespaces work; on installs without it (the tarball) the shell, stdio MCP servers and ACP adapters are off, listed as a design section 8 exception |
 | Chromium's sandbox on default Ubuntu | 5.8 "A package format that cannot run it ... does not ship the browser" | Chromium's own sandbox meets the same namespace restriction; the `.deb` needs an AppArmor profile or CEF's setuid sandbox helper, or it ships no browser on default Ubuntu |
-| Every feature on every platform | G7 "A feature works on all three or is listed as an exception in section 8" | A shell, stdio MCP servers and ACP adapters that are off on default Ubuntu (P7, P43), and Windows with no auto-allowed command (P2), each need an exception listed in design section 8 |
+| Every feature on every platform | G7 "A feature works on all three or is listed as an exception in section 8" | A shell, stdio MCP servers and ACP adapters that are off on default Ubuntu (P7, P43), and Windows with no auto-allowed command (P2), each need an exception listed in design section 8. **Decided 2026-11-17, in this document's favour:** each is listed as an exception in design section 8 |
 | Skills and sub-agents arrive before their protection | Section 6: skills and sub-agents in M2, memory (where drafts arrive) in M3 | P19 denies tool writes to skills and sub-agent definitions in M2, until drafts exist in M3 |
 | ACP mediation | 5.4 "Those requests pass through the same permissions and sandbox as the native engine's tools" | Agents' own tools and their project configuration run outside those requests; P44 gates the start and P29 adds a second layer |
-| Scope of untrusted files | 5.11 "files from outside the workspace are labelled as untrusted" | A repository is untrusted until the user trusts it, and third-party paths stay untrusted after (P13) |
-| Scope of the file tools | 5.3 "File tools are scoped to the workspace" | Reads outside the workspace ask rather than being refused (P60), as design 5.11's labelling of outside files assumes, and writes outside need a rule naming the folder (4.2) |
+| Scope of untrusted files | 5.11 "files from outside the workspace are labelled as untrusted" | A repository is untrusted until the user trusts it, and third-party paths stay untrusted after (P13). **Decided 2026-11-17, in this document's favour:** design 5.11 now says so |
+| Scope of the file tools | 5.3 "File tools are scoped to the workspace" | Reads outside the workspace ask rather than being refused (P60), as design 5.11's labelling of outside files assumes, and writes outside need a rule naming the folder (4.2). **Decided 2026-11-17, in this document's favour:** design 5.3 now says so |
 | `unidex serve` session tools | 5.6 "it exposes memory, recall and session tools" | Session tools are off by default (P28) |
 | Secrets for unattended runs | 5.10 "environment variables as a fallback where no keychain exists" | Scheduler definitions never hold secrets, and a run without the keychain fails (P55) |
-| The headless CLI | 5 "`unidex` binary: every capability, headless" | Provider hosts and permission widening change only interactively (P22, P47) |
-| When spend caps arrive | Section 7 parity table: cost tracking in M2 | Caps from M1, which already runs a hosted provider (P40) |
+| The headless CLI | 5 "`unidex` binary: every capability, headless" | Provider hosts and permission widening change only interactively (P22, P47). **Decided 2026-11-17, in this document's favour:** design section 5 now says so |
+| When spend caps arrive | Section 7 parity table: cost tracking in M2 | Caps from M1, which already runs a hosted provider (P40). **Decided 2026-11-17, in this document's favour:** spend caps arrive in M1 |
 
 ## 8. Priority order for the maintainer
 
 Decide in this order. The first six rows are the review's five that matter most, with P1 and P43 counted as one, as
-the review counted them; P42 follows them because it proves them. The table lists all 61 proposals, one row each.
+the review counted them; P42 follows them because it proves them. The table lists all 61 proposals, one row each. On
+2026-11-17 the maintainer accepted the 31 that are scheduled for M1 (marked "Accepted" where each is defined); the others
+are decided before their own milestones.
 
 | Order | Proposal | What it stops |
 |---|---|---|
