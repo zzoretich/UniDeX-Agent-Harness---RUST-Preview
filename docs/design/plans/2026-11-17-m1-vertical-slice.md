@@ -248,12 +248,18 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   A 2.2), `crates/udx-core/tests/paths.rs`, `crates/udx-test-support/Cargo.toml` (drop `udx-core`),
   `crates/udx-test-support/src/lib.rs`. Create `crates/udx-core/tests/choke_point.rs`, its fixtures
   `crates/udx-core/tests/fixtures/choke_point/{allowed,refused}/*.txt`, and `crates/udx-test-support/src/stand_in.rs`
-  (the stand-in's API as stubs naming T7).
+  (the stand-in's API as stubs naming T7, under A 3's rule "Stubs never panic", see Produces).
 - **Consumes.** Nothing new. **Produces.** A 3.1.1 (`Env::var_os`, the `PathError` additions, `home_dir`, `UserVar`,
   `user_var`, `test_root` (not cached), `check_test_path`, `os_side_effects_allowed` and `OsSideEffect` with the single
   opt-in variable `UNIDEX_TEST_OS_SIDE_EFFECTS`, `paths::testing::TestEnv`) and A 3.14 (`TestRoot`, `TempHome` and
-  `scan_for_canary` implemented; `HttpStandIn`, `StandInRoute`, `StandInResponse`, `RecordedRequest`, `TestCert` as
-  stubs for T7).
+  `scan_for_canary` implemented; `StandInRoute`, `StandInResponse` and `RecordedRequest` written whole, since they are
+  data; `HttpStandIn` and `TestCert` as stubs for T7). Those stubs follow A 3's rule "Stubs never panic", which binds
+  every task that creates a stub: no `unimplemented!`, `todo!` or panic. `HttpStandIn::start` and `start_tls` return an
+  inert stand-in that binds no socket, serves nothing and records nothing (`requests()` is empty; `url()` returns a
+  loopback URL no listener serves); `TestCert::generate` returns an inert value whose `ca_pem()` is a fixed placeholder
+  naming T7, not a certificate and no key material. None returns a `Result`, and `udx-test-support` depends on no
+  workspace crate, so no `NotBuilt` is involved. T2b's `no_panicking_stub` scan and `udx-test-support`'s
+  `stubs_never_panic` cover these files from T2b's merge, so they must pass on T1b's stubs.
 - **Items covered (gate report, section g, "The path guard" and "Architecture notes").** Tests for a relative override
   and a missing root; the right error for absolute-path failures (`paths.rs:73`, `:77`, `:96`, now `NotAbsolute`);
   values that are only whitespace (`paths.rs:63`, now `Blank`); a printed notice when a test is skipped because it runs
@@ -487,25 +493,33 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   manifest changes.
 - **Consumes.** T2a's types and manifests. **Produces.** Every public item of A 3.2 to 3.15 as a stub under A 3's rule
   "Stubs never panic": a function returning a `Result` (or a stream of them) returns its error's `NotBuilt` naming the
-  owning task; a backend not built yet reports `Unavailable(NotBuiltYet)`; anything else returns the value that grants
-  nothing. No `unimplemented!`, `todo!`, `panic!` or `unreachable!` sits behind any public function this task or T2a
-  creates. Also: the `udx-app` binary's `main` that parses no flags yet; the hidden argument
-  `--udx-sandbox-probe <check>` dispatching to `udx_sandbox::probe_main` (a stub that prints an `Error` outcome naming
-  the backend's task and exits nonzero) in both binaries' `main`.
+  owning task, except where that type is serialized (`SpendRefusal`, `EgressVerdict`, `TrustState`: the existing
+  grant-nothing value A 3 names); a backend not built yet reports `Unavailable(NotBuiltYet)`; anything else returns
+  the value that grants nothing. No `unimplemented!`, `todo!`, `panic!` or `unreachable!` sits behind any public
+  function this task, T2a or T1b creates (the rule binds every task that creates a stub). Also: the `udx-app`
+  binary's `main` that parses no flags yet; the hidden argument `--udx-sandbox-probe <check>` dispatching to
+  `udx_sandbox::probe_main` (a stub that prints an `Error` outcome naming the backend's task and exits nonzero) in
+  both binaries' `main`.
 - **Tests:**
   - `every_stub_names_its_task` (a source scan asserting each `NotBuilt` and `NotBuiltYet` carries a task id that
     exists in this plan); `public_items_match_contract_names` (a source scan for each public type named in A 3 and A
     4, by its home path); `no_panicking_stub` (a source scan, kept for good: no `unimplemented!` or `todo!` in any
     `src/` file of a workspace crate, `udx-cookbook` excluded).
-  - `stubs_never_panic` (one per crate, on all three CI platforms): calls every stubbed public constructor and entry
-    point of that crate (every constructor, and every function or trait method that returns a `Result`, a stream, an
-    `Availability`, or a `Box<dyn ..>` or `Arc<dyn ..>`; T2a's `udx-core` stubs included), with inputs inside the test
-    root and URLs on a closed loopback port, and asserts that each call returns, never panics, and that every
-    `NotBuilt` it sees names a task in this plan. While an item is still a stub the call returns its `NotBuilt` error
-    (or `Unavailable(NotBuiltYet)` for a backend); once its owner has merged the call returns whatever the real code
-    returns, so owners need not edit this file. The CLI's version runs every subcommand through `assert_cmd` and
-    asserts it never exits with 101 (a panic's exit code); while a verb is a stub it prints the not-built message
-    naming its task and exits 1.
+  - `stubs_never_panic` (one per crate, on all three CI platforms; T2a's `udx-core` stubs and T1b's stand-in stubs in
+    `udx-test-support` included): calls every stubbed public constructor and entry point of that crate (every
+    constructor, and every function or trait method that returns a `Result`, a stream, an `Availability`, or a
+    `Box<dyn ..>` or `Arc<dyn ..>`), with inputs inside the test root, and asserts that each call returns, never
+    panics, and that every `NotBuilt` it sees names a task in this plan. While an item is still a stub the call returns
+    its `NotBuilt` error, its serialized type's grant-nothing value (A 3) or `Unavailable(NotBuiltYet)`; once its owner
+    has merged the call returns whatever the real code returns, so owners need not edit this file. It never launches a
+    program or changes OS state, before or after the owners merge: every function that launches a program, opens a URL
+    or file in another application, registers OS state, writes to the OS secret store, changes an access list, signals
+    a process or sends on the network is called only with input its real implementation refuses, or has nothing to act
+    on, before any such effect (for the opener, a `file:` URL), or not called at all where no such input exists
+    (`platform_sandbox`, `engine_deps`, `resolve_login_path`, `harden_process`, the CLI's `doctor`), exactly as A 3's
+    table "What the never-panic test may call" lists, and the test says why beside each. The CLI's version runs the
+    verbs that table allows through `assert_cmd` and asserts none exits with 101 (a panic's exit code); while a verb is
+    a stub it prints the not-built message naming its task and exits 1.
   - `<platform>_backend_not_built_reports_unavailable` (in `tests/macos.rs`, `tests/linux.rs`, `tests/windows.rs`):
     `platform_sandbox` reports `Unavailable { reason: NotBuiltYet { .. }, .. }`, `spawn` refuses with it, and
     `probe_main` exits nonzero without panicking.
@@ -566,7 +580,10 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `display_host_non_ascii_shows_ascii_and_unicode` (A D15).
   - `p54_file_and_custom_schemes_refused`, `p54_credentials_in_url_refused`,
     `p54_shell_metacharacters_reach_opener_as_one_argument` (the launcher is a test double recording argv),
-    `p54_untrusted_needs_confirmation`, `opener_reveals_executable_and_model_html`.
+    `p54_untrusted_needs_confirmation`, `opener_reveals_executable_and_model_html`; `opener_refuses_before_launch`
+    (through the same test-double launcher: a `file:` URL, a custom scheme, a URL with credentials and an untrusted
+    source without `confirmed_full_url` each return their error and the launcher records no call; T2b's
+    `stubs_never_panic` relies on the `file:` case, A 3, "What the never-panic test may call").
   - `net_address_spellings_classified` over the vector table: integer, octal, hex, short IPv4, IPv4-mapped and
     -compatible IPv6, bracketed forms, trailing dots, the metadata-service address, every private, loopback,
     link-local, shared and documentation range. Following the test-vector convention, the vector file stores private,
@@ -691,7 +708,9 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     `provider_set_from_providers` (a set holding the mock provider routes through `Router::from_config`).
   - `mock_provider_replays_script_and_records_requests`; `mock_first_delta_delay_honoured`;
     `mock_request_matcher_mismatch_fails_call`.
-  - `fixture_transport_rejects_request_mismatch`.
+  - `fixture_transport_rejects_request_mismatch`; `transport_refuses_non_http_scheme_before_connecting`
+    (`ReqwestTransport` given a `file:` and an `ftp:` URL returns `TransportError::Connect` and a loopback listener
+    the test opens records no connection; T2b's `stubs_never_panic` relies on it).
   - `stand_in_records_requests`, `stand_in_tls_with_generated_cert` (a client trusting the generated CA from a file
     connects; one that does not, fails), `stand_in_serves_redirects_slow_gzip_and_huge_bodies`.
 - **Done when.** The common commands.
@@ -814,6 +833,10 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `children_waited_by_pid` (two children exit in either order; each wait returns its own status; a third unrelated
     child is not reaped).
   - `free_space_watch_idle_when_no_unattended_group` (no timer is registered while nothing runs).
+  - `supervisor_kill_refuses_unregistered_pid` (a pid never registered in the session is refused and no signal is
+    sent: a process the test started outside the supervisor keeps running); `probe_main_refuses_unknown_check` (an
+    unknown check name prints an `Error` outcome and exits nonzero, and no check's code runs). T2b's
+    `stubs_never_panic` relies on both (A 3, "What the never-panic test may call").
   - `access_entries_missing_file_is_empty` and `access_entries_reads_records` (three platforms);
     `clean_workspace_scope_only_its_records` (records planted for two workspaces in the test root: `Workspace(dir)`
     removes only that one's, `All` removes every record, capability entries included) and
@@ -1244,7 +1267,11 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `p15_image_load_goes_through_address_policy` (`fetch_bytes` refuses a loopback and a metadata address and an
     unlisted content type).
   - `links_extracted_and_recorded_verbatim`; `html_scripts_and_styles_dropped`; `unsupported_encoding_refused`;
-    `net_no_connection_at_start` (constructing the tool and the engine opens no socket).
+    `net_no_connection_at_start` (constructing the tool and the engine opens no socket);
+    `system_resolver_refuses_empty_host_before_lookup` (`SystemResolver` given an empty host returns an error without a
+    lookup); `non_http_scheme_refused_before_gate_and_lookup` (`web_fetch` and `fetch_bytes` given a `file:` URL return
+    `FetchError::Scheme`, the recording gate sees no request and the stub resolver no lookup). T2b's
+    `stubs_never_panic` relies on both.
 - **Done when.** The common commands; mutation testing of `policy.rs` locally with no missed mutant.
 - **Platform notes.** All three CI platforms. Nothing here changes OS state.
 
@@ -1312,7 +1339,9 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     `p49_single_key_is_not_an_answer` (a pseudo-terminal on Unix).
   - `p47_mode_widening_refused_headless` (`unidex run --mode auto` without a terminal exits 4; `unidex chat --mode auto`
     asks for a typed confirmation); `p47_cli_cannot_turn_off_builtin` (no verb or flag exists).
-  - `chat_refuses_without_terminal_and_points_to_run`.
+  - `chat_refuses_without_terminal_and_points_to_run` (refused before the engine is built: no probe runs and no
+    session log is created). The `--mode auto` refusal of `p47_mode_widening_refused_headless` also happens before the
+    engine is built. T2b's `stubs_never_panic` relies on both (A 3, "What the never-panic test may call").
   - `run_exit_codes` (completed 0, stopped 3, refused 4, error 1); `run_json_is_ndjson_envelopes`;
     `run_json_key_split_across_deltas_redacted`.
   - `p13_trust_refused_headless`; `p48_trust_home_needs_long_confirmation`; `trust_revoke_cleans_access_entries`
@@ -1418,7 +1447,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   unavailable the shell tasks are listed in `SuiteReport.skipped` with the reason instead);
   `canary_tasks_fail_when_canary_leaks` (a deliberately leaking script makes the task fail);
   `report_records_pass_rate_invalid_calls_turns_cost_asks`; `workspace_copied_into_test_root`; `budget_cap_stops_task`;
-  `skipped_tasks_listed_with_reason`.
+  `skipped_tasks_listed_with_reason`; `missing_suite_refused_before_any_task` (a suite path that does not exist gives
+  `EvalError::Io`, no task's workspace is copied and no provider is called; T2b's `stubs_never_panic` relies on it).
 - **Done when.** The common commands; `cargo run -p udx-evals -- run --suite m1 --provider mock` writes the report.
 - **Platform notes.** The mock suite runs and passes on three CI platforms inside the normal test job whatever the
   merge order of T11 and T12: the harness asks `platform_sandbox`, runs the shell tasks where it reports `Full`

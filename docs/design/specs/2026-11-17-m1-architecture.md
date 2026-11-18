@@ -280,28 +280,63 @@ Signatures are contracts (see "How to read"). Common conventions: errors are `th
 uses `#[async_trait::async_trait]` so it stays usable as `dyn`; timestamps are `u64` milliseconds since the Unix epoch;
 byte sizes are `u64`; money is `u64` micro-dollars (`MicroUsd`).
 
-**Stubs never panic (the contracts tasks, T2a and T2b).** Until its owning task merges, a public item exists as a
-stub, and no `unimplemented!`, `todo!`, `panic!` or `unreachable!` sits behind any public function either contracts
-task creates, so every task's tests pass on all three CI platforms whatever the merge order. A stub answers instead:
+**Stubs never panic (every task that creates a stub).** Until its owning task merges, a public item may exist as a
+stub. The rule binds every task that creates one: T1b (the HTTP stand-in's API in `udx-test-support`, until T7), T2a
+(`udx-core`) and T2b (every other crate). No `unimplemented!`, `todo!`, `panic!` or `unreachable!` sits behind any
+public function such a task creates, so every task's tests pass on all three CI platforms whatever the merge order,
+and T2b's checks pass on stub files T2b does not own. A stub answers instead:
 
 - A function or method that returns a `Result`, or a stream of them, returns its error type's `NotBuilt` variant,
-  carrying `udx_core::stub::NotBuilt { item, task }` with the owning task's id. Every public error enum of sections
-  3.1 to 3.15 has that variant, which is not repeated in each block below; `PathError` is the exception, because T1b
-  builds its functions before the contracts tasks run. Nothing returns `NotBuilt` once the owning task has merged.
+  carrying `udx_core::stub::NotBuilt { item, task }` with the owning task's id. Every public error enum in A has that
+  variant (`LogError` of section 4.3 included), which is not repeated in each block; two kinds of type are the
+  exception. `PathError` has none, because T1b builds its functions before any stub exists. A serialized type never
+  gains one (it would change the session log's format, and the `&'static str` fields would tie its deserializing to
+  static data): where a function's error or verdict type is serialized, its stub returns that type's existing value
+  that grants nothing, which in A is `SpendRefusal::PerCall { worst_case, cap: 0 }` from `SpendLedger::reserve` (the
+  amount asked) and from `worst_case` (`u64::MAX`), `EgressVerdict::StopTurn(CapScope::Turn)` from
+  `EgressState::evaluate` and the engine's `EgressGate::check`, and `TrustState::Untrusted` from `TrustStore::get`. No
+  other function in A returns a serialized error or verdict type. Nothing returns `NotBuilt` once the owning task has
+  merged.
 - A sandbox backend that is not built yet reports itself unavailable, exactly as a failed probe would (section 3.6,
-  "Before a backend merges").
+  "Before a backend merges"). `UnavailableReason::NotBuiltYet` is a real, logged state with an owned `String`, not a
+  `NotBuilt` variant.
 - A function whose type has no error returns the value that grants nothing: `Decision::Deny` from an evaluation,
   `CommandShape::NeedsShell` from `parse_command`, `true` from a question whose `true` adds a label, an ask or a
   refusal (`exposes`, `is_third_party`), `false` from one whose `true` grants, `PromptIntegrity::Unknown`, `None` or an
   empty collection from a lookup or a listing. Text a stub would escape, redact or label is replaced by a fixed
   placeholder naming the owning task, never passed through. A constructor with no error type returns an inert value
-  whose methods follow these rules.
+  whose methods follow these rules (T1b's `HttpStandIn::start` returns a stand-in that serves and records nothing).
 
 ```rust
 // udx_core::stub (T2a, written whole)
-/// What a contracts-task stub returns instead of panicking.
+/// What a stub returns instead of panicking.
 pub struct NotBuilt { pub item: &'static str, pub task: &'static str }
 ```
+
+**What the never-panic test may call.** T2b's `stubs_never_panic` calls every stubbed public constructor and entry
+point, and keeps calling them after their owners merge, so it must never launch a program or change OS state, before
+or after. A function that launches a program, opens a URL or file in another application, registers OS state, writes
+to the OS secret store, changes an access list, signals a process or sends on the network is called by that test only
+with input its real implementation refuses, or has nothing to act on, before any such effect; where no such input
+exists, the test does not call it, and the named test covers it instead. In M1 that is:
+
+| Function (owner) | Effect | What the test passes, or why it is not called |
+|---|---|---|
+| `udx_core::opener::open` (T4) | launches another application | an `OpenTarget::Url` with a `file:` scheme, refused with `SchemeRefused` before any launch (T4's `opener_refuses_before_launch`) |
+| `udx_core::secret::open_secret_store`, `SecretStore::{set, delete}`, `udx_core::config::apply` (T6, T3) | writes to the OS secret store | a test root without the `secret_store` opt-in, under which `open_secret_store` returns the memory store (T6's `os_store_refused_without_opt_in`); `apply` only with that store |
+| `udx_core::process_env::resolve_login_path` (T6) | launches the login shell | not called (no refusing input); T6's `login_path_resolved_off_the_start_path` |
+| `udx_core::secret::harden_process` (T6) | changes the calling process | not called; T6's `p57_*` tests |
+| `udx_providers::ReqwestTransport` as `HttpTransport::send` (T7) | sends on the network | a URL whose scheme is neither `http` nor `https`, refused with `TransportError::Connect` before any connection (T7's `transport_refuses_non_http_scheme_before_connecting`) |
+| `AnthropicProvider`, `OllamaProvider` entry points (T8, T9) | send on the network | constructed with a transport the test defines (an `HttpTransport` that refuses every request in the process), so no request reaches a socket |
+| `udx_tools::net::SystemResolver::lookup` (T22) | sends a lookup | an empty host, refused before any lookup (T22's `system_resolver_refuses_empty_host_before_lookup`) |
+| `udx_tools::net::fetch_bytes`, `web_fetch`'s `run` (T22) | send on the network | a URL whose scheme is neither `http` nor `https`, refused with `FetchError::Scheme` at step 1, before the gate and any lookup |
+| the `shell` tool's `run`, `Sandbox::spawn` (T21, T10 to T12) | launch a program | only through `udx_sandbox::testing::UnavailableSandbox`, which refuses (P7) before spawning |
+| `udx_sandbox::platform_sandbox`, `udx_engine::wiring::engine_deps` (T10 to T12, T23) | launch the probe | not called; the platform tests of section 3.6, the backend tasks' probe tests and T23's wiring test |
+| `udx_sandbox::probe_main` (T10) | runs a probe check in the calling process | a check name it does not know, refused before any check runs (T10's `probe_main_refuses_unknown_check`) |
+| `Supervisor::{kill, end_session, end_all, watch_free_space}` on `ProcessSupervisor` (T10) | signals processes | `kill` with a pid never registered, refused before any signal (T10's `supervisor_kill_refuses_unregistered_pid`); the others with no group registered, where they do nothing |
+| `udx_sandbox::clean_access_entries` (T10, T12) | changes access lists | a test root with no records, where it removes nothing |
+| `udx_evals::run_suite` (T28) | runs commands and provider calls | a suite path that does not exist, refused with `EvalError::Io` before any task runs (T28's `missing_suite_refused_before_any_task`) |
+| CLI verbs (T24, T25) | build the engine, probe, write the secret store | `chat` without a terminal and `run --mode auto` without a terminal, both refused before the engine is built (T24); `key` under a test root without the opt-in (memory store); `trust`, `config` and `sandbox clean` in the test root with no records; `doctor` not called, since its sandbox row probes (T25's tests) |
 
 ### 3.1 `udx-core`
 
@@ -765,6 +800,7 @@ pub trait ProcessRegistry: Send + Sync {
 /// nor any backend. udx-sandbox's ProcessSupervisor implements it (T10); testing::FakeSupervisor below is the fake.
 pub trait Supervisor: ProcessRegistry {
     fn live(&self, session: &SessionId) -> Vec<ProcessInfo>;
+    /// Kills the registered group holding `pid` in `session`; a pid not registered there is refused before any signal.
     fn kill(&self, session: &SessionId, pid: u32) -> Result<(), SandboxError>;
     fn end_session(&self, session: &SessionId) -> Vec<ProcessInfo>;   // kills every group; returns what was killed
     fn end_all(&self) -> Vec<ProcessInfo>;                            // app quit
@@ -1165,7 +1201,9 @@ pub enum TransportError { Connect(String), Tls(String), Timeout, Body(String), C
 pub struct HttpRequest { pub method: http::Method, pub url: url::Url, pub headers: Vec<(String, SensitiveHeader)>, pub body: Vec<u8>, pub timeout: Duration }
 pub enum SensitiveHeader { Plain(String), Secret(Secret) }   // secret header values never reach Debug, logs or fixtures
 pub struct HttpResponse { pub status: u16, pub headers: Vec<(String, String)>, pub body: futures::stream::BoxStream<'static, Result<bytes::Bytes, TransportError>> }
-pub struct ReqwestTransport { /* rustls with ring, platform verifier, no proxy from the environment, no automatic redirects */ }
+/// rustls with ring, the platform verifier, no proxy from the environment, no automatic redirects. A URL whose scheme is
+/// neither http nor https is refused with TransportError::Connect before any connection is opened.
+pub struct ReqwestTransport { /* ... */ }
 
 // Role routing (design 5.1)
 pub struct Router { /* roles -> (provider, model) with an ordered fallback list */ }
@@ -1329,7 +1367,8 @@ pub struct FetchCaps { pub max_body: u64 /* 10 MiB */, pub max_decompressed: u64
 #[async_trait::async_trait]
 pub trait Resolver: Send + Sync { async fn lookup(&self, host: &str) -> Result<Vec<std::net::IpAddr>, FetchError>; }
 /// The production Resolver (T22): one lookup through the operating system's resolver per call, made only at step 3
-/// below. The engine wiring uses it (section 3.11); tests use testing::StubResolver.
+/// below; an empty host is refused before any lookup. The engine wiring uses it (section 3.11); tests use
+/// testing::StubResolver.
 pub struct SystemResolver;
 #[async_trait::async_trait]
 pub trait EgressGate: Send + Sync {
@@ -1371,7 +1410,8 @@ Order of operations for every request and every redirect hop (threat model 4.6, 
 // udx_sandbox
 pub fn platform_sandbox(paths: &StatePaths, env: &dyn Env) -> Arc<dyn Sandbox>;  // probes once and caches; reprobe on demand
 /// Reached from the app's and the CLI's `main` through the hidden argument `--udx-sandbox-probe <check>`: runs one
-/// ProbeCheck from inside the sandbox and prints its ProbeOutcome as one JSON line (section 3.1.5).
+/// ProbeCheck from inside the sandbox and prints its ProbeOutcome as one JSON line (section 3.1.5). A check name it does
+/// not know is refused (an Error outcome and a nonzero exit) before any check runs.
 pub fn probe_main(check: &str) -> std::process::ExitCode;
 /// Every live sandboxed group per session, held by its KillHandle (T10). The engine reaches it only as
 /// Arc<dyn udx_core::sandbox::Supervisor> (section 3.1.5), whose methods carry the contract.
@@ -1970,8 +2010,8 @@ pub enum ProtocolError { Unterminated, BadJson(String), UnknownTool(String), Non
 
 | Verb | What it does | Attendance and threat-model rules |
 |---|---|---|
-| `unidex chat [--workspace DIR] [--provider ID] [--model M] [--mode read_only\|ask\|auto] [--resume SESSION] [--json]` | Interactive session in the terminal | Requires `Attended(Terminal)`; otherwise refuses with a message pointing to `unidex run`. Output escaped (P49); asks typed from the terminal device (P49); `--json` prints `EventEnvelope`s as NDJSON (section 4), streamed text through `StreamRedactor`, and still asks on the terminal device. A `--mode` wider than the session's starting mode needs a typed confirmation (D29). The CLI never turns off a built-in ask (P47) |
-| `unidex run PROMPT [--workspace DIR] [--provider ID] [--model M] [--mode M] [--json]` | One turn, then exit with a status | Attendance detected (section 3.1.2): without a terminal every ask is a deny (P41's test) and a `--mode` wider than the starting mode is refused with exit code 4 (P47); exit code 0 completed, 3 stopped (with the reason), 4 refused, 1 error |
+| `unidex chat [--workspace DIR] [--provider ID] [--model M] [--mode read_only\|ask\|auto] [--resume SESSION] [--json]` | Interactive session in the terminal | Requires `Attended(Terminal)`; otherwise refuses with a message pointing to `unidex run`, before the engine is built. Output escaped (P49); asks typed from the terminal device (P49); `--json` prints `EventEnvelope`s as NDJSON (section 4), streamed text through `StreamRedactor`, and still asks on the terminal device. A `--mode` wider than the session's starting mode needs a typed confirmation (D29). The CLI never turns off a built-in ask (P47) |
+| `unidex run PROMPT [--workspace DIR] [--provider ID] [--model M] [--mode M] [--json]` | One turn, then exit with a status | Attendance detected (section 3.1.2): without a terminal every ask is a deny (P41's test) and a `--mode` wider than the starting mode is refused with exit code 4 (P47), before the engine is built; exit code 0 completed, 3 stopped (with the reason), 4 refused, 1 error |
 | `unidex config list [--json]` | Every section and row with its source (C1) | |
 | `unidex config get KEY` / `set KEY VALUE [--dry-run]` / `unset KEY [--dry-run]` | `--dry-run` prints what the file would become and writes nothing; `unset` restores the default (C1) | `InteractiveOnly` keys need a terminal and a typed confirmation; refused headless and in `--json` without a terminal (P22, P47, P24) |
 | `unidex key set PROVIDER [--stdin]` / `key delete PROVIDER` | Stores or removes a provider key in the secret store | The key is read from the terminal without echo, or from standard input with `--stdin`; never from an argument (P23) |
@@ -2224,7 +2264,9 @@ pub struct RunConfig { pub provider: ProviderSel, pub model: String, pub budget:
 pub enum ProviderSel { Mock /* replays tasks/<id>/mock-script.json */, Configured(ProviderId) }
 pub struct TaskResult { pub id: String, pub passed: bool, pub invalid_tool_calls: u32, pub model_calls: u32, pub turns: u32,
                         pub cost: MicroUsd, pub asks: u32, pub egress_asks: u32, pub stopped: Option<StopReason>, pub log: PathBuf }
-pub fn run_suite(suite: &Path, cfg: &RunConfig) -> Result<SuiteReport, EvalError>;  // writes results.json and a markdown table
+/// Writes results.json and a markdown table. A suite path that does not exist is refused (EvalError::Io) before any
+/// task runs.
+pub fn run_suite(suite: &Path, cfg: &RunConfig) -> Result<SuiteReport, EvalError>;
 pub struct SuiteReport { pub results: Vec<TaskResult>, pub passed: u32, pub total: u32, pub skipped: Vec<(String, String /* reason */)>, pub cost: MicroUsd }
 pub enum EvalError { Task { id: String, reason: String }, Io(std::io::Error), Engine(EngineError), Budget { spent: MicroUsd } }
 ```
