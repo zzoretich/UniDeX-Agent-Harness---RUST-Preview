@@ -1739,24 +1739,74 @@ evaluation harness T28; 8.0M), the two CI tasks (nightlies T33, the automation-s
   the controller uses 150k per task. 48.0 x 0.85 = 40.8M; plus the gate at M0's 3.7M; plus 0.5M; plus 6.8M (45 x
   150k). 40.8 + 3.7 + 0.5 + 6.8 = 51.8M.
 
-**Proposal for the maintainer:** a milestone cap of 45M, with check-ins at 11M (the gate report's point), 22M (the old
-cap) and 33M, each task stopped at its own cap. The cap holds about 10M above the low end as contingency for tasks
-that stop at their caps and for fix rounds the 20 % margins do not pay for (M0's fix rounds cost 140k to 614k each). At
-each check-in the controller reports spend against this forecast, the controller's own usage included; if the 33M
-check-in projects past 45M, the maintainer chooses from the list below.
+**The milestone cap: the maintainer's choice.** The architect proposed a cap of 45M. That cap is below the high end of
+this plan's own forecast: the high end is 51.8M, 6.8M over 45M, and the low end is 35.2M, 9.8M under it. So if spend
+tracks the high end, M1's scope as planned does not fit under 45M, and something has to give at a check-in. The
+maintainer chooses one of three options. In each, every task stops at its own cap, the check-ins are at 11M (the gate
+report's point), 22M (the old cap) and 33M, and at each check-in the controller reports spend so far, the controller's
+own usage included, and projects the milestone's total from it.
+
+- **(a) A cap at the high end: 52M** (51.8M rounded up). The whole forecast range fits: 16.8M above the low end and
+  0.2M above the high end. Nothing is planned to stop, but there is almost no room past the high end: one fix round of
+  M0's size (140k to 614k) beyond the 0.85 assumption would use it up, and a check-in projecting past 52M goes to the
+  maintainer as under (b).
+- **(b) The 45M cap as proposed.** It holds 9.8M above the low end as contingency for tasks that stop at their caps
+  and for fix rounds the 20 % margins do not pay for, and it is 6.8M short of the high end. Reaching the high end stops
+  the milestone at a check-in for a decision: the first check-in whose projection passes 45M stops the milestone (no
+  new task starts, running tasks finish) until the maintainer chooses to raise the cap (to (a)), to move scope out (as
+  (c), or the T12 item below), or to end M1 with the work done. If spend tracks the high end, the projection passes
+  45M as soon as a check-in measures that pace, so the stop comes at a check-in, not at the cap.
+- **(c) A lower cap than (a), 46M, with named scope moved out of M1:** T36 and T39 (the shaped-text cache and its
+  measurement), T37 (the widget-kit measurement), and the six merges below. That removes 5.4M of caps (2.6 + 1.3 +
+  1.5) and nine tasks (two, one, and one for each merge), leaving 36 tasks and 42.6M of caps other than the gate and
+  the architect line. Forecast after the move: low (48.0 - 5.4) x 0.64 + 1.7 + 0.5 + 36 x 0.05 = 31.3M; high (48.0 -
+  5.4) x 0.85 + 3.7 + 0.5 + 36 x 0.15 = 45.8M. The 46M cap is that high end rounded up: 0.2M above it and 14.7M above
+  the new low end. Its costs are those of each item below; it keeps every answer the maintainer gave on 2026-11-17
+  except gate question 4's (the persistent shaped-text cache in M1), which it reopens.
+
+No set of scope outside the security work brings the high end much under 45M: with T12 added to (c), the range is
+30.4M to 44.6M (below), which a 45M cap would hold with 0.4M to spare, at T12's costs, which include reopening the
+maintainer's answer to gate question 1 for Windows.
+
+**How a saving is counted.** An item's saving in caps is the caps it removes. Its saving in forecast follows the
+forecast's two assumptions: the caps removed times the ratio (0.64 at the low end, 0.85 at the high end), plus the
+controller's allowance (50k at the low end, 150k at the high end) for each task that no longer runs. Moving every item
+below saves 6.7M of caps and ten tasks: 4.8M of forecast at the low end and 7.2M at the high end (4.3M and 5.7M
+without the controller term), leaving a range of 30.4M to 44.6M ((48.0 - 6.7) x 0.64 + 1.7 + 0.5 + 35 x 0.05 and
+(48.0 - 6.7) x 0.85 + 3.7 + 0.5 + 35 x 0.15).
 
 Scope the maintainer could move out of M1, with what each saves and what it costs:
 
-- **The persistent shaped-text cache and its measurement (T36, T39):** saves 2.6M of caps (about 1.7M to 2.2M of
-  forecast). Costs: the scroll target is likely missed at the M1 gate (decision 0008 found the trial at the limit), and
-  gate question 4's answer ("M1 builds a persistent shaped-text cache") is reopened.
-- **The widget-kit measurement (T37):** saves 1.3M. Costs: question 23 is answered without numbers (our own renderer
+- **The persistent shaped-text cache and its measurement (T36, T39):** saves 2.6M of caps and two tasks: 1.8M of
+  forecast at the low end (2.6 x 0.64 + 2 x 0.05) and 2.5M at the high end (2.6 x 0.85 + 2 x 0.15). Costs: the scroll
+  target is likely missed at the M1 gate (decision 0008 found the trial at the limit), and gate question 4's answer
+  ("M1 builds a persistent shaped-text cache") is reopened.
+- **The widget-kit measurement (T37):** saves 1.3M of caps and one task: 0.9M of forecast at the low end (1.3 x 0.64 +
+  0.05) and 1.3M at the high end (1.3 x 0.85 + 0.15). Costs: question 23 is answered without numbers (our own renderer
   by default).
-- **The Windows sandbox (T12):** saves 1.3M. Costs: the shell is off on Windows through M1 (fail closed, P7), D3's
-  footprint is not built, and a design 8 exception covers it for M1.
+- **The Windows sandbox (T12):** saves 1.3M of caps and one task: 0.9M to 1.3M of forecast, as for T37. Costs, all of
+  them:
+  - It reopens two of the maintainer's answers of 2026-11-17: gate question 1 for Windows (the shell sandbox on all
+    three platforms in M1; A 1.1 item 4), and D3, the acceptance of an AppContainer with a job object and its
+    access-list footprint. The shell is off on Windows through M1 (fail closed, P7), which needs a design 8 exception
+    the maintainer accepts; the Windows backend then reports `Unavailable` with a "not built in M1" reason instead of
+    being built (a small change the controller assigns).
+  - D3's footprint is not built: no access entries, records or AppContainer profiles; `unidex sandbox clean` and
+    `unidex trust --revoke` have nothing to remove on Windows either; record 0016 is not written.
+  - The doctor task (T25) changes: on Windows its sandbox row reports the shell off with that reason, its "Windows
+    sandbox access entries" row reports none, and T12 leaves its Needs.
+  - The Windows rows of the coverage tables change from tested to "shell off on Windows": in A section 6 the Windows
+    tests of P1, P8, P10, P23, P43, P48, P50 and P51 are not written, and P7's
+    `p7_forced_unavailable_shell_absent_and_refuses` pins the shell's absence instead; the Windows column of A 3.1.5's
+    probe table and A 3.6's Windows items become M2 work; T40's residual list loses D3's tool compatibility and access
+    entries and gains "no shell on Windows in M1".
+  - The Windows shell runs of T21, T23 and T28 (and the evaluation suite's shell tasks there) are skipped with that
+    reason.
 - **Merges, which save review overhead only, not work:** T4 into T3, T26 into T27, T25 into T24, T17 into T16, T18
-  into T19, T31 into T32. Each saves about 0.25M (one reviewer allocation and one reserve, less the larger review of the
-  merged diff), about 1.5M for all six, at the cost of larger pull requests in crates already shared.
+  into T19, T31 into T32. Each saves about 0.25M of caps (one reviewer allocation and one reserve, less the larger
+  review of the merged diff) and one task, about 1.5M of caps and six tasks for all six: 1.3M of forecast at the low
+  end (1.5 x 0.64 + 6 x 0.05) and 2.2M at the high end (1.5 x 0.85 + 6 x 0.15), at the cost of larger pull requests in
+  crates already shared. They move no scope.
 - **Nothing in the security set** can move without the maintainer reopening question 2.
 
 ## Order of work
