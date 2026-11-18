@@ -88,3 +88,11 @@ the current plan under `docs/design/plans/`.
 - A role marked "fresh" is a new agent that took over from the original, usually a fix round when the original's
   context had grown large; it has its own row.
 - Agents stopped at a usage limit and then resumed keep one cumulative figure across the stop.
+| 2026-11-17 | M1 | Gate decisions written into the documents | builder | Sonnet | 2 | 229k | done; one fix round (1 important, 6 minor findings) | #17 |
+| 2026-11-17 | M1 | Gate decisions written into the documents | reviewer | Sonnet | 2 | 173k | approved after one fix round | #17 |
+| 2026-11-17 | M1 | Architecture and task breakdown | architect | Opus | 1 | 534k | done; 38 tasks, caps of 43.0M against the gate report's 21.9M | #18 |
+| 2026-11-17 | M1 | Architecture and task breakdown | reviewer | Opus | 1 | 440k | approved with fixes: 4 critical, 16 important, 24 minor findings | #18 |
+| 2026-11-18 | M1 | Architecture and plan, fix round 1 | fix author | Opus | 1 | 560k | all findings addressed; the task file became the plan, 45 tasks, caps of 50.2M | #18 |
+| 2026-11-18 | M1 | Architecture and plan, fix rounds 2 and 3 | fix author | Opus | 2 | 607k | done; round 2 fixed 2 partly resolved and 5 new important findings, round 3 fixed 2 more | #18 |
+| 2026-11-18 | M1 | Architecture and plan | re-reviewer | Opus | 3 | 598k | approved after three fix rounds; three clarifications carried to Tasks 2b, 6 and 24 | #18 |
+| 2026-11-18 | M1 | Start of M1 and its budget | maintainer's decision | not applicable | 1 | not applicable | M1's start approved; milestone cap of 52M tokens, full scope, check-ins at 11M, 22M and 33M | #18 |
