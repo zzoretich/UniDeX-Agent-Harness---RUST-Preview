@@ -583,48 +583,33 @@ fn governed_control_and_markup_characters_in_summary() {
 
 #[test]
 fn governed_escaped_names_cannot_collide() {
-    // The U+017F shadow of a governed path, and an ASCII decoy that spells out
-    // the escape the shadow is printed with. Built at run time.
-    let shadow = format!("xta{}k/src/privacy/mod.rs", '\u{17f}');
-    let decoy = "xta\\u{17f}k/src/privacy/mod.rs";
-    assert!(shadow.is_ascii() != decoy.is_empty() || !shadow.is_ascii());
+    // A shadow (a non-ASCII character in a governed path) and an ASCII decoy
+    // that spells out the escape the shadow is printed with. Built at run time.
+    let shadow = format!("xtask/{}.rs", '\u{17f}');
+    let decoy = "xtask/\\u{17f}.rs";
     let r = run_with(&[&shadow, decoy], true);
     assert_eq!(r.code, Some(0), "stdout: {}", r.stdout);
-    // Print each alone to see what it is called.
-    let lines: Vec<&str> = r
-        .stdout
-        .lines()
-        .filter(|l| l.starts_with("::warning "))
-        .collect();
-    let alone = run_with(&[&shadow], true);
-    let alone_decoy = run_with(&[decoy], true);
-    let a = flagged(&alone.stdout);
-    let d = flagged(&alone_decoy.stdout);
-    assert_eq!(a.len(), 1);
-    assert!(
-        !a.iter().any(|n| d.contains(n)),
-        "same printed name: {a:?} {d:?}"
-    );
-    // The decoy's backslash is printed as an escape of its own, so the only
-    // `\u{17f}` in the output is the shadow's.
-    for n in &d {
-        assert!(n.contains("\\u{5c}u{17f}"), "{n}");
-    }
-    for n in &a {
-        assert!(n.contains("xta\\u{17f}k") && !n.contains("u{5c}"), "{n}");
-    }
-    // In one run the shadow is flagged under its own printed name.
-    assert!(
-        lines.iter().any(|l| l.contains("file=xta\\u{17f}k/")),
-        "{lines:?}"
-    );
-    // The summary rows differ too, and each maps back to one name.
+    let printed = flagged(&r.stdout);
+    // Both are flagged (both sit under xtask/**) and print differently.
+    assert_eq!(printed.len(), 2, "{printed:?}");
+    assert!(printed.contains("xtask/\\u{17f}.rs"), "{printed:?}");
+    assert!(printed.contains("xtask/\\u{5c}u{17f}.rs"), "{printed:?}");
+    // The summary rows differ the same way.
     let rows = summary_names(&r.summary.unwrap());
-    assert!(rows.contains("xta\\u{17f}k/src/privacy/mod.rs"), "{rows:?}");
-    assert!(
-        rows.iter()
-            .all(|n| !n.contains('\\') || n.contains("u{5c}")),
-        "{rows:?}"
+    assert_eq!(rows, printed, "summary rows differ from annotations");
+    // The attack itself: a shadow of a governed path next to the ASCII decoy
+    // of its printed form. Only the shadow is flagged, and its printed form
+    // is not the decoy's name.
+    let shadow = format!("xta{}k/src/privacy/mod.rs", '\u{17f}');
+    let decoy = "xta\\u{17f}k/src/privacy/mod.rs";
+    let r = run_with(&[&shadow, decoy], true);
+    let printed = flagged(&r.stdout);
+    assert_eq!(printed.len(), 1, "{printed:?}");
+    // The printed `\u{17f}` can only come from the shadow: a literal backslash
+    // is always printed as `\u{5c}`, so the decoy would read differently.
+    assert_eq!(
+        printed.iter().next().unwrap(),
+        "xta\\u{17f}k/src/privacy/mod.rs"
     );
 }
 

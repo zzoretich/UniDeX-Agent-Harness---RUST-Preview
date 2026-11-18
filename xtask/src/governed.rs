@@ -16,10 +16,10 @@ use std::path::Path;
 /// The governed list: one pattern per row, with the reason it is governed.
 ///
 /// Patterns are anchored at the repository root, with `*` never crossing a
-/// folder separator and letter case ignored, except where a pattern starts
-/// with `**/` (any depth). A reason holds no markup characters, because it is
+/// folder separator and letter case ignored. A pattern that starts with `**/`
+/// applies at any depth instead of only at the root. A reason holds no markup characters, because it is
 /// written into a table cell. The record (decision 0025) carries the same table.
-pub const GOVERNED: &[(&str, &str)] = &[
+const GOVERNED: &[(&str, &str)] = &[
     (
         "xtask/**",
         "the tool that hosts the privacy gate, the hooks and this check, with their tests",
@@ -80,34 +80,37 @@ pub const GOVERNED: &[(&str, &str)] = &[
         "the path guard that confines every test to its test root",
     ),
     (
+        "crates/udx-core/src/lib.rs",
+        "a path attribute here could redirect the governed path guard module",
+    ),
+    (
         "docs/decisions/0025-governed-paths-review.md",
         "the record that defines the governed set and the review rule",
     ),
 ];
 
 /// The reason for a name that holds a non-ASCII character and matches no row.
-pub const NON_ASCII_REASON: &str =
+const NON_ASCII_REASON: &str =
     "non-ASCII name: may shadow a governed path on a case-folding file system";
 
-/// The compiled governed list, in the order of [`GOVERNED`].
-pub struct Matcher {
-    set: GlobSet,
-}
+/// The most entries the hosting service's files endpoint lists for one pull
+/// request. This is the API's documented limit, not verified offline; a list
+/// that reaches it may be cut off, whatever the pull request's count says.
+const LISTING_LIMIT: u64 = 3000;
 
-impl Default for Matcher {
-    fn default() -> Self {
-        Self::new()
-    }
+/// The compiled governed list, in the order of [`GOVERNED`].
+struct Matcher {
+    set: GlobSet,
 }
 
 /// Fold a path the way a case-folding file system can: upper-case, then
 /// lower-case, so characters that fold to ASCII letters become those letters.
-pub fn fold(name: &str) -> String {
+fn fold(name: &str) -> String {
     name.to_uppercase().to_lowercase()
 }
 
 impl Matcher {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let mut b = GlobSetBuilder::new();
         for (pattern, _) in GOVERNED {
             b.add(
@@ -125,7 +128,7 @@ impl Matcher {
 
     /// The reason of the first governed row the name matches, as given or
     /// folded; else the non-ASCII reason for a name with a non-ASCII character.
-    pub fn reason(&self, path: &str) -> Option<&'static str> {
+    fn reason(&self, path: &str) -> Option<&'static str> {
         let folded = fold(path);
         let first = self
             .set
@@ -146,9 +149,10 @@ fn push_escape(out: &mut String, c: char) {
     let _ = write!(out, "\\u{{{:x}}}", c as u32);
 }
 
-/// Escape a workflow-command property value (`%`, CR, LF, `:` and `,`; any
-/// other control or non-ASCII character is written as `\u{hex}`).
-pub fn escape_property(s: &str) -> String {
+/// Escape a workflow-command property value (`%`, CR, LF, `:` and `,`; a
+/// backslash and any other control or non-ASCII character is written as
+/// `\u{hex}`).
+fn escape_property(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -157,7 +161,7 @@ pub fn escape_property(s: &str) -> String {
             '\n' => out.push_str("%0A"),
             ':' => out.push_str("%3A"),
             ',' => out.push_str("%2C"),
-            c if c.is_control() || !c.is_ascii() => push_escape(&mut out, c),
+            c if c == '\\' || c.is_control() || !c.is_ascii() => push_escape(&mut out, c),
             c => out.push(c),
         }
     }
@@ -165,7 +169,7 @@ pub fn escape_property(s: &str) -> String {
 }
 
 /// Escape a workflow-command message (`%`, CR and LF).
-pub fn escape_message(s: &str) -> String {
+fn escape_message(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -179,9 +183,11 @@ pub fn escape_message(s: &str) -> String {
 }
 
 /// Make text safe inside one cell of a markdown table: one line, no raw HTML,
-/// no link, image or emphasis markup, no pipe that could end the cell, no
-/// control or non-ASCII character (written as `\u{hex}`).
-pub fn escape_cell(s: &str) -> String {
+/// no bracket link or image, no asterisk or tilde emphasis, no pipe that could end the cell, no
+/// control or non-ASCII character (written as `\u{hex}`), and a backslash
+/// written as `\u{5c}` so no two names print the same. Underscore emphasis,
+/// at-mentions and bare web addresses can still render.
+fn escape_cell(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -190,7 +196,6 @@ pub fn escape_cell(s: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '&' => out.push_str("&amp;"),
-            '\\' => out.push_str("&#92;"),
             '[' => out.push_str("&#91;"),
             ']' => out.push_str("&#93;"),
             '(' => out.push_str("&#40;"),
@@ -201,7 +206,7 @@ pub fn escape_cell(s: &str) -> String {
             '\r' => out.push_str("&#13;"),
             '\n' => out.push_str("&#10;"),
             c if c.is_control() => out.push('?'),
-            c if !c.is_ascii() => push_escape(&mut out, c),
+            c if c == '\\' || !c.is_ascii() => push_escape(&mut out, c),
             c => out.push(c),
         }
     }
@@ -209,7 +214,7 @@ pub fn escape_cell(s: &str) -> String {
 }
 
 /// Split a list file: names each ended by a NUL byte; empty names are dropped.
-pub fn parse_list(bytes: &[u8]) -> Vec<String> {
+fn parse_list(bytes: &[u8]) -> Vec<String> {
     bytes
         .split(|b| *b == 0)
         .filter(|n| !n.is_empty())
@@ -217,10 +222,19 @@ pub fn parse_list(bytes: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// One of git's status letters, then optional digits (the score of a rename
+/// or a copy).
+fn is_status_word(w: &[u8]) -> bool {
+    match w.split_first() {
+        Some((l, rest)) => b"ACDMRTUX".contains(l) && rest.iter().all(|b| b.is_ascii_digit()),
+        None => false,
+    }
+}
+
 /// Read the output of `git diff --name-status -z --find-renames`: a status
 /// word, then one path, or two (old, new) for a rename or a copy, each ended
 /// by a NUL byte. Every path, old and new, becomes a name.
-pub fn parse_name_status(bytes: &[u8]) -> Result<Vec<String>, String> {
+fn parse_name_status(bytes: &[u8]) -> Result<Vec<String>, String> {
     let mut toks = bytes.split(|b| *b == 0).collect::<Vec<_>>();
     if toks.last().is_some_and(|t| t.is_empty()) {
         toks.pop();
@@ -228,10 +242,12 @@ pub fn parse_name_status(bytes: &[u8]) -> Result<Vec<String>, String> {
     let mut names = Vec::new();
     let mut it = toks.into_iter();
     while let Some(status) = it.next() {
-        let two = matches!(status.first(), Some(b'R' | b'C'));
-        if status.is_empty() {
-            return Err("name-status input: an empty status".into());
+        if !is_status_word(status) {
+            return Err(
+                "name-status input: not git diff --name-status -z output (bad status word)".into(),
+            );
         }
+        let two = matches!(status.first(), Some(b'R' | b'C'));
         for _ in 0..(if two { 2 } else { 1 }) {
             match it.next() {
                 Some(p) if !p.is_empty() => names.push(String::from_utf8_lossy(p).into_owned()),
@@ -281,7 +297,7 @@ pub fn run(req: &Request, out: &mut dyn Write) -> Result<usize, String> {
         }
     }
     let incomplete = match req.counts {
-        Some((changed, listed)) if listed < changed => Some(format!(
+        Some((changed, listed)) if listed < changed || listed >= LISTING_LIMIT => Some(format!(
             "The changed-file list is incomplete ({listed} of {changed}); treat this pull request as governed."
         )),
         _ => None,
@@ -311,7 +327,10 @@ pub fn run(req: &Request, out: &mut dyn Write) -> Result<usize, String> {
     if let Some(path) = req.summary {
         let mut text = String::from("## Governed paths\n\n");
         if let (Some(base), Some(head)) = (req.base, req.head) {
-            let _ = writeln!(text, "Examined base {base} and head {head}.\n");
+            let _ = writeln!(
+                text,
+                "Run for base {base} and head {head} (from the event).\n"
+            );
         }
         if let Some(msg) = &incomplete {
             let _ = writeln!(text, "{msg}\n");
