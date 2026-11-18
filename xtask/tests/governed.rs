@@ -396,6 +396,13 @@ fn governed_reads_name_status_output() {
         r.code
     );
     assert!(flagged(&r.stdout).is_empty());
+    // An empty path is an error too.
+    let r = run_raw(b"M\0\0", &["--name-status"], true);
+    assert!(
+        matches!(r.code, Some(c) if c != 0),
+        "empty path: {:?}",
+        r.code
+    );
     // Without the flag the same bytes are plain names, and the status words
     // are names that are not governed.
     let r = run_raw(b"M\0README.md\0", &[], true);
