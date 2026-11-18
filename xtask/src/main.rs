@@ -27,9 +27,26 @@ enum Cmd {
 
 #[derive(Args)]
 struct GovernedArgs {
-    /// A file of changed paths, each ended by a NUL byte.
+    /// A file of changed paths, each ended by a NUL byte. With --name-status:
+    /// the output of `git diff --name-status -z --find-renames BASE...HEAD`
+    /// saved to a file, which names both paths of a rename.
     #[arg(long, value_name = "LIST_FILE")]
     files: std::path::PathBuf,
+    /// Read the list as `git diff --name-status -z` output.
+    #[arg(long)]
+    name_status: bool,
+    /// The changed-file count of the pull request (needs --listed).
+    #[arg(long, value_name = "N", requires = "listed")]
+    changed: Option<u64>,
+    /// The number of entries the hosting service listed (needs --changed).
+    #[arg(long, value_name = "N", requires = "changed")]
+    listed: Option<u64>,
+    /// The base commit id examined, 40 or 64 hexadecimal characters.
+    #[arg(long, value_name = "ID", value_parser = governed::check_commit_id, requires = "head")]
+    base: Option<String>,
+    /// The head commit id examined, 40 or 64 hexadecimal characters.
+    #[arg(long, value_name = "ID", value_parser = governed::check_commit_id, requires = "base")]
+    head: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -90,7 +107,15 @@ fn main() -> ExitCode {
                 .filter(|v| !v.is_empty())
                 .map(std::path::PathBuf::from);
             let mut out = std::io::stdout().lock();
-            match governed::run(&a.files, summary.as_deref(), &mut out) {
+            let req = governed::Request {
+                list: &a.files,
+                name_status: a.name_status,
+                counts: a.changed.zip(a.listed),
+                base: a.base.as_deref(),
+                head: a.head.as_deref(),
+                summary: summary.as_deref(),
+            };
+            match governed::run(&req, &mut out) {
                 Ok(_) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("governed: {e}");
