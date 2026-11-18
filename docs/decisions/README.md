@@ -25,3 +25,4 @@ in record 0010) now lives at `docs/acceptance/hands-on/platform-trial.md`.
 | [0012](0012-embedded-browser-trial.md) | Embedded browser trial | accepted with open questions |
 | [0013](0013-rendering-in-ci-and-vms.md) | Rendering in CI and in virtual machines | accepted with open questions |
 | [0014](0014-packaging-and-identity.md) | Packaging tool and application identity | accepted |
+| [0025](0025-governed-paths-review.md) | Governed paths: flag and review | accepted |

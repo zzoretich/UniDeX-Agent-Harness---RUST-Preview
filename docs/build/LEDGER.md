@@ -99,3 +99,9 @@ the current plan under `docs/design/plans/`.
 | 2026-11-18 | M1 | Task 1b path guard | test author | Sonnet | 1 | 165k | 21 tests written first | #19 |
 | 2026-11-18 | M1 | Task 1b path guard | builder | Sonnet | 3 | 244k | done after two fix rounds | #19 |
 | 2026-11-18 | M1 | Task 1b path guard | reviewer | Opus | 3 | 346k | approved: round 1 found 5 important and 15 minor findings, all important ones fixed; round 2 closed 6 notes | #19 |
+| 2026-11-18 | M1 | Task 1c governed paths | test author | Sonnet | 1 | 111k | 4 tests written first | #20 |
+| 2026-11-18 | M1 | Task 1c governed paths | builder | Sonnet | 3 | 224k | done after two fix rounds | #20 |
+| 2026-11-18 | M1 | Task 1c governed paths | reviewer | Opus | 2 | 294k | approved: round 1 found 1 critical, 3 important and 6 minor findings, all but one optional nit fixed | #20 |
+| 2026-11-18 | M1 | Task 1c governed paths | security reviewer | Opus | 3 | 330k | safe to merge: round 1 found 2 critical and 4 important ways to evade the flag, round 2 found 2 more, all fixed | #20 |
+| 2026-11-18 | M1 | Contract amendments after Tasks 1b and 1c | builder | Sonnet | 1 | 199k | done | #23 |
+| 2026-11-18 | M1 | Contract amendments after Tasks 1b and 1c | reviewer | Sonnet | 1 | 175k | approved, 6 minor notes left | #23 |
