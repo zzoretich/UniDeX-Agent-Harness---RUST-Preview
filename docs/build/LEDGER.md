@@ -96,3 +96,6 @@ the current plan under `docs/design/plans/`.
 | 2026-11-18 | M1 | Architecture and plan, fix rounds 2 and 3 | fix author | Opus | 2 | 607k | done; round 2 fixed 2 partly resolved and 5 new important findings, round 3 fixed 2 more | #18 |
 | 2026-11-18 | M1 | Architecture and plan | re-reviewer | Opus | 3 | 598k | approved after three fix rounds; three clarifications carried to Tasks 2b, 6 and 24 | #18 |
 | 2026-11-18 | M1 | Start of M1 and its budget | maintainer's decision | not applicable | 1 | not applicable | M1's start approved; milestone cap of 52M tokens, full scope, check-ins at 11M, 22M and 33M | #18 |
+| 2026-11-18 | M1 | Task 1b path guard | test author | Sonnet | 1 | 165k | 21 tests written first | #19 |
+| 2026-11-18 | M1 | Task 1b path guard | builder | Sonnet | 3 | 244k | done after two fix rounds | #19 |
+| 2026-11-18 | M1 | Task 1b path guard | reviewer | Opus | 3 | 346k | approved: round 1 found 5 important and 15 minor findings, all important ones fixed; round 2 closed 6 notes | #19 |
