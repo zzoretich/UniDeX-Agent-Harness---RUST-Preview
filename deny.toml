@@ -47,3 +47,5 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []
 
 # scratch: governed-paths check, to be discarded
+
+scratch skip-ci probe
