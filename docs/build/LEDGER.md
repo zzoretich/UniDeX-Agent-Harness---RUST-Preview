@@ -94,4 +94,4 @@ the current plan under `docs/design/plans/`.
 | 2026-11-17 | M1 | Architecture and task breakdown | reviewer | Opus | 1 | 440k | approved with fixes: 4 critical, 16 important, 24 minor findings | #18 |
 | 2026-11-18 | M1 | Architecture and plan, fix round 1 | fix author | Opus | 1 | 560k | all findings addressed; the task file became the plan, 45 tasks, caps of 50.2M | #18 |
 | 2026-11-18 | M1 | Architecture and plan, fix rounds 2 and 3 | fix author | Opus | 2 | 607k | done; round 2 fixed 2 partly resolved and 5 new important findings, round 3 fixed 2 more | #18 |
-| 2026-11-18 | M1 | Architecture and plan | re-reviewer | Opus | 3 | 551k+ (the last round not recorded) | approved after three fix rounds; three clarifications carried to Tasks 2b, 6 and 24 | #18 |
+| 2026-11-18 | M1 | Architecture and plan | re-reviewer | Opus | 3 | 598k | approved after three fix rounds; three clarifications carried to Tasks 2b, 6 and 24 | #18 |
