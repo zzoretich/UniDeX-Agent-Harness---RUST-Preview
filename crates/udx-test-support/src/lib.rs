@@ -27,6 +27,11 @@ impl TestRoot {
             .unwrap_or_else(|| {
                 panic!("{TEST_ROOT} is not set: run the tests through cargo (cargo test)")
             });
+        // Checked before anything is created, so a relative value never makes a folder in the working folder.
+        assert!(
+            Path::new(&root).is_absolute(),
+            "{TEST_ROOT} must be an absolute path"
+        );
         std::fs::create_dir_all(&root).expect("create the test root");
         let dir = tempfile::Builder::new()
             .prefix("udx-")
@@ -141,16 +146,42 @@ fn encodings(canary: &str) -> Vec<Vec<u8>> {
     let raw = canary.as_bytes();
     let mut all = vec![
         canary.to_string(),
-        base64(raw, false),
-        base64(raw, true),
         percent(raw, false),
         percent(raw, true),
         hex(raw, false),
         hex(raw, true),
     ];
+    for url_safe in [false, true] {
+        all.extend(base64_needles(raw, url_safe));
+    }
     all.sort();
     all.dedup();
     all.into_iter().map(String::into_bytes).collect()
+}
+
+/// The characters of the canary's base64 form that do not depend on its neighbours, for each of the three alignments
+/// (0, 1 or 2 bytes of other data before it). The characters that mix in a neighbouring byte are dropped: the leading
+/// ones that hold bits of the byte before, and the last one when the canary does not end on a three-byte boundary.
+/// A needle shorter than `MIN_NEEDLE` would match unrelated text, so it is skipped.
+fn base64_needles(canary: &[u8], url_safe: bool) -> Vec<String> {
+    const MIN_NEEDLE: usize = 6;
+    let mut out = Vec::new();
+    for before in 0..3usize {
+        let mut data = vec![0u8; before];
+        data.extend_from_slice(canary);
+        let encoded = base64(&data, url_safe);
+        let lead = [0, 2, 3][before];
+        let trail = usize::from(data.len() % 3 != 0);
+        let chars: Vec<char> = encoded.chars().collect();
+        if chars.len() < lead + trail {
+            continue;
+        }
+        let needle: String = chars[lead..chars.len() - trail].iter().collect();
+        if needle.len() >= MIN_NEEDLE {
+            out.push(needle);
+        }
+    }
+    out
 }
 
 /// Base64 without padding, so a value matches whether or not the writer padded it.

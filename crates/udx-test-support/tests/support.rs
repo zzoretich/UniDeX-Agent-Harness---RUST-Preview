@@ -100,7 +100,7 @@ fn hex(input: &str) -> String {
 
 #[test]
 fn scan_for_canary_finds_each_encoding() {
-    // Six bytes, a multiple of three, so the standard form has no padding; the bytes `?`, `>` and `~` make the two
+    // Nine bytes, a multiple of three, so the standard form has no padding; the bytes `?`, `>` and `~` make the two
     // base64 alphabets differ and need percent escapes. Invented, low entropy, and no rule's shape.
     let canary = "c4n??>>~~";
     let std_b64 = base64(canary.as_bytes(), false);
@@ -130,4 +130,70 @@ fn scan_for_canary_finds_each_encoding() {
     assert!(scan_for_canary(root.path(), "other-0000").is_empty());
     // A missing folder yields nothing and does not panic.
     assert!(scan_for_canary(&root.child("no-such-folder"), canary).is_empty());
+}
+
+/// Base64 of a whole payload, padded or not.
+fn base64_payload(input: &[u8], url_safe: bool, pad: bool) -> String {
+    let mut out = base64(input, url_safe);
+    if !pad {
+        out.retain(|c| c != '=');
+    }
+    out
+}
+
+#[test]
+fn scan_for_canary_finds_base64_inside_larger_payloads() {
+    // Two canaries, one whose length is a multiple of three and one that is not, so every alignment and every kind of
+    // ending is met. Both are invented and low entropy.
+    for canary in [
+        "c4n??>>~~",
+        "c4n??>>~~x",
+        "c4n??>>~~xy",
+        "invented-canary-0000?>",
+    ] {
+        for before in 0..3usize {
+            for after in [0usize, 1, 2, 5] {
+                for url_safe in [false, true] {
+                    for pad in [false, true] {
+                        let mut payload = b"user".to_vec();
+                        payload.truncate(before);
+                        payload.extend_from_slice(canary.as_bytes());
+                        payload.extend(std::iter::repeat_n(b'~', after));
+                        let blob = base64_payload(&payload, url_safe, pad);
+                        let root = TestRoot::new();
+                        let p = root.child("blob.txt");
+                        std::fs::write(&p, format!("Authorization: Basic {blob}\n")).unwrap();
+                        assert_eq!(
+                            scan_for_canary(root.path(), canary),
+                            vec![p],
+                            "canary {canary:?}, {before} bytes before, {after} after, url_safe {url_safe}, pad {pad}: {blob}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn scan_for_canary_finds_hex_and_percent_inside_larger_data() {
+    let canary = "c4n??>>~~";
+    let lower_hex = hex(canary);
+    let upper_hex = lower_hex.to_uppercase();
+    let upper_pct = percent(canary);
+    let lower_pct = upper_pct.to_lowercase();
+    let root = TestRoot::new();
+    let mut want = BTreeSet::new();
+    for (name, body) in [
+        ("hex_lower", format!("00ff{lower_hex}aa11")),
+        ("hex_upper", format!("00FF{upper_hex}AA11")),
+        ("pct_upper", format!("q=pre{upper_pct}&x=1")),
+        ("pct_lower", format!("q=pre{lower_pct}&x=1")),
+    ] {
+        let p = root.child(name);
+        std::fs::write(&p, body).unwrap();
+        want.insert(p);
+    }
+    let found: BTreeSet<PathBuf> = scan_for_canary(root.path(), canary).into_iter().collect();
+    assert_eq!(found, want);
 }
