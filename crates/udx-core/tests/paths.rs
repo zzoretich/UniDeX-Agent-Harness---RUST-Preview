@@ -84,9 +84,15 @@ fn a_root_reached_through_a_symlink_is_accepted() {
 }
 
 #[test]
-fn without_a_test_root_the_os_folders_are_used() {
-    let p = AppPaths::resolve(&MapEnv::of([] as [(&str, &Path); 0])).unwrap();
-    assert!(p.config_dir.to_string_lossy().contains("unidex-preview"));
+fn a_test_build_without_a_test_root_never_returns_os_folders() {
+    // This crate's tests run with the `testing` feature, so the operating
+    // system's folders are never an answer. The non-testing path (the OS
+    // folders) is covered by the unit tests in `src/paths.rs`.
+    let e = AppPaths::resolve(&MapEnv::of([] as [(&str, &Path); 0]));
+    assert!(
+        matches!(e, Err(PathError::TestBuildWithoutTestRoot)),
+        "{e:?}"
+    );
 }
 
 #[test]
@@ -103,7 +109,7 @@ fn cargo_gives_every_test_process_a_test_root() {
 
 #[test]
 fn test_env_folders_sit_inside_the_process_root() {
-    let env = udx_test_support::TestEnv::new();
+    let env = udx_core::paths::testing::TestEnv::new();
     let p = AppPaths::resolve(&env).unwrap();
     assert!(p.data_dir.starts_with(real(env.root())));
 }

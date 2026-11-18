@@ -8,7 +8,13 @@ publish = false
 [dependencies]
 directories = "6"
 thiserror = "2"
+tempfile = { version = "3", optional = true }
+
+[features]
+# Test helpers (paths::testing) and a fail-closed AppPaths::resolve. Enabled only by tests.
+testing = ["dep:tempfile"]
 
 [dev-dependencies]
 tempfile = "3"
 udx-test-support = { path = "../udx-test-support" }
+udx-core = { path = ".", features = ["testing"] }
