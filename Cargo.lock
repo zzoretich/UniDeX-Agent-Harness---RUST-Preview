@@ -5432,6 +5432,7 @@ dependencies = [
  "directories",
  "tempfile",
  "thiserror 2.0.21",
+ "udx-core",
  "udx-test-support",
 ]
 
@@ -5440,7 +5441,6 @@ name = "udx-test-support"
 version = "0.0.1"
 dependencies = [
  "tempfile",
- "udx-core",
 ]
 
 [[package]]

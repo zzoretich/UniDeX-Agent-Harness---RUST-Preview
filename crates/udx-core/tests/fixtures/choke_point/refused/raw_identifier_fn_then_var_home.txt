@@ -1,0 +1,2 @@
+fn r#loop() {}
+fn g() { let h = std::env::var("HOME"); }

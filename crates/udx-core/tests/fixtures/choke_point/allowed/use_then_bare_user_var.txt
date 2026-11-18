@@ -1,0 +1,5 @@
+use udx_core::paths::user_var;
+
+fn login_shell(env: &dyn Env) -> Option<OsString> {
+    user_var(env, UserVar::Shell)
+}

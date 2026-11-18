@@ -1,0 +1,2 @@
+struct Wire { r#type: u8 }
+fn f() { let h = std::env::home_dir(); }

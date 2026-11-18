@@ -1,0 +1,3 @@
+use std::env as e;
+
+fn t() -> PathBuf { e::temp_dir() }

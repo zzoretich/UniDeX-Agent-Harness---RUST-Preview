@@ -1,0 +1,5 @@
+let x = homepage::home_dir_name();
+let y = my_dirs::thing();
+let z = self::home::local();
+let w = crate::home::local();
+let v = env::args();

@@ -22,8 +22,9 @@ impl Env for MapEnv {
     }
 }
 
-fn tmp() -> tempfile::TempDir {
-    tempfile::tempdir().unwrap()
+/// A fresh folder inside the process's test root (never the OS temp folder).
+fn tmp() -> udx_test_support::TestRoot {
+    udx_test_support::TestRoot::new()
 }
 
 fn real(p: &Path) -> PathBuf {
@@ -84,9 +85,15 @@ fn a_root_reached_through_a_symlink_is_accepted() {
 }
 
 #[test]
-fn without_a_test_root_the_os_folders_are_used() {
-    let p = AppPaths::resolve(&MapEnv::of([] as [(&str, &Path); 0])).unwrap();
-    assert!(p.config_dir.to_string_lossy().contains("unidex-preview"));
+fn a_test_build_without_a_test_root_never_returns_os_folders() {
+    // This crate's tests run with the `testing` feature, so the operating
+    // system's folders are never an answer. The non-testing path (the OS
+    // folders) is covered by the unit tests in `src/paths.rs`.
+    let e = AppPaths::resolve(&MapEnv::of([] as [(&str, &Path); 0]));
+    assert!(
+        matches!(e, Err(PathError::TestBuildWithoutTestRoot)),
+        "{e:?}"
+    );
 }
 
 #[test]
@@ -103,7 +110,7 @@ fn cargo_gives_every_test_process_a_test_root() {
 
 #[test]
 fn test_env_folders_sit_inside_the_process_root() {
-    let env = udx_test_support::TestEnv::new();
+    let env = udx_core::paths::testing::TestEnv::new();
     let p = AppPaths::resolve(&env).unwrap();
     assert!(p.data_dir.starts_with(real(env.root())));
 }
@@ -320,5 +327,63 @@ fn an_unreadable_folder_is_refused() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     if enforced {
         assert!(matches!(result, Err(PathError::OutsideTestRoot { .. })));
+    } else {
+        skipped_as_root_notice(&mut std::io::stderr(), "an_unreadable_folder_is_refused");
+    }
+}
+
+/// The notice printed when a test is skipped because the process runs as root.
+#[cfg(unix)]
+fn skipped_as_root_notice(out: &mut dyn std::io::Write, test: &str) {
+    writeln!(
+        out,
+        "SKIPPED {test}: running as root, so file permissions are not enforced"
+    )
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn skipped_as_root_prints_notice() {
+    let mut captured: Vec<u8> = Vec::new();
+    skipped_as_root_notice(&mut captured, "an_unreadable_folder_is_refused");
+    let text = String::from_utf8(captured).unwrap();
+    assert!(text.contains("SKIPPED"), "{text}");
+    assert!(text.contains("an_unreadable_folder_is_refused"), "{text}");
+    assert!(text.contains("root"), "{text}");
+    assert!(text.ends_with('\n'), "{text}");
+}
+
+#[test]
+fn relative_override_is_made_absolute_inside_root() {
+    let root = tmp();
+    let real_root = real(root.path());
+    let mut env = MapEnv::of([("UNIDEX_TEST_ROOT", root.path())]);
+    env.0
+        .insert("UNIDEX_CONFIG_DIR".to_string(), "rel/c".to_string());
+    env.0
+        .insert("UNIDEX_DATA_DIR".to_string(), "rel/d".to_string());
+    env.0
+        .insert("UNIDEX_CACHE_DIR".to_string(), "k".to_string());
+    let p = AppPaths::resolve(&env).unwrap();
+    assert_eq!(p.config_dir, real_root.join("rel").join("c"));
+    assert_eq!(p.data_dir, real_root.join("rel").join("d"));
+    assert_eq!(p.cache_dir, real_root.join("k"));
+    assert!(p.data_dir.is_absolute());
+    // Nothing is created, and nothing is resolved against the working folder.
+    assert!(!real_root.join("rel").exists());
+}
+
+#[test]
+fn relative_override_escaping_root_refused() {
+    let root = tmp();
+    for var in ["UNIDEX_CONFIG_DIR", "UNIDEX_DATA_DIR", "UNIDEX_CACHE_DIR"] {
+        let mut env = MapEnv::of([("UNIDEX_TEST_ROOT", root.path())]);
+        env.0.insert(var.to_string(), "../outside".to_string());
+        let e = AppPaths::resolve(&env);
+        assert!(
+            matches!(e, Err(PathError::OutsideTestRoot { .. })),
+            "{var}: {e:?}"
+        );
     }
 }
