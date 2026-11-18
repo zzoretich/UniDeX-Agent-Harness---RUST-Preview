@@ -4,8 +4,9 @@ A Rust rebuild of the UniDeX Agent Harness: its own agent engine that works with
 vendors' coding agents as optional add-ons, and a native interface built on GPUI. It plans to target macOS, Linux and
 Windows.
 
-**Status: pre-release, and not usable as an application.** Milestone M0, the foundations, is complete and awaiting the
-maintainer's decisions. It produced a workspace skeleton, CI on three platforms, a privacy gate, a threat model, an
+**Status: pre-release, and not usable as an application.** Milestone M0, the foundations, is complete and was signed off
+by the maintainer on 2026-11-17, who decided the questions due before M1 is planned (questions 1 to 5 of the gate
+report); the rest are open. It produced a workspace skeleton, CI on three platforms, a privacy gate, a threat model, an
 acceptance checklist, a set of trials with written decisions, and a small cookbook of GPUI examples. The only user-facing
 programs are `unidex --version` and the example windows. Nothing here chats, runs an agent or edits anything yet.
 

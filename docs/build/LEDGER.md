@@ -75,6 +75,7 @@ the current plan under `docs/design/plans/`.
 | 2026-11-17 | M0 | Task 16 | reviewer (final whole-branch) | Opus | 1 | 503k | ready to merge with fixes: 10 important, none critical | #15 |
 | 2026-11-17 | M0 | Task 16 | builder (fresh, final fix wave) | Opus | 1 | 371k | done | #15 |
 | 2026-11-17 | M0 | Task 16 | re-reviewer (final) | Sonnet | 1 | 202k | approved | #15 |
+| 2026-11-17 | M0 | M0 sign-off and gate decisions (questions 1 to 5) | maintainer's decision, recorded in the documents | not applicable | 1 | not applicable | M0 signed off; questions 1 to 5 decided and recorded in the gate report, design, threat model and decision 0014; the section d hand checks not done, still owed; questions 6 to 27 open | pending |
 
 ## Notes
 

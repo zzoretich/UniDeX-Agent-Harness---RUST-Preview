@@ -302,7 +302,7 @@ delete the download, and report what macOS said: that is the one result the runn
 - The first signed build is made, or any build is to be released to users: first the unhashed fetches listed under
   Supply chain (the NSIS ApplicationID plugin, the `create-dmg` script, the AppImage tooling if used) are hash-checked
   or supplied from a verified copy;
-- The first signed or notarized release is prepared (the placeholder identifier replaced; secrets supplied; the pre-signing changes
-  in Consequences made); the browser is packaged
-  (re-trial nested bundles, the setuid `.deb` and the Windows bootstrap); cargo-packager has no release by
-  mid-2027 or breaks on a pinned toolchain; or a measured download size exceeds the 40 MB target.
+- The first signed or notarized release is prepared (the placeholder identifier replaced; secrets supplied; the
+  pre-signing changes in Consequences made); the browser is packaged (re-trial nested bundles, the setuid `.deb` and
+  the Windows bootstrap); cargo-packager has no release by mid-2027 or breaks on a pinned
+  toolchain; or a measured download size exceeds the 40 MB target.
