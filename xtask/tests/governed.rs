@@ -132,6 +132,16 @@ fn governed_list_matches_record() {
         "xtask/src/main.rs",
         "xtask/src/lib.rs",
         "xtask/Cargo.toml",
+        "xtask/src/privacy.rs",
+        "xtask/src/privacy_extra/mod.rs",
+        "xtask/src/privacyx/mod.rs",
+        "xtask/src/hooks_extra.rs",
+        "xtask/src/hook.rs",
+        "xtask/src/governed_extra.rs",
+        "xtask/tests/xprivacy.rs",
+        "xtask/tests/privacy.txt",
+        "xtask/tests/secrets_extra.rs",
+        "xtask/tests/other.rs",
         "xtask/tests/privacy.rs",
         "xtask/tests/privacy_mutants.rs",
         "xtask/tests/secrets.rs",
@@ -156,6 +166,7 @@ fn governed_list_matches_record() {
         "CODEOWNERS",
         "docs/CODEOWNERS",
         "crates/udx-core/src/paths.rs",
+        "crates/udx-core/src/lib.rs",
         "docs/decisions/0025-governed-paths-review.md",
         // Rulings of the controller: a `.cargo` folder, file or link at any
         // depth, and everything under `.github/`.
@@ -178,7 +189,7 @@ fn governed_list_matches_record() {
         "docs/build/LEDGER.md",
         "docs/decisions/0024-x.md",
         "crates/udx-core/tests/hooks.rs",
-        "crates/udx-core/src/lib.rs",
+        "crates/udx-core/src/config.rs",
         "crates/udx-core/Cargo.toml",
         "cargo",
         "privacy-allow.toml.bak",
@@ -461,7 +472,7 @@ fn governed_prints_commit_ids_and_refuses_bad_ones() {
     );
     for l in summary.lines() {
         assert!(
-            l.is_empty() || l.starts_with('|') || l.starts_with('#') || l.starts_with("Examined"),
+            l.is_empty() || l.starts_with('|') || l.starts_with('#') || l.starts_with("Run for"),
             "stray summary line: {l:?}"
         );
     }
@@ -568,4 +579,156 @@ fn governed_control_and_markup_characters_in_summary() {
     }
     // The annotation holds the escape for the control characters too.
     assert!(!r.stdout.contains('\u{1b}'), "{:?}", r.stdout);
+}
+
+#[test]
+fn governed_escaped_names_cannot_collide() {
+    // The U+017F shadow of a governed path, and an ASCII decoy that spells out
+    // the escape the shadow is printed with. Built at run time.
+    let shadow = format!("xta{}k/src/privacy/mod.rs", '\u{17f}');
+    let decoy = "xta\\u{17f}k/src/privacy/mod.rs";
+    assert!(shadow.is_ascii() != decoy.is_empty() || !shadow.is_ascii());
+    let r = run_with(&[&shadow, decoy], true);
+    assert_eq!(r.code, Some(0), "stdout: {}", r.stdout);
+    // Print each alone to see what it is called.
+    let lines: Vec<&str> = r
+        .stdout
+        .lines()
+        .filter(|l| l.starts_with("::warning "))
+        .collect();
+    let alone = run_with(&[&shadow], true);
+    let alone_decoy = run_with(&[decoy], true);
+    let a = flagged(&alone.stdout);
+    let d = flagged(&alone_decoy.stdout);
+    assert_eq!(a.len(), 1);
+    assert!(
+        !a.iter().any(|n| d.contains(n)),
+        "same printed name: {a:?} {d:?}"
+    );
+    // The decoy's backslash is printed as an escape of its own, so the only
+    // `\u{17f}` in the output is the shadow's.
+    for n in &d {
+        assert!(n.contains("\\u{5c}u{17f}"), "{n}");
+    }
+    for n in &a {
+        assert!(n.contains("xta\\u{17f}k") && !n.contains("u{5c}"), "{n}");
+    }
+    // In one run the shadow is flagged under its own printed name.
+    assert!(
+        lines.iter().any(|l| l.contains("file=xta\\u{17f}k/")),
+        "{lines:?}"
+    );
+    // The summary rows differ too, and each maps back to one name.
+    let rows = summary_names(&r.summary.unwrap());
+    assert!(rows.contains("xta\\u{17f}k/src/privacy/mod.rs"), "{rows:?}");
+    assert!(
+        rows.iter()
+            .all(|n| !n.contains('\\') || n.contains("u{5c}")),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn governed_flags_a_list_at_the_listing_limit() {
+    let list = nul(&["README.md"]);
+    // Exactly the documented limit listed, with the event's count equal: the
+    // count may be capped as well, so this still warns.
+    let r = run_raw(&list, &["--changed", "3000", "--listed", "3000"], true);
+    assert_eq!(r.code, Some(0), "stdout: {}", r.stdout);
+    let warn: Vec<&str> = r.stdout.lines().filter(|l| l.starts_with("::")).collect();
+    assert_eq!(warn.len(), 1, "stdout: {:?}", r.stdout);
+    assert!(
+        warn[0].contains("incomplete (3000 of 3000)"),
+        "{:?}",
+        warn[0]
+    );
+    assert!(
+        r.summary
+            .unwrap()
+            .contains("treat this pull request as governed")
+    );
+    // Just under it, with matching counts: no warning.
+    let r = run_raw(&list, &["--changed", "2999", "--listed", "2999"], true);
+    assert_eq!(r.code, Some(0));
+    assert!(!r.stdout.contains("incomplete"), "{:?}", r.stdout);
+    assert!(!r.summary.unwrap().contains("incomplete"));
+}
+
+#[test]
+fn governed_name_status_refuses_other_input() {
+    // A plain list read as name-status: `deny.toml` is not a status word.
+    let r = run_raw(&nul(&["deny.toml", "README.md"]), &["--name-status"], true);
+    assert!(
+        matches!(r.code, Some(c) if c != 0),
+        "plain list: {:?}",
+        r.code
+    );
+    assert!(flagged(&r.stdout).is_empty());
+    // Status words git does not emit.
+    for bad in ["Z", "m", "MM", "M1x", "RR100", "100", " M"] {
+        let mut b = Vec::new();
+        b.extend_from_slice(bad.as_bytes());
+        b.extend_from_slice(b"\0deny.toml\0docs/x.toml\0");
+        let r = run_raw(&b, &["--name-status"], true);
+        assert!(
+            matches!(r.code, Some(c) if c != 0),
+            "accepted status {bad:?}: {:?}",
+            r.code
+        );
+    }
+    // Every letter git documents, with a score where git gives one.
+    for ok in ["A", "C", "D", "M", "R", "T", "U", "X", "R100", "C75", "M"] {
+        let two = ok.starts_with('R') || ok.starts_with('C');
+        let mut b = Vec::new();
+        b.extend_from_slice(ok.as_bytes());
+        b.extend_from_slice(b"\0deny.toml\0");
+        if two {
+            b.extend_from_slice(b"docs/x.toml\0");
+        }
+        let r = run_raw(&b, &["--name-status"], true);
+        assert_eq!(r.code, Some(0), "refused status {ok:?}");
+        assert_eq!(flagged(&r.stdout).len(), 1, "{ok:?}");
+    }
+}
+
+/// The patterns of the governed table in `xtask/src/governed.rs`, in order.
+fn code_patterns() -> Vec<String> {
+    let src = include_str!("../src/governed.rs");
+    let start = src.find("const GOVERNED").unwrap();
+    let end = start + src[start..].find("\n];").unwrap();
+    let lines: Vec<&str> = src[start..end].lines().collect();
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        let t = l.trim();
+        let first =
+            t.starts_with("(\"") || (i > 0 && lines[i - 1].trim() == "(" && t.starts_with('"'));
+        if first {
+            let q = t.trim_start_matches('(').trim_start_matches('"');
+            out.push(q.split('"').next().unwrap().to_string());
+        }
+    }
+    out
+}
+
+#[test]
+fn governed_table_matches_the_record() {
+    let rec = include_str!("../../docs/decisions/0025-governed-paths-review.md");
+    let table = rec.split("| Pattern | Why |").nth(1).expect("record table");
+    let record: Vec<String> = table
+        .lines()
+        .skip(2)
+        .take_while(|l| l.starts_with('|'))
+        .map(|l| {
+            let cell = l
+                .trim_start_matches('|')
+                .split(" | ")
+                .next()
+                .unwrap()
+                .trim();
+            cell.trim_matches('`').to_string()
+        })
+        .collect();
+    let code = code_patterns();
+    assert!(code.len() > 10, "{code:?}");
+    assert_eq!(record, code);
 }
