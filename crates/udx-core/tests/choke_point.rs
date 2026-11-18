@@ -340,13 +340,14 @@ fn violations(src: &str) -> Vec<String> {
                 if p.first().is_some_and(|f| USER_CRATES.contains(&f.as_str())) {
                     v.push(format!("use of user-folder crate {}", p[0]));
                 }
-                // A glob of std::env imports home_dir and temp_dir without naming them.
-                let env_glob = p.len() >= 2
-                    && p.last().is_some_and(|l| l == "*")
-                    && p[p.len() - 2] == "env"
-                    && (p[0] == "std" || p.len() == 2);
-                if env_glob {
-                    v.push(format!("use glob of std::env: {}", p.join("::")));
+                // Any glob that ends in `env::*` imports home_dir and temp_dir without naming them; an alias of
+                // `std::env` (`self::env`, `crate::env`, a renamed `std`) cannot dodge a rule that ignores the prefix.
+                if p.len() >= 2 && p.last().is_some_and(|l| l == "*") && p[p.len() - 2] == "env" {
+                    v.push(format!("use glob of an env module: {}", p.join("::")));
+                }
+                // Renaming `std` itself hides every qualified spelling.
+                if p.len() == 1 && p[0] == "std" && rename.is_some() {
+                    v.push("use renames std".to_string());
                 }
             }
             i = j.max(i + 1);
@@ -565,6 +566,10 @@ fn choke_point_rule_refuses_direct_lookups() {
         "env_macro_braces_home.txt",
         "option_env_macro_brackets_home.txt",
         "option_env_macro_braces_appdata.txt",
+        "use_self_env_glob.txt",
+        "use_crate_env_glob.txt",
+        "use_super_env_glob.txt",
+        "use_std_renamed_then_glob.txt",
     ] {
         assert!(names.contains(must), "missing refused fixture {must}");
     }

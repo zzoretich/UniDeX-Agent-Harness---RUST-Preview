@@ -21,8 +21,8 @@ pub struct TestRoot {
 impl TestRoot {
     /// Panics if `UNIDEX_TEST_ROOT` is missing: run the tests through cargo.
     pub fn new() -> TestRoot {
-        let root = std::env::var(TEST_ROOT)
-            .ok()
+        // Read as the OS holds it, so a root that is not valid UTF-8 is not mistaken for a missing one.
+        let root = std::env::var_os(TEST_ROOT)
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| {
                 panic!("{TEST_ROOT} is not set: run the tests through cargo (cargo test)")
@@ -103,13 +103,20 @@ impl TempHome {
     }
 }
 
+/// The shortest canary `scan_for_canary` accepts: below five bytes the base64 form has no part that is independent of
+/// the data around it, and a shorter search string would match unrelated text.
+const MIN_CANARY_LEN: usize = 5;
+
 /// Every file below `root` that holds `canary` or its base64 (both alphabets),
-/// percent or hex encoding. Symlinks are not followed; a folder that cannot be
+/// percent or hex encoding. Panics if the canary is shorter than five bytes (a test author's mistake: a short value
+/// cannot be searched for reliably). Symlinks are not followed; a folder that cannot be
 /// read yields nothing. Sorted.
 pub fn scan_for_canary(root: &Path, canary: &str) -> Vec<PathBuf> {
-    if canary.is_empty() {
-        return Vec::new();
-    }
+    assert!(
+        canary.len() >= MIN_CANARY_LEN,
+        "the canary must be at least {MIN_CANARY_LEN} bytes, got {}",
+        canary.len()
+    );
     let needles = encodings(canary);
     let mut found = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -162,9 +169,8 @@ fn encodings(canary: &str) -> Vec<Vec<u8>> {
 /// The characters of the canary's base64 form that do not depend on its neighbours, for each of the three alignments
 /// (0, 1 or 2 bytes of other data before it). The characters that mix in a neighbouring byte are dropped: the leading
 /// ones that hold bits of the byte before, and the last one when the canary does not end on a three-byte boundary.
-/// A needle shorter than `MIN_NEEDLE` would match unrelated text, so it is skipped.
+/// The canary is at least `MIN_CANARY_LEN` bytes, so every needle is at least six characters.
 fn base64_needles(canary: &[u8], url_safe: bool) -> Vec<String> {
-    const MIN_NEEDLE: usize = 6;
     let mut out = Vec::new();
     for before in 0..3usize {
         let mut data = vec![0u8; before];
@@ -177,9 +183,7 @@ fn base64_needles(canary: &[u8], url_safe: bool) -> Vec<String> {
             continue;
         }
         let needle: String = chars[lead..chars.len() - trail].iter().collect();
-        if needle.len() >= MIN_NEEDLE {
-            out.push(needle);
-        }
+        out.push(needle);
     }
     out
 }

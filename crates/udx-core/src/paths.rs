@@ -193,7 +193,8 @@ fn override_var(env: &dyn Env, var: &'static str) -> Result<Option<PathBuf>, Pat
 fn guard(env: &dyn Env, testing: bool) -> Result<Option<PathBuf>, PathError> {
     // Cargo sets CARGO_MANIFEST_DIR for everything it runs; such a process
     // must have a test root and never falls through to the OS folders.
-    if non_empty(env, TEST_ROOT).is_none() && non_empty(env, "CARGO_MANIFEST_DIR").is_some() {
+    // The root is read the way `test_root` reads it (exactly, not lossily).
+    if non_empty_os(env, TEST_ROOT).is_none() && non_empty(env, "CARGO_MANIFEST_DIR").is_some() {
         return Err(PathError::CargoWithoutTestRoot);
     }
     let root = test_root(env)?;
@@ -308,21 +309,25 @@ fn home_dir_with(env: &dyn Env, testing: bool) -> Result<PathBuf, PathError> {
 
 /// The few user variables other modules need, read only here.
 ///
-/// Under a test root, a variable whose value is a path into the user's folders is answered from the test root, never
-/// with the real value: `Home` and `UserProfile` give [`home_dir`], `XdgRuntimeDir` gives `<test root>/runtime`. A test
-/// root that cannot be used, or none in a `testing` build, gives `None` for those three. Every other variable passes
-/// through: `Shell`, `Path`, `SystemRoot`, `Windir` and `ComSpec` name system programs and folders, and `User`,
-/// `Logname`, `Lang`, `Tz`, `Term` and `PathExt` are not paths.
+/// Under a test root, a variable whose value is a path into the user's folders, or the account name (the last part of
+/// the real home folder, a personal name), is answered from the test root, never with the real value: `Home` and
+/// `UserProfile` give [`home_dir`], `XdgRuntimeDir` gives `<test root>/runtime`, and `User` and `Logname` give the
+/// placeholder `user`. A test root that cannot be used, or none in a `testing` build, gives `None` for those five.
+/// Every other variable passes through: `Lang`, `Tz`, `Term` and `PathExt` are not paths, and `Shell`, `SystemRoot`,
+/// `Windir` and `ComSpec` name system programs and folders. Known limit: `Path` and `Shell` are not redirected, so a
+/// test that reads them can see a home folder inside a `PATH` entry; tests that run commands need them.
 pub fn user_var(env: &dyn Env, var: UserVar) -> Option<OsString> {
     user_var_with(env, var, cfg!(feature = "testing"))
 }
 
 fn user_var_with(env: &dyn Env, var: UserVar, testing: bool) -> Option<OsString> {
     let redirected = match var {
-        UserVar::Home | UserVar::UserProfile | UserVar::XdgRuntimeDir => true,
-        UserVar::User
-        | UserVar::Logname
-        | UserVar::Shell
+        UserVar::Home
+        | UserVar::UserProfile
+        | UserVar::XdgRuntimeDir
+        | UserVar::User
+        | UserVar::Logname => true,
+        UserVar::Shell
         | UserVar::Lang
         | UserVar::Tz
         | UserVar::Term
@@ -336,14 +341,15 @@ fn user_var_with(env: &dyn Env, var: UserVar, testing: bool) -> Option<OsString>
         return env.var_os(var.name());
     }
     match guard(env, testing) {
-        Ok(Some(root)) => {
-            let dir = if var == UserVar::XdgRuntimeDir {
-                root.join("runtime")
-            } else {
-                root.join("home")
-            };
-            inside(&root, &dir).ok().map(PathBuf::into_os_string)
-        }
+        Ok(Some(root)) => match var {
+            UserVar::User | UserVar::Logname => Some(OsString::from("user")),
+            UserVar::XdgRuntimeDir => inside(&root, &root.join("runtime"))
+                .ok()
+                .map(PathBuf::into_os_string),
+            _ => inside(&root, &root.join("home"))
+                .ok()
+                .map(PathBuf::into_os_string),
+        },
         Ok(None) => env.var_os(var.name()),
         Err(_) => None,
     }
@@ -379,7 +385,8 @@ fn os_side_effects_allowed_with(
     what: OsSideEffect,
     testing: bool,
 ) -> Result<(), PathError> {
-    // Fails closed like `resolve`: with no test root in a `testing` build or under cargo, never allowed.
+    // The `?` is the refusal: with no test root in a `testing` build or under cargo, `guard` returns an error, so the
+    // `Ok(())` below is reached only with no test root in a build that is neither (an installed app).
     if guard(env, testing)?.is_none() {
         return Ok(());
     }
@@ -407,7 +414,7 @@ pub mod testing {
     #[used]
     static UNIDEX_TESTING_MARKER_UDX_CORE: &str = "UNIDEX_TESTING_MARKER_udx_core";
 
-    /// A fresh folder inside the process's test root, removed on drop, with its `home` folder made.
+    /// A fresh folder inside the process's test root, removed on drop, with its `home` and `runtime` folders made.
     ///
     /// As an [`Env`] it sets `UNIDEX_TEST_ROOT` to that folder, plus any
     /// variable added with [`TestEnv::with`], and nothing else.
@@ -419,8 +426,8 @@ pub mod testing {
     impl TestEnv {
         /// Panics if `UNIDEX_TEST_ROOT` is missing: run the tests through cargo.
         pub fn new() -> TestEnv {
-            let root = std::env::var(TEST_ROOT)
-                .ok()
+            // Read as the OS holds it, so a root that is not valid UTF-8 is not mistaken for a missing one.
+            let root = std::env::var_os(TEST_ROOT)
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| {
                     panic!("{TEST_ROOT} is not set: run the tests through cargo (cargo test)")
@@ -435,7 +442,10 @@ pub mod testing {
                 .prefix("udx-")
                 .tempdir_in(&root)
                 .expect("create a folder inside the test root");
-            std::fs::create_dir(dir.path().join("home")).expect("create the fake home");
+            for sub in ["home", "runtime"] {
+                std::fs::create_dir(dir.path().join(sub))
+                    .expect("create a folder of the test home");
+            }
             TestEnv {
                 dir,
                 vars: HashMap::new(),
@@ -462,10 +472,13 @@ pub mod testing {
 
     impl Env for TestEnv {
         fn var(&self, key: &str) -> Option<String> {
+            self.var_os(key).map(|v| v.to_string_lossy().into_owned())
+        }
+        fn var_os(&self, key: &str) -> Option<std::ffi::OsString> {
             if let Some(v) = self.vars.get(key) {
-                return Some(v.clone());
+                return Some(v.into());
             }
-            (key == TEST_ROOT).then(|| self.dir.path().to_string_lossy().into_owned())
+            (key == TEST_ROOT).then(|| self.dir.path().as_os_str().to_owned())
         }
     }
 }

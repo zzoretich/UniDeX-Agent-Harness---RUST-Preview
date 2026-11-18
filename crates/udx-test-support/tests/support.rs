@@ -197,3 +197,31 @@ fn scan_for_canary_finds_hex_and_percent_inside_larger_data() {
     let found: BTreeSet<PathBuf> = scan_for_canary(root.path(), canary).into_iter().collect();
     assert_eq!(found, want);
 }
+
+#[test]
+fn scan_for_canary_accepts_the_shortest_canary_and_finds_it_in_base64() {
+    // Five bytes is the shortest canary whose base64 form has a needle at every alignment.
+    let canary = "k3y-9";
+    let root = TestRoot::new();
+    for (before, name) in [(0usize, "a"), (1, "b"), (2, "c")] {
+        let mut payload = b"xy"[..before].to_vec();
+        payload.extend_from_slice(canary.as_bytes());
+        payload.extend_from_slice(b"zz");
+        std::fs::write(root.child(name), base64_payload(&payload, false, true)).unwrap();
+    }
+    assert_eq!(scan_for_canary(root.path(), canary).len(), 3);
+}
+
+#[test]
+#[should_panic(expected = "canary")]
+fn scan_for_canary_refuses_a_canary_too_short_to_search_for() {
+    let root = TestRoot::new();
+    scan_for_canary(root.path(), "k3y-");
+}
+
+#[test]
+#[should_panic(expected = "canary")]
+fn scan_for_canary_refuses_an_empty_canary() {
+    let root = TestRoot::new();
+    scan_for_canary(root.path(), "");
+}

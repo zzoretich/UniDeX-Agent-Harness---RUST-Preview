@@ -1,0 +1,3 @@
+use std as s;
+use s::env::*;
+fn f() { let h = home_dir(); }

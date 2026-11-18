@@ -1,0 +1,3 @@
+use std::env;
+use self::env::*;
+fn f() { let h = home_dir(); }

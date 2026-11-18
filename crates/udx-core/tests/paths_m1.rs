@@ -281,10 +281,8 @@ fn user_var_reads_only_listed_names() {
     }
     // Windows spells some of these in mixed case; compare without case. Under a test root the three path variables
     // that point into the user's folders (HOME, USERPROFILE, XDG_RUNTIME_DIR) are answered from the root and their
-    // real values are never read; a build without the `testing` feature reads them (unit test in `src/paths.rs`).
+    // real values are never read (nor are USER and LOGNAME, which the root answers with a placeholder); a build without the `testing` feature reads them (unit test in `src/paths.rs`).
     let expected: BTreeSet<String> = [
-        "USER",
-        "LOGNAME",
         "SHELL",
         "LANG",
         "TZ",
@@ -445,12 +443,16 @@ fn user_var_under_a_test_root_never_returns_the_real_folders() {
         user_var(&env, UserVar::XdgRuntimeDir),
         Some(root.join("runtime").into_os_string())
     );
+    // The account name is the last part of the real home folder and a personal name: a placeholder, never the real one.
+    assert_eq!(user_var(&env, UserVar::User), Some(OsString::from("user")));
+    assert_eq!(
+        user_var(&env, UserVar::Logname),
+        Some(OsString::from("user"))
+    );
     // Everything else passes through: paths to system programs and folders, names, locale.
     for (var, want) in [
         (UserVar::Shell, "/bin/sh"),
         (UserVar::Path, "/usr/bin"),
-        (UserVar::User, "someone"),
-        (UserVar::Logname, "someone"),
         (UserVar::Lang, "en_US.UTF-8"),
         (UserVar::Tz, "UTC"),
         (UserVar::Term, "xterm"),
@@ -475,7 +477,14 @@ fn user_var_under_a_test_root_never_returns_the_real_folders() {
         ("USERPROFILE", "x"),
         ("XDG_RUNTIME_DIR", "y"),
     ]);
-    for var in [UserVar::Home, UserVar::UserProfile, UserVar::XdgRuntimeDir] {
+    let none = none.with("USER", "someone").with("LOGNAME", "someone");
+    for var in [
+        UserVar::Home,
+        UserVar::UserProfile,
+        UserVar::XdgRuntimeDir,
+        UserVar::User,
+        UserVar::Logname,
+    ] {
         assert_eq!(user_var(&none, var), None, "{var:?}");
     }
 }
@@ -527,4 +536,55 @@ fn a_non_utf8_test_root_is_kept_exactly() {
     name.extend_from_slice(b"/odd-\xFF-name");
     let root = PathBuf::from(OsString::from_vec(name));
     assert_eq!(test_root(&OsOnly(root.clone())).unwrap(), Some(root));
+}
+
+#[test]
+fn test_env_creates_its_runtime_folder() {
+    let env = TestEnv::new();
+    let runtime = user_var(&env, UserVar::XdgRuntimeDir).unwrap();
+    assert_eq!(PathBuf::from(&runtime), real(env.root()).join("runtime"));
+    assert!(Path::new(&runtime).is_dir());
+}
+
+/// An Env that shows the cargo marker through `var` and the test root only through `var_os`, as a non-UTF-8 root is.
+struct MarkerAndOsRoot(PathBuf);
+
+impl Env for MarkerAndOsRoot {
+    fn var(&self, key: &str) -> Option<String> {
+        (key == "CARGO_MANIFEST_DIR").then(|| "/some/crate".to_string())
+    }
+    fn var_os(&self, key: &str) -> Option<OsString> {
+        match key {
+            TEST_ROOT => Some(self.0.clone().into_os_string()),
+            _ => self.var(key).map(OsString::from),
+        }
+    }
+}
+
+#[test]
+fn the_cargo_check_and_test_root_read_the_root_the_same_way() {
+    let holder = tmp();
+    let env = MarkerAndOsRoot(real(holder.path()));
+    // The root is there (for `var_os`), so the marker does not make it "missing".
+    assert_eq!(test_root(&env).unwrap(), Some(real(holder.path())));
+    assert!(AppPaths::resolve(&env).is_ok());
+    assert_eq!(home_dir(&env).unwrap(), real(holder.path()).join("home"));
+    assert!(check_test_path(&env, &holder.path().join("x")).is_ok());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_non_utf8_test_root_gives_the_same_answer_everywhere() {
+    use std::os::unix::ffi::OsStringExt;
+    let holder = tmp();
+    let mut name = real(holder.path()).into_os_string().into_vec();
+    name.extend_from_slice(b"/odd-\xFF-name");
+    let root = PathBuf::from(OsString::from_vec(name));
+    let env = MarkerAndOsRoot(root.clone());
+    assert_eq!(test_root(&env).unwrap(), Some(root.clone()));
+    assert_eq!(AppPaths::resolve(&env).unwrap().data_dir, root.join("data"));
+    assert_eq!(home_dir(&env).unwrap(), root.join("home"));
+    // A sibling folder outside the root is still refused.
+    let e = check_test_path(&env, &real(holder.path()).join("elsewhere"));
+    assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })), "{e:?}");
 }
