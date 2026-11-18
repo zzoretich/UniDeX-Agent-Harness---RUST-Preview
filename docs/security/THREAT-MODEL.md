@@ -16,8 +16,9 @@ Markings:
   document's recommendation, undecided until the maintainer accepts it and the design is updated. Numbers are stable;
   new proposals continue from the highest number.
 - **Accepted (Pn), 2026-11-17**: the maintainer accepted the proposal at the M0 gate; M1 builds it. Placed beside the
-  proposal's own mark, whose text is unchanged. For P41 only its M1 part, the definition of an unattended run, is
-  accepted now.
+  proposal's own mark, whose text is unchanged. An accepted proposal keeps its original mark and text until the
+  milestone that builds it moves it into the design, as section 9 describes. For P41 only its M1 part, the definition of an
+  unattended run, is accepted now.
 - **Rewritten**: a proposal whose text changed after a review. **Demoted to a backstop** and **Withdrawn**: kept so
   that numbering stays stable, with the reason.
 - **Answered**: where this document disagrees with part of the review, and why.
@@ -219,7 +220,8 @@ sandbox helper (7.1).
   event naming the rule; an "ask" in a run marked unattended becomes a deny with no card. Sandbox tests on all three CI
   platforms: no write outside the workspace, no read of a planted file under a temp `<home>`; writes inside succeed.
 - P1: from the sandbox, a connection to a loopback listener the test opens fails, and a lookup of a test name reaches
-  neither the test's stub resolver nor the system resolver's socket. The Linux variant waits for the decision in 7.1.
+  neither the test's stub resolver nor the system resolver's socket. The Linux variant follows the decision of 2026-11-17 in 7.1
+  (the `.deb` installs an AppArmor profile; the feature is off where it is absent).
 - P2: a rule-allowed `tar czf o.tgz *` beside a planted `--checkpoint-action=exec=...` file leaves no marker; compound
   commands generated around an allowed prefix always ask; a zsh glob qualifier never runs under a rule; on Windows every
   command asks; a saved rule `rg *` does not admit `rg --pre=./x foo`.
@@ -236,7 +238,8 @@ sandbox helper (7.1).
 - P43: an escape matrix run from inside the sandbox on each CI platform (`open`, `osascript`, `launchctl`;
   `systemd-run`, `gio open`, an X11 connection, `TIOCSTI`; `schtasks`, WMI, COM) leaves no marker file outside it. On
   each CI platform an https request from a networked sandboxed command succeeds with certificate checks on, while the
-  keychain lookup of P23's test fails from the same profile. The Linux variant waits for the decision in 7.1.
+  keychain lookup of P23's test fails from the same profile. The Linux variant follows the decision of 2026-11-17 in 7.1
+  (the `.deb` installs an AppArmor profile; the feature is off where it is absent).
 - P47: a workspace file allowing `npm *` changes nothing; "allow always" on `npm test` does not admit `npm exec`; a
   user allow on `git push` still asks; a server named in a workspace `.mcp.json` is never started; with P14's ask
   turned off for one session the indicator shows throughout, and the next session asks again.
@@ -577,7 +580,7 @@ M6 (routines and duties under P19).
   session log; API keys removed from the environment of every child process (design 5.10, 5.11). Section 5's "no secret
   in any log" extends redaction to every log and crash report: secrets live in a type that never prints its value, the
   panic hook scrubs, and the redactor matches each stored secret, its base64 and URL encodings and token-shaped strings.
-- **Proposed, not yet in the design (P21). Rewritten; egress scanning demoted to a backstop.** 
+- **Proposed, not yet in the design (P21). Rewritten; egress scanning demoted to a backstop.**
   **Accepted (P21), 2026-11-17.**
   Stored secret values and
   their encodings are redacted from tool results before they reach the model, so a model rarely holds one. *Demoted to

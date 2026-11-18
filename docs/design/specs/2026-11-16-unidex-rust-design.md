@@ -450,12 +450,13 @@ Known exceptions at design time:
   `example.unidex.rust-preview` until the project has a domain or an organization, replaced before anything is signed;
   "UniDeX contributors" as publisher, author, copyright and Debian maintainer, with no contact address; and the daily
   nightly schedule stays.
-- Linux installs without the AppArmor profile that the `.deb` installs for the sandbox helper (the tarball) have no
-  mount or network namespaces, so the shell, stdio MCP servers and add-on adapters are off there, failing closed (threat
-  model P7, P43; decided at the M0 gate, 2026-11-17).
+- Linux installs without the AppArmor profile that the `.deb` installs for the sandbox helper (the tarball) cannot
+  rely on mount or network namespaces, so the shell, stdio MCP servers and add-on adapters are off there, failing closed
+  (threat model P7, P43; decided at the M0 gate, 2026-11-17).
 - Windows runs no command under an allow rule until a parser exists for the shell in use: every command asks (threat
   model P2; decided at the M0 gate, 2026-11-17, with the Linux exception above, under goal G7).
-- Open at the M0 gate: further exceptions proposed by the M0 trials; see `docs/build/M0-GATE.md`, questions 10 and 11.
+- Open at the M0 gate: further exceptions proposed by the M0 trials (`docs/build/M0-GATE.md`, questions 10 and 11) or
+  by threat-model proposals not yet decided (threat model 7.1; questions 13, 19 and 22).
 
 ## 9. Performance targets
 

@@ -71,6 +71,9 @@ At the M0 gate the maintainer answered question 5 of `docs/build/M0-GATE.md`:
   any release. Condition (b) (where the signing secrets live) is not decided and moves with signing to M4.
 - **Packaging tool:** the choice in "Decision" stands.
 
+The trial's identifier in `packaging/Packager.toml` still ends in `.trial`; M1's packaging task replaces it with
+`example.unidex.rust-preview` when it packages a real binary target.
+
 ## Evidence
 
 Sizes are bytes as printed by the runs (`diag.sh`, `ls -l`); MB is 10^6 bytes. Every package is unsigned. Jobs: round 1

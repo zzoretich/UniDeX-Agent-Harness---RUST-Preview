@@ -124,6 +124,9 @@ design carries a one-line pointer to it and its approved wording stands.
 | Before the milestone that needs it | 6 to 23 (question 23 is the one due before M1's chat window is built) |
 | Whenever convenient | 24 to 27 |
 
+The next two paragraphs describe the design as it stood before the decisions of 2026-11-17, and are kept as the record
+of what this report said when it was written; for the design as it is now, see "Maintainer's decisions" above.
+
 Changes the design already took (each settles something it left open, or states a fact about M0 beside the approved
 text without changing it): the PTY crate (5.7), how browser frames travel and CEF on Windows (5.8), what "CI-verified"
 covers in decision 0013's words, including the "(on X11)" qualifier on the Linux automation socket's frame capture (8),
@@ -1014,6 +1017,8 @@ highest recorded for CI or packaging, so that row is still 1.3M. Task 16 is left
 1,149 + 2,545 = 3,694k in all (stage 1, then stage 2 and the final review), above the document budget, because a gate
 report reads every record, and stage 2 also built the cookbook; it is the only task of its kind. That suggests the 0.6M
 the M1 estimate gives the gate report is low: this gate cost more than six times that.
+
+(Written before the decision of 2026-11-17 that M1's nightlies are unsigned; no figure below is changed.)
 
 **M1 as a whole: 22 million tokens**, with a check-in at 11 million. Reasoning, to be replaced by the M1 architect's
 real task list: design 6 puts one hosted and one local provider, the engine loop, core tools, the shell sandbox,
