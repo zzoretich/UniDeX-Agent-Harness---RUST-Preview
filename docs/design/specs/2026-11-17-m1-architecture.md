@@ -1,10 +1,10 @@
 # M1 architecture: contracts for the vertical slice
 
-Status: proposed by the architect for review · 2026-11-17 · builds on the approved design
+Status: proposed by the architect for review, revised after review 1 · 2026-11-17 · builds on the approved design
 (`docs/design/specs/2026-11-16-unidex-rust-design.md`, "the design"), the M0 gate report (`docs/build/M0-GATE.md`, "the
 gate report"), the threat model (`docs/security/THREAT-MODEL.md`, revision 3) and decision records 0001 to 0014, with
-the maintainer's answers of 2026-11-17 to gate questions 1 to 5. The task breakdown that builds this is
-`docs/design/plans/2026-11-17-m1-vertical-slice.md` ("the task file").
+the maintainer's answers of 2026-11-17 to gate questions 1 to 5 and to design calls D1, D3, D12 and D19 (section 8).
+The plan that builds this is `docs/design/plans/2026-11-17-m1-vertical-slice.md` ("the plan"); "Tn" is its Task n.
 
 How to read this file:
 
@@ -43,7 +43,7 @@ From design 6, as amended by the maintainer's answers to gate questions 1 to 5:
 7. **Spend caps** from M1 (P40): a shared ledger with per-call and per-day caps.
 8. **A session log**: one append-only, versioned JSONL file per session (design 5.2), redacted, owner-only.
 9. **A real GPUI chat window** and **`unidex chat`**, plus `unidex run`, `unidex config`, `unidex doctor`,
-   `unidex trust` and `unidex key` (section 3.12).
+   `unidex trust`, `unidex key` and `unidex sandbox clean` (section 3.12).
 10. **The chat's prepared-message cache with eviction** (gate question 4; decision 0008) and **a persistent shaped-text
     cache** (gate question 4), after a measurement that isolates the slow-frame cause.
 11. **The automation socket in test builds**, end-to-end UI tests on three CI platforms with Wayland as a hard check,
@@ -131,7 +131,7 @@ the only ones allowed (no cycles; normal dependencies only, dev-dependencies lis
 | `udx-engine` | new | The native engine: turn loop, permissions, asks, context assembly and labelling, exposure, workspace trust, egress after exposure, spend ledger, session-log writer and reader, prompt-based tool protocol | `udx-core`, `udx-providers`, `udx-tools`, `udx-sandbox` |
 | `udx-ui-model` | new | Screen state and actions for the chat window, with no GPUI types: thread view-model, markdown model, ask cards, notices, the prepared-message cache policy | `udx-core` |
 | `udx-app` | new | The GPUI application binary `unidex-rust-preview`: window, theme, fonts, the Tokio-to-GPUI bridge, the chat window, message-body rendering, the shaped-text cache, the element registry; the automation socket and perf instrumentation in test and perf builds only | `udx-core`, `udx-ui-model`, `udx-engine`, `udx-providers`, `udx-tools`, `udx-sandbox` |
-| `udx-cli` | changed | The `unidex` binary: `chat`, `run`, `config`, `doctor`, `trust`, `key`, `--version` | `udx-core`, `udx-engine`, `udx-providers`, `udx-tools`, `udx-sandbox` |
+| `udx-cli` | changed | The `unidex` binary: `chat`, `run`, `config`, `doctor`, `trust`, `key`, `sandbox clean`, `--version` | `udx-core`, `udx-engine`, `udx-providers`, `udx-tools`, `udx-sandbox` |
 | `udx-evals` | new | The evaluation harness and the M1 task set (design 10.2) | `udx-core`, `udx-engine`, `udx-providers` (feature `testing`), `udx-tools`, `udx-sandbox` |
 | `udx-test-support` | changed | Test helpers that depend on no workspace crate: a test-root folder, a recording HTTP stand-in, a temporary home with planted files, canary scanning | none |
 | `udx-cookbook` | unchanged | GPUI examples (decision 0007) | none |
@@ -528,7 +528,7 @@ reads that table):
 | `[permissions]` | `mode` (`read_only`, `ask`, `auto`), `[[permissions.rules]]` | allow rules, and any `mode` change that widens (`read_only` to `ask` or `auto`, `ask` to `auto`), are InteractiveOnly(PermissionWidening) (P47; design 5 as qualified at gate question 2(d)); a narrowing change is Plain. The configured mode applies to trusted workspaces only; an untrusted workspace's sessions start in `ask` whatever it says (P60; D29) |
 | `[egress]` | `verbatim_per_origin_per_turn`, `verbatim_per_turn`, `verbatim_per_session` | P14; numbers set from the measurement in T28 |
 | `[net]` | `private_allow` (list of `host:port`) | InteractiveOnly(PrivateAddressAllow); never applied unattended (P24) |
-| `[limits]` | `command_wall_s`, `command_memory_mb`, `command_processes_margin`, `output_cap_bytes`, `read_cap_bytes`, `free_space_floor_mb` | P51, P40 |
+| `[limits]` | `command_wall_s`, `command_memory_mb`, `command_processes_margin`, `output_cap_bytes`, `read_cap_bytes`, `free_space_floor_mb`, `deny_walk_entries` (default 500,000; section 3.6) | P51, P40, P10 |
 
 #### 3.1.4 The `Engine` trait and its events (T2a for the types; T19 and T23 implement the native engine)
 
@@ -1596,8 +1596,8 @@ turn (`per_origin_per_turn`), past which they ask; verbatim links in total, appr
 and per session, and reaching either stops the turn; any request with a body asks; a shell command with network asks.
 Host history never exempts composed data. Before exposure, normal permissions apply (P60's per-host ask).
 
-P15's image load (`EgressRequest::ImageLoad`): from an image in an exposed turn's output it asks
-(`ExposedImageLoad`), even when the current turn is not exposed; otherwise it is the user's own action and passes; unattended it is denied
+P15's image load (`EgressRequest::ImageLoad`): from an image in an exposed turn's output it asks (`ExposedImageLoad`),
+even when the current turn is not exposed; otherwise it is the user's own action and passes; unattended it is denied
 (only the app can send it). Every load then runs `udx_tools::net::fetch_bytes` (section 3.5), so address
 classification, `private_allow` and the caps apply exactly as for `web_fetch`.
 
@@ -1723,7 +1723,7 @@ impl Tty {
 pub fn print_escaped(out: &mut dyn std::io::Write, text: &str) -> std::io::Result<()>;   // every model and tool text
 ```
 
-### 3.13 The chat window: view-model boundary, caches and the automation socket (T26, T27, T29 to T32, T34)
+### 3.13 The chat window: view-model boundary, caches and the automation socket (T26, T27, T29 to T35, T38, T39)
 
 The boundary rule (design 5.10): everything a test needs to assert about the chat screen is in `udx-ui-model` and is
 tested with no window; `udx-app` only renders that state and turns input into actions.
@@ -1896,7 +1896,7 @@ for the disk image's own overhead and the bundle's other files. Not verified: ho
 `.dmg`; T35 calibrates it against the nightly's `.dmg` and records the ratio, and the nightly's own check of the real
 `.dmg` (T33) stays as the backstop.
 
-### 3.14 `udx-test-support` (T1b creates it; T2a fills the stand-in)
+### 3.14 `udx-test-support` (T1b creates it; T7 fills the stand-in)
 
 ```rust
 pub struct TestRoot { /* a fresh folder inside UNIDEX_TEST_ROOT, removed on drop; panics if the variable is missing */ }
@@ -2247,7 +2247,7 @@ parallel tasks do not collide).
 | D16 | Instruction files in M1: `AGENTS.md` at the workspace root and its `@path` imports only; nested files in sub-folders are not loaded | P13 needs a defined, hashable set; M1 has no per-folder context | Nested instruction files arrive with M2's context management. Writes to other agents' instruction files (CLAUDE.md and similar) are still protected (P8; section 3.1.8), since tools the user runs outside the sandbox load them | no |
 | D17 | Fonts on Linux are named with fallbacks and the `.deb` depends on `fonts-dejavu-core`; no font is bundled in M1 | Keeps the download small and avoids a font licence in the notices | Text looks different per distribution; a bundled font can be added later | no |
 | D18 | Widget-kit isolation (question 23): one `MessageBodyRenderer` boundary with exactly one implementation compiled in; the kit, if adopted, only behind the `kit-renderer` feature | Gate question 23, option C, as the gate report recommends; the answer is needed only before T38 (message bodies); T30 draws bodies with a minimal renderer behind the same trait | If the answer arrives after T38 started, T38's renderer is redone (bounded by the trait) | yes (0021, written by T37 with the maintainer's answer) |
-| D19 | Governed paths (the privacy gate's code and tests, `privacy-allow.toml`, `.gitleaks.toml`, the workflows, `deny.toml`, `.cargo/`): "flag and review". A base-branch check, `governed-paths (flag)` (`pull_request_target`, never checking out or running the pull request's code, a read-only token), flags every pull request that touches one with an annotation and a job summary listing the files, and does not fail it for that reason; each such pull request gets an extra security review by an Opus reviewer limited to the governed files, and the controller reports each such change to the maintainer | **Decided by the maintainer on 2026-11-17**, differently from both a code-owners file and the architect's admin-review check: the hosting service does not let the account that opens a pull request approve it, and every pull request is opened from the maintainer's account, so an enforced approving review cannot work today | Enforcement is a process rule, not a hosting-service rule. Enforced human approval (a ruleset requirement, by a code-owners file or otherwise) is owed for when a second account exists (outside contributors, or a bot account for the build agents) and is listed for the gate report; no account handle goes into the repository. The base-branch privacy scan (`privacy (base)`) is separate and does fail a pull request | yes (0025, written by T1d, citing the answer) |
+| D19 | Governed paths (the privacy gate's code and tests, `privacy-allow.toml`, `.gitleaks.toml`, the workflows, `deny.toml`, `.cargo/`): "flag and review". A base-branch check, `governed-paths (flag)` (`pull_request_target`, never checking out or running the pull request's code, a read-only token), flags every pull request that touches one with an annotation and a job summary listing the files, and does not fail it for that reason; each such pull request gets an extra security review by an Opus reviewer limited to the governed files, and the controller reports each such change to the maintainer | **Decided by the maintainer on 2026-11-17**, differently from both a code-owners file and the architect's admin-review check: the hosting service does not let the account that opens a pull request approve it, and every pull request is opened from the maintainer's account, so an enforced approving review cannot work today | Enforcement is a process rule, not a hosting-service rule. Enforced human approval (a ruleset requirement, by a code-owners file or otherwise) is owed for when a second account exists (outside contributors, or a bot account for the build agents) and is listed for the gate report; no account handle goes into the repository. The base-branch privacy scan (`privacy (base)`) is separate and does fail a pull request | yes (0025, written by T1c, citing the answer) |
 | D20 | Core benchmarks in CI are release-mode runs of non-GPUI code against generous ceilings stored in `perf/ceilings.toml`, not statistical comparisons | Shared runners are noisy (design 9); ceilings catch large regressions without false alarms | Small regressions pass unnoticed until a gate measures on the reference machine | no |
 | D21 | Windows `FixedShell` is `cmd.exe /d /s /c` (no AutoRun); PowerShell later | Smallest, predictable; every command asks anyway | Users who expect PowerShell syntax get errors in M1 | no |
 | D22 | Default spend caps: 0.50 USD per call and 5.00 USD per day | P40 needs defaults; small enough that a runaway loop costs little before it stops | A long context on a large model can pass the per-call cap and refuse until the user raises it | no |
