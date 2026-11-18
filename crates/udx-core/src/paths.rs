@@ -562,4 +562,24 @@ mod tests {
             ));
         }
     }
+
+    #[test]
+    fn process_env_var_os_reads_the_real_environment() {
+        let real = std::env::var_os("PATH").expect("cargo sets PATH");
+        assert!(!real.is_empty());
+        assert_eq!(ProcessEnv.var_os("PATH"), Some(real));
+        assert_eq!(ProcessEnv.var_os("UNIDEX_NO_SUCH_VARIABLE_0000"), None);
+    }
+
+    #[test]
+    fn test_env_with_adds_a_variable_and_keeps_the_root() {
+        let env = testing::TestEnv::new().with("UNIDEX_SOME_KEY", "some-value");
+        assert_eq!(env.var("UNIDEX_SOME_KEY").as_deref(), Some("some-value"));
+        assert_eq!(env.var_os("UNIDEX_SOME_KEY"), Some("some-value".into()));
+        assert_eq!(
+            env.var(TEST_ROOT).map(PathBuf::from).as_deref(),
+            Some(env.root())
+        );
+        assert_eq!(env.var("UNIDEX_OTHER_KEY"), None);
+    }
 }
