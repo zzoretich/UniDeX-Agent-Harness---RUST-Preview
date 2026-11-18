@@ -1,0 +1,78 @@
+name: governance
+
+# Why this workflow runs on pull_request_target (decision 0025)
+#
+# A pull request that touches a governed file (the privacy gate, its allow
+# files, a workflow, the dependency policy, build-tool configuration) is
+# flagged for an extra security review. A workflow triggered by `pull_request`
+# runs the definition from the pull request's own branch, so a pull request
+# could edit this very file to print nothing. `pull_request_target` runs the
+# definition from the BASE branch, so the check cannot be edited away by the
+# change it judges. It cannot run before it is on the base branch, so it
+# cannot judge the pull request that adds it.
+#
+# What must NEVER be added to this workflow:
+#   - a checkout of the pull request (no `ref` naming the head or merge
+#     commit, no `repository` naming a fork), a build of its code, or a run
+#     of anything it contains. The job reads the pull request only as data,
+#     through the API, and treats every file name as data.
+#   - a write permission. The token stays at contents: read and
+#     pull-requests: read.
+#   - a secret, or any step that uses one.
+#   - pull-request-controlled text (a file name, a title, a branch name) in a
+#     shell command or a workflow expression. Pass such values through
+#     environment variables or files only.
+# Same hardening as ci.yml otherwise: persist-credentials false, every action
+# pinned to a full commit SHA, a fixed runner label.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  governed-paths:
+    name: governed-paths (flag)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      # With pull_request_target and no `ref`, this is the base branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Build the base branch's xtask
+        shell: bash
+        run: cargo build --locked -p xtask
+      - name: List the pull request's changed files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          # All pages; each name is written followed by a NUL byte, so a name
+          # holding a newline stays one name. The file is data and is never
+          # interpolated into a command.
+          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+            | jq -j '.[].filename + "\u0000"' > "${RUNNER_TEMP}/changed-files.list"
+      - name: Flag the governed files
+        shell: bash
+        run: ./target/debug/xtask governed --files "${RUNNER_TEMP}/changed-files.list"
