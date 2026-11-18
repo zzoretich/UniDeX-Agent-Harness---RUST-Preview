@@ -120,7 +120,7 @@ The gate passes when every box is ticked; a miss blocks it (design 9, 10.4).
 
 Names follow design 5. "New" crates are created by the contracts tasks (T2a writes every manifest with these arrows,
 T2b the stubs; task numbers refer to the plan file); the dependency arrows are
-the only ones allowed (no cycles; normal dependencies only, dev-dependencies listed separately).
+the only normal dependencies allowed; dev-dependencies follow the rule of section 2.2.
 
 | Crate | M1 status | Responsibility | Workspace dependencies (normal) |
 |---|---|---|---|
@@ -173,12 +173,24 @@ inside `udx-core` sees two different compilations of `udx-core`.
 - `TestEnv` (today in `udx-test-support`) moves to `udx_core::paths::testing`, behind `udx-core`'s cargo feature
   `testing`.
 - Every crate that has helpers others need exposes them as `pub mod testing` behind its own `testing` feature:
-  `udx-core` (test env, memory secret store, fixed clock, fixed ids), `udx-providers` (scripted mock provider, fixture
-  transport), `udx-sandbox` (a sandbox that reports itself unavailable, and a fake supervisor that records
-  registrations), `udx-tools` (stub resolver), `udx-engine` (a turn harness that collects events). A dependent crate
-  enables it only under `[dev-dependencies]`, and a test that needs another crate's real code lives in the crate above
-  both: tests that need the engine and the real tools are in `udx-engine` (T23), never in `udx-tools`, so no
-  dev-dependency cycle comes back.
+  `udx-core` (test env, memory secret store, fixed clock, fixed ids, and the fake supervisor of section 3.1.5, which
+  records registrations and kills), `udx-providers` (scripted mock provider, fixture transport), `udx-sandbox` (a
+  sandbox that reports itself unavailable), `udx-tools` (stub resolver), `udx-engine` (a turn harness that collects
+  events). A dependent crate enables it only under `[dev-dependencies]`.
+- **The dev-dependency rule.** What the gate report's warning needs is the absence of a cycle, so the rule says exactly
+  that: (1) the graph of normal and dev-dependencies between workspace crates has no cycle, dev-dependencies counted
+  (cargo itself accepts a dev-dependency cycle, so the check is ours); (2) no test-helper crate depends on a crate it
+  helps test, so `udx-test-support` depends on no workspace crate. A dev-dependency may point from any crate to any
+  other crate that does not depend on it, normally or as a dev-dependency. A test lives in a crate that can see
+  everything it uses under this rule; tests that need the engine and the real tools are in `udx-engine` (T23).
+- The dev-dependency edges M1 needs beyond each crate's normal dependencies, which T2a writes: `udx-test-support` for
+  every crate whose tests use its helpers, `udx-core` included (T5 and T6 use `TempHome` and `scan_for_canary`; once
+  `udx-test-support` no longer depends on `udx-core`, this closes no cycle); the `testing` feature of crates a crate
+  already depends on; and one edge that is not also a normal dependency, `udx-tools` to `udx-sandbox` with `testing`
+  (T21's shell-tool tests use `UnavailableSandbox` and the real backend). Because of that edge no `udx-sandbox` test
+  may use `udx-tools`: T11's restricted-runner test asserts the probe's result, and the shell tool's absence on that
+  runner is T21's test. T2a reads every task's tests for any other edge; the check (`crate_map_arrows_exact`) enforces
+  both parts of the rule, not a list.
 - A `testing` feature never adds a capability to a release build. Each one defines a marker string
   (`UNIDEX_TESTING_MARKER_<crate>`) in a `#[used]` static so the release check (P37) fails if any reaches a packaged
   binary (section 3.15 says how the check proves the markers survive a release build).
@@ -350,9 +362,12 @@ pub fn workspace_key(root: &Path) -> Result<WorkspaceKey, WorkspaceError>;
 ```
 
 Other public types the signatures below name, with their homes (each defined in its section): `udx_core::config::KeyPath`
-(3.1.3), `udx_core::diag::Level` (3.1.11), `udx_core::fsguard::{DenyEntry, UndoRef}` (3.1.8), `udx_core::net::HostPort`
-(3.1.9), `udx_core::sandbox::{Platform, KillHandle, ProcessRegistry}` (3.1.5), `udx_core::events::{LogError, *Summary}`
-(4.2, 4.3), `udx_providers::{ProviderSet, RouteError}` and `testing::RequestMatcher` (3.2),
+(3.1.3), `udx_core::diag::Level` (3.1.11), `udx_core::ids::{SystemClock, V7Ids}` (3.1.2),
+`udx_core::fsguard::{DenyEntry, UndoRef, WindowsForm}` (3.1.8), `udx_core::net::HostPort` (3.1.9),
+`udx_core::sandbox::{Platform, KillHandle, ProcessRegistry, Supervisor, FreeSpaceWatch}` and
+`udx_core::sandbox::testing::FakeSupervisor` (3.1.5), `udx_core::events::{LogError, *Summary}` (4.2, 4.3),
+`udx_providers::{ProviderSet, RouteError, TransportError}` and `testing::RequestMatcher` (3.2),
+`udx_tools::net::SystemResolver` (3.5),
 `udx_engine::protocol::{ParsedCall, ProtocolError}` (3.11), `udx_engine::context::ContextError`,
 `udx_engine::trust::TrustError` (3.9), `udx_engine::spend::SpendError` (3.10), `udx_evals::{SuiteReport, EvalError}`
 (3.15), `udx_test_support::{StandInRoute, RecordedRequest, TestCert}` (3.14), `udx_ui_model::{WorkspaceVm,
@@ -377,13 +392,8 @@ pub enum PathError {
     TestBuildWithoutTestRoot,                             // `testing` feature on and no test root: never OS folders
 }
 
-/// Every user-folder path in the workspace comes from here (gate report, section g). The choke-point test
-/// (crates/udx-core/tests/choke_point.rs, T1b) scans every product crate's sources, that is everything under `crates/`
-/// except `crates/udx-core/src/paths.rs` and `udx-cookbook`, and fails on `directories::`, `dirs::`, `home_dir`,
-/// `temp_dir()`, and a string literal naming HOME, USERPROFILE, APPDATA, LOCALAPPDATA, TMPDIR, TEMP, TMP, USER, LOGNAME,
-/// SHELL or XDG_* passed to any environment read. `xtask/` is excluded by name, with the reason in the test: it is the
-/// build tool, never shipped, and its own tests move onto the test root in T1a. The test holds a named allow list of
-/// (file, pattern) pairs; it is empty when T1b merges and grows only with the controller's agreement.
+/// Every user-folder path in the workspace comes from here (gate report, section g). The choke-point test that
+/// enforces it is specified below this code block ("The choke-point rule").
 impl AppPaths {
     pub fn resolve(env: &dyn Env) -> Result<AppPaths, PathError>;
 }
@@ -429,6 +439,38 @@ pub mod testing {
 }
 ```
 
+**The choke-point rule** (T1b; `crates/udx-core/tests/choke_point.rs`). The test scans every `.rs` file under `crates/`,
+comments removed, except `crates/udx-core/src/paths.rs` (the one module that owns the lookups) and `crates/udx-cookbook/`
+(GPUI examples, decision 0007). `xtask/` lies outside `crates/`, and the test says why it is not scanned: it is the
+build tool, never shipped, and T1a moves its own tests onto the test root. The test fails on any of these routes to the
+operating system's user folders:
+
+1. The standard library's home and temp lookups, however spelled: a path ending in `env::home_dir` or `env::temp_dir`
+   (which covers `std::env::home_dir`, `::std::env::temp_dir`, and `env::home_dir` after `use std::env`); a `use` item
+   that imports `home_dir` or `temp_dir` from `std::env` anywhere in its use tree, renamed or not; and a `use` item that
+   renames `std::env` itself (`use std::env as e`), which would hide the qualified spelling.
+2. Any path whose first segment is one of the crates `dirs`, `directories` or `home`, and the operating systems' home
+   lookups by name: `getpwuid`, `getpwuid_r`, `getpwnam`, `getpwnam_r`, `SHGetKnownFolderPath`, `SHGetFolderPathW`,
+   `GetUserProfileDirectoryW` and `NSHomeDirectory`.
+3. An environment read of a user-folder or identity variable by its literal name: a string literal equal to HOME,
+   USERPROFILE, APPDATA, LOCALAPPDATA, TMPDIR, TEMP, TMP, USER, LOGNAME or SHELL, or starting with `XDG_`, as the first
+   argument of a call to `var` or `var_os`, whether a function (`std::env::var("HOME")`) or a method on any receiver
+   (`env.var("HOME")`, which covers `Env`), or of the macros `env!` and `option_env!`. The same literal used any other
+   way (a key of the child environment's allow list, `TestEnv::with`) is not a read.
+
+The allow rule: a bare name never fails the test, so `home_dir`, `user_var` and `temp_dir` on their own match nothing;
+only the routes above do. A call to the sanctioned accessors therefore passes in every file and every spelling:
+`udx_core::paths::home_dir(env)`, `crate::paths::home_dir(env)`, or `home_dir(env)` after
+`use udx_core::paths::home_dir`, and the same for `user_var`. A function another module happens to name `home_dir`
+passes only while its body takes none of the routes above, so it cannot reach the OS. The test also holds a named allow
+list of (file, pattern) pairs for exceptions; it is empty when T1b merges and grows only with the controller's
+agreement. The rule is tested on fixtures before the tree is scanned: `choke_point_rule_accepts_sanctioned_accessor`
+(each spelling of a call to `home_dir` and `user_var` above, a method `var` reading `UNIDEX_TEST_ROOT`, and `"HOME"` as a
+map key) and `choke_point_rule_refuses_direct_lookups` (one fixture per route of items 1 to 3, including a use tree
+split over lines, `use std::env::{self,` then `home_dir};`, and a renamed `std::env`). The fixtures are text files under
+`crates/udx-core/tests/fixtures/choke_point/{allowed,refused}/` with the extension `.txt`, so the tree scan, which reads
+only `.rs` files, never sees them.
+
 ```rust
 // udx_core::state (T3). Where the app keeps its private state in M1, before the vault exists (D11).
 pub struct StatePaths {
@@ -460,6 +502,8 @@ pub struct CallId(String);   // the provider's tool-call id, kept verbatim; engi
 pub struct AskId(Uuid);      pub struct ReservationId(Uuid);  pub struct WorkspaceKey(String); // sha-256 hex, 16 bytes
 pub trait IdGen: Send + Sync { fn uuid(&self) -> Uuid; }   // uuid v7 in production; sequential in `testing`
 pub trait Clock: Send + Sync { fn now_ms(&self) -> u64; fn monotonic(&self) -> std::time::Instant; }
+pub struct V7Ids;         // the production IdGen (uuid v7); the engine wiring uses it (section 3.11)
+pub struct SystemClock;   // the production Clock (SystemTime and Instant); the engine wiring uses it
 
 // udx_core::attendance (P41's definition of an unattended run; threat model 5.4)
 pub enum Attendance {
@@ -583,8 +627,10 @@ pub enum SessionGrant {
     UnsandboxedShell,                        // P7: attended only, after a warning; refused when Unattended
 }
 pub enum Role { Main, Background, Reviewer, Embeddings }   // design 5.1; M1 uses Main only
-/// LogError is udx_core::events::LogError (section 4.3), so this enum needs nothing from udx-engine.
-pub enum EngineError { Workspace(WorkspaceError), Config(ConfigError), Provider(String), Log(LogError), Closed, Refused(String) }
+/// LogError is udx_core::events::LogError (section 4.3), so this enum needs nothing from udx-engine. Setup carries the
+/// engine wiring's failures as text (section 3.11), since their types live above udx-core.
+pub enum EngineError { Workspace(WorkspaceError), Config(ConfigError), Provider(String), Log(LogError), Closed, Refused(String),
+                       Setup(String) }
 ```
 
 #### 3.1.5 The `Sandbox` trait and profile types (T2a for the types; T10 to T12 implement)
@@ -605,7 +651,11 @@ pub enum Availability {
 /// grant, a rule's network and a networked ask are all refused with the reason; commands still run without network.
 /// This is fail closed for the network grant only (P7, P43), and the app says so in the status bar and in doctor.
 pub enum NetworkGrants { Available, Unavailable { reason: NetworkUnavailableReason, remedy: String } }
-pub enum NetworkUnavailableReason { LandlockScopeMissing { abi: u32 } /* Linux below ABI 6 */, ProbeCheckFailed { check: ProbeCheck } }
+pub enum NetworkUnavailableReason {
+    LandlockScopeMissing { abi: u32 },          // Linux below ABI 6
+    ProbeCheckFailed { check: ProbeCheck },
+    ResolverConfigUnreadable { why: String },   // Linux: no resolver copy could be made for this spawn (section 3.6)
+}
 pub enum Backend { MacosSeatbelt, LinuxNamespaces, WindowsAppContainer }
 pub enum Platform { Macos, Linux, Windows }
 impl Platform { pub fn current() -> Platform; }
@@ -619,7 +669,7 @@ pub enum UnavailableReason {
     ForcedByTestBuild,             // only with the `testing` feature (P7's test)
 }
 pub enum ProbeCheck { WriteOutsideWorkspace, LoopbackConnect, NameLookup, IpcEscape, IpcEscapeNetworked, SecretStoreReach,
-                      ReadDeniedFile, ReadInTreeDenied, OtherProcessEnv }
+                      ReadDeniedFile, ReadInTreeDenied, OtherProcessEnv, NetworkedResolverConfig }
 /// What the probe saw for one check. `Denied` names the specific denial (the sandbox's error code or the missing
 /// service), never just "failed". `NotApplicable` (the resource does not exist outside the sandbox on this machine, so
 /// a denial cannot be shown) is reported as such and is never counted as a pass or a failure.
@@ -685,6 +735,45 @@ pub trait ProcessRegistry: Send + Sync {
     fn register(&self, session: &SessionId, call: &CallId, handle: KillHandle, info: ProcessInfo);
     fn unregister(&self, session: &SessionId, pid: u32);
 }
+/// The supervisor as the engine uses it (P50, P51). Object-safe and Send + Sync (through ProcessRegistry). EngineDeps
+/// holds it as Arc<dyn Supervisor> (section 3.11), so the engine is built and tested with neither the real supervisor
+/// nor any backend. udx-sandbox's ProcessSupervisor implements it (T10); testing::FakeSupervisor below is the fake.
+pub trait Supervisor: ProcessRegistry {
+    fn live(&self, session: &SessionId) -> Vec<ProcessInfo>;
+    fn kill(&self, session: &SessionId, pid: u32) -> Result<(), SandboxError>;
+    fn end_session(&self, session: &SessionId) -> Vec<ProcessInfo>;   // kills every group; returns what was killed
+    fn end_all(&self) -> Vec<ProcessInfo>;                            // app quit
+    fn holding_network_or_credentials(&self, session: &SessionId) -> Vec<ProcessInfo>;  // P50: exposure or revoke
+    /// P51: while an unattended run has a live group, reads free space on `volume` once a second (never while idle, so
+    /// the idle target holds) and kills that run's groups when it falls below `floor`. Dropping the watch stops it.
+    fn watch_free_space(&self, session: &SessionId, volume: PathBuf, floor: u64) -> FreeSpaceWatch;
+    /// The same object as the narrower registry the shell tool receives (ToolContext::processes, section 3.4).
+    fn as_registry(self: Arc<Self>) -> Arc<dyn ProcessRegistry>;
+}
+/// A drop guard: dropping it runs the stop action the implementation gave `new`.
+pub struct FreeSpaceWatch { /* Option<Box<dyn FnOnce() + Send>> */ }
+impl FreeSpaceWatch { pub fn new(stop: Box<dyn FnOnce() + Send>) -> FreeSpaceWatch; }
+
+#[cfg(feature = "testing")]
+pub mod testing {
+    /// Built whole by T2a (not a stub), so T19 and T21 can use it before any backend exists. Records every call in
+    /// order. `kill`, `end_session` and `end_all` also call `kill_group` on the matching registered handles, so a
+    /// test's own GroupKiller sees the kill; `live` and `holding_network_or_credentials` answer from the registered
+    /// ProcessInfo values; `watch_free_space` returns a watch whose drop is recorded.
+    pub struct FakeSupervisor { /* Mutex<Vec<SupervisorCall>>, registered handles */ }
+    impl FakeSupervisor { pub fn new() -> Arc<FakeSupervisor>; pub fn calls(&self) -> Vec<SupervisorCall>; }
+    impl super::ProcessRegistry for FakeSupervisor {}
+    impl super::Supervisor for FakeSupervisor {}
+    pub enum SupervisorCall {
+        Register { session: SessionId, call: CallId, pid: u32 }, Unregister { session: SessionId, pid: u32 },
+        Kill { session: SessionId, pid: u32 }, EndSession { session: SessionId }, EndAll,
+        WatchFreeSpace { session: SessionId, floor: u64 }, WatchDropped { session: SessionId },
+    }
+    /// A GroupKiller that counts kill_group calls and lists a fixed set of processes.
+    pub struct RecordingKiller { /* ... */ }
+    impl RecordingKiller { pub fn new(live: Vec<ProcessInfo>) -> Arc<RecordingKiller>; pub fn kills(&self) -> u32; }
+    impl super::GroupKiller for RecordingKiller {}
+}
 pub struct ExitInfo {
     pub code: Option<i32>, pub signal: Option<i32>, pub timed_out: bool, pub limits_hit: Vec<LimitKind>,
     /// Protected writes the backend reported denying (P8). Only a backend with BackendDetails::reports_denied_writes
@@ -706,7 +795,12 @@ own binary (the app or the CLI) started with the hidden argument `--udx-sandbox-
 ours and needs nothing installed. Any check `Allowed`, or any setup step failing, makes the backend `Unavailable`; a
 networked check `Allowed` makes only `NetworkGrants` unavailable. The production probe plants nothing (no item in a
 secret store, no file outside the app's folders); CI tests plant known items under the opt-in variable (section 3.1.1)
-and assert they are not returned.
+and assert they are not returned. `NetworkedResolverConfig` (section 3.6, "Name resolution in the Linux networked
+root") makes no lookup: it reports `Denied { how }` when the host's `/run` and the folder the host's resolver link
+points into are absent from the networked root while that root's `/etc/resolv.conf` is a regular read-only file equal
+to the copy and the read list's `nsswitch.conf` names the `dns` source; `Allowed` when the host's resolver folder is
+reachable; `Error` when the copy is missing or differs or no `dns` source is named. `Allowed` or `Error` here makes
+only `NetworkGrants` unavailable (`ProbeCheckFailed { check: NetworkedResolverConfig }`), and the app says so.
 
 | Check | macOS seatbelt | Linux namespaces | Windows AppContainer |
 |---|---|---|---|
@@ -719,6 +813,7 @@ and assert they are not returned.
 | Planted file under a temp home unreadable (P10) | yes | yes | yes |
 | Deny-listed file inside the workspace unreadable (`ReadInTreeDenied`) | yes (profile rule) | yes (masked) | yes (deny entry) |
 | Another process's environment unreadable (P23, `OtherProcessEnv`) | `sysctl` `kern.procargs2` on a process started outside the sandbox fails | the PID namespace's own `/proc` shows no host process | `OpenProcess` on a process started outside the container fails |
+| Resolver configuration, networked profile (P1, P43, `NetworkedResolverConfig`) | `NotApplicable` (name resolution goes through the profile's reviewed `mach-lookup` entries, T10) | host `/run` and the resolver link's target folder absent; `/etc/resolv.conf` a regular read-only file equal to the copy; `dns` named in the read list's `nsswitch.conf`; no lookup made | `NotApplicable` (the AppContainer's `internetClient` capability) |
 
 How fail-closed is reported: `Availability::Unavailable` carries a reason and a remedy in plain words (for example
 "Linux restricts user namespaces here. Install the `.deb`, which adds an AppArmor profile, or use a system that allows
@@ -769,7 +864,8 @@ pub trait SecretStore: Send + Sync {
 }
 pub enum SecretBackend { MacosKeychain, LinuxSecretService, WindowsCredentialManager, Environment, Memory /* testing only */ }
 /// Picks the OS store; falls back to the environment only where no OS store is reachable (design 5.10), and never
-/// writes to the OS store when a test root is set unless CI set UNIDEX_TEST_OS_SECRET_STORE=1 (os_side_effects_allowed).
+/// writes to the OS store when a test root is set unless CI named `secret_store` in UNIDEX_TEST_OS_SIDE_EFFECTS
+/// (os_side_effects_allowed(SecretStore), section 3.1.1).
 pub fn open_secret_store(env: &dyn Env) -> Box<dyn SecretStore>;
 pub enum SecretError { Unavailable(String), Locked, NotFound, Backend(String) }
 
@@ -827,6 +923,16 @@ pub enum DenyReason {
                                           // a short (8.3) component is expanded with GetLongPathNameW before any
                                           // comparison, and refused if it cannot be expanded
     LinkInPath, TooManyHops, NotUtf8OnWindows, OutsideNoRule, Race, TestRoot(PathError),
+}
+/// P9's Windows path spellings, each refused before any open (T5).
+pub enum WindowsForm {
+    Unc,                    // \\server\share\...
+    Verbatim,               // \\?\...
+    Device,                 // \\.\...
+    ReservedName(String),   // NUL, CON, PRN, AUX, COM1 to COM9, LPT1 to LPT9, with or without an extension
+    Stream,                 // name:stream or name::$DATA
+    TrailingDotOrSpace,     // a component ending in "." or " "
+    ShortNameUnexpanded,    // an 8.3 component GetLongPathNameW could not expand
 }
 pub struct GuardedPath { /* canonical path, the components as asked, device and inode where they exist */ }
 
@@ -1028,6 +1134,9 @@ impl BoundEndpoint {
 pub trait HttpTransport: Send + Sync {
     async fn send(&self, req: HttpRequest) -> Result<HttpResponse, TransportError>;
 }
+/// What a transport reports when no complete response arrived (T7). A response with any status, 3xx included (no
+/// automatic redirects), is an HttpResponse, not an error; a failure while the body streams is an item of the body.
+pub enum TransportError { Connect(String), Tls(String), Timeout, Body(String), Cancelled }
 pub struct HttpRequest { pub method: http::Method, pub url: url::Url, pub headers: Vec<(String, SensitiveHeader)>, pub body: Vec<u8>, pub timeout: Duration }
 pub enum SensitiveHeader { Plain(String), Secret(Secret) }   // secret header values never reach Debug, logs or fixtures
 pub struct HttpResponse { pub status: u16, pub headers: Vec<(String, String)>, pub body: futures::stream::BoxStream<'static, Result<bytes::Bytes, TransportError>> }
@@ -1046,6 +1155,9 @@ pub enum RouteError { NoRoute(Role), UnknownProvider(ProviderId), UnknownModel {
 pub struct ProviderSet { /* ProviderId -> Arc<dyn Provider> */ }
 impl ProviderSet {
     pub fn from_config(cfg: &Config, secrets: &dyn SecretStore, transport: Arc<dyn HttpTransport>) -> Result<ProviderSet, ProviderError>;
+    /// A set the caller built: the scripted mock provider in test builds and the evaluation harness's ProviderSel::Mock
+    /// (the engine wiring takes a ProviderSet, section 3.11).
+    pub fn from_providers(providers: Vec<Arc<dyn Provider>>) -> ProviderSet;
     pub fn get(&self, id: &ProviderId) -> Option<Arc<dyn Provider>>;
     pub fn ids(&self) -> Vec<ProviderId>;
 }
@@ -1191,6 +1303,9 @@ pub struct NetPolicy { pub private_allow: Vec<HostPort> /* attended only */, pub
 pub struct FetchCaps { pub max_body: u64 /* 10 MiB */, pub max_decompressed: u64 /* 20 MiB */, pub timeout: Duration /* 30 s */, pub max_redirects: u8 /* 5 */ }
 #[async_trait::async_trait]
 pub trait Resolver: Send + Sync { async fn lookup(&self, host: &str) -> Result<Vec<std::net::IpAddr>, FetchError>; }
+/// The production Resolver (T22): one lookup through the operating system's resolver per call, made only at step 3
+/// below. The engine wiring uses it (section 3.11); tests use testing::StubResolver.
+pub struct SystemResolver;
 #[async_trait::async_trait]
 pub trait EgressGate: Send + Sync {
     /// Asked before the first request and before following every redirect hop. May raise an ask and wait for it.
@@ -1233,32 +1348,42 @@ pub fn platform_sandbox(paths: &StatePaths, env: &dyn Env) -> Arc<dyn Sandbox>; 
 /// Reached from the app's and the CLI's `main` through the hidden argument `--udx-sandbox-probe <check>`: runs one
 /// ProbeCheck from inside the sandbox and prints its ProbeOutcome as one JSON line (section 3.1.5).
 pub fn probe_main(check: &str) -> std::process::ExitCode;
-pub struct ProcessSupervisor { /* every live sandboxed group per session, held by its KillHandle */ }
+/// Every live sandboxed group per session, held by its KillHandle (T10). The engine reaches it only as
+/// Arc<dyn udx_core::sandbox::Supervisor> (section 3.1.5), whose methods carry the contract.
+pub struct ProcessSupervisor { /* ... */ }
+impl ProcessSupervisor { pub fn new() -> Arc<ProcessSupervisor>; }
 impl udx_core::sandbox::ProcessRegistry for ProcessSupervisor {}
-impl ProcessSupervisor {
-    pub fn new() -> Arc<ProcessSupervisor>;
-    pub fn live(&self, session: &SessionId) -> Vec<ProcessInfo>;
-    pub fn end_session(&self, session: &SessionId) -> Vec<ProcessInfo>;   // kills every group; returns what was killed
-    pub fn end_all(&self) -> Vec<ProcessInfo>;                            // app quit
-    pub fn kill(&self, session: &SessionId, pid: u32) -> Result<(), SandboxError>;
-    pub fn holding_network_or_credentials(&self, session: &SessionId) -> Vec<ProcessInfo>;  // P50: asked on exposure or revoke
-    /// P51: while an unattended run has a live group, reads free space on `volume` once a second (never while idle, so
-    /// the idle target holds) and kills that run's groups when it falls below `floor`. Dropping the watch stops it.
-    pub fn watch_free_space(&self, session: &SessionId, volume: PathBuf, floor: u64) -> FreeSpaceWatch;
-}
-pub struct FreeSpaceWatch { /* ... */ }
-// Windows access entries (D3; the other platforms return an empty list and do nothing)
+impl udx_core::sandbox::Supervisor for ProcessSupervisor {}
+
+// Windows access entries (D3). The two functions are platform-neutral, in `entries.rs` (T10); see below.
 pub struct AccessEntryRecord { pub workspace: Option<WorkspaceKey>, pub path: PathBuf, pub sid: String, pub kind: EntryKind, pub added_ms: u64 }
 pub enum EntryKind { AllowWorkspace, AllowSessionTmp, DenyProtected, DenyListed, AllowReadList }
 pub enum CleanScope { Workspace(PathBuf), All }
 pub struct CleanReport { pub removed: u32, pub failed: Vec<(PathBuf, String)> }
 pub fn access_entries(paths: &StatePaths) -> Result<Vec<AccessEntryRecord>, SandboxError>;
 pub fn clean_access_entries(paths: &StatePaths, env: &dyn Env, which: CleanScope) -> Result<CleanReport, SandboxError>;
+// Crate-private hooks T12 fills, so T12 adds no line to entries.rs (T2b creates them as stubs naming T12):
+#[cfg(windows)] mod windows {
+    pub(crate) fn remove_entry(record: &AccessEntryRecord, env: &dyn Env) -> Result<(), String>;
+    pub(crate) fn delete_profile(workspace: &WorkspaceKey, env: &dyn Env) -> Result<(), String>;
+}
 #[cfg(feature = "testing")] pub mod testing {
     pub struct UnavailableSandbox;   // reports ForcedByTestBuild
-    pub struct FakeSupervisor;       // a recording ProcessRegistry, so engine tests need no real backend
 }
 ```
+
+**The access-entry functions on every platform (D3).** The records file `StatePaths::sandbox_dir/grants.toml` holds one
+`[[entry]]` table per `AccessEntryRecord`, with its serde field names; a missing file is an empty list. `access_entries`
+reads it. `clean_access_entries` reads the records in its scope (`Workspace(dir)`: the records whose `workspace` is
+`workspace_key(dir)`; `All`: every record, the capability entries with no workspace included), removes each entry and
+then each workspace's AppContainer profile through the hooks above, rewrites the file without the removed records
+through `fsguard::private`, and keeps and reports each failure. On macOS and Linux no backend adds an entry, so there
+is no hook: nothing is removed from the operating system and a record found there (only a test plants one) is dropped
+from the file. Both functions are T10's and work on every platform from T10's merge, so `unidex trust --revoke`, `unidex
+sandbox clean` and the doctor's row need nothing from T12 for them (T24 reaches T10 through T23's Needs, T25 directly).
+On Windows the real removal arrives with T12's hooks; before T12 no record can exist, because only T12's backend
+writes one, so a Windows run never reaches the stubs. The write-ahead writer of the footprint below is T12's and uses
+the same format.
 
 **Process lifetime, the same on every platform (P50).** A group lives until the supervisor ends it (session end, app
 quit, the end of an unattended run, or the user's kill from the list of live processes) or until no process is left in
@@ -1286,16 +1411,19 @@ Per platform (D1, D2, D3, D28; each backend task writes a decision record):
   command has no network; maps the user; builds a new root from bind mounts (read list read-only, workspace and session
   temp read-write, a sized tmpfs for the temp folder) with its own `/proc` for the PID namespace, so no host process's
   `/proc/<pid>/environ` is visible (P23); hides `$XDG_RUNTIME_DIR`, the session bus and the X11 and Wayland socket
-  folders; sets `no_new_privs`; applies Landlock; loads a seccomp filter refusing the `TIOCSTI` and `TIOCLINUX` ioctls,
-  `keyctl`, `add_key`, `request_key`, `ptrace`, `process_vm_*`, `bpf`, `perf_event_open`, `userfaultfd`,
-  `io_uring_setup`, `io_uring_enter`, `io_uring_register`, `unshare` and `setns`, `clone` with namespace flags, and
-  `clone3` with `ENOSYS` (its flags sit behind a pointer the filter cannot read, so the C library falls back to `clone`,
-  whose flags the filter checks); closes every inherited descriptor except standard input, output and error
-  (`close_range`); calls `setsid` with no controlling terminal; and starts the command as its child. P50: killing the
-  PID namespace ends every descendant, including ones that called `setsid`. P51: cgroup v2 `pids.max` and `memory.max`
-  when a delegated cgroup is writable, otherwise `RLIMIT_NPROC` at the user's current count plus the margin (reported
-  in `BackendDetails`). On default Ubuntu, AppArmor lets only a profiled binary create user namespaces; the `.deb`
-  installs `/etc/apparmor.d/unidex-rust-preview-sandbox` granting `userns` to
+  folders; binds each `credential_sockets` path (only those a "use my credentials" grant restored, P23) as that one
+  socket file at its own path, never its folder, so the folder's other sockets stay absent (P43; the socket's parent
+  folders in the new root are empty folders of the root's own tmpfs, not the host's); sets `no_new_privs`; applies
+  Landlock; loads a seccomp filter refusing the `TIOCSTI` and `TIOCLINUX` ioctls, `keyctl`, `add_key`, `request_key`,
+  `ptrace`, `process_vm_*`, `bpf`, `perf_event_open`, `userfaultfd`, `io_uring_setup`, `io_uring_enter`,
+  `io_uring_register`, `unshare` and `setns`, `clone` with namespace flags, and `clone3` with `ENOSYS` (its flags sit
+  behind a pointer the filter cannot read, so the C library falls back to `clone`, whose flags the filter checks);
+  closes every inherited descriptor except standard input, output and error (`close_range`); calls `setsid` with no
+  controlling terminal; and starts the command as its child. P50: killing the PID namespace ends every descendant,
+  including ones that called `setsid`. P51: cgroup v2 `pids.max` and `memory.max` when a delegated cgroup is writable,
+  otherwise `RLIMIT_NPROC` at the user's current count plus the margin (reported in `BackendDetails`). On default
+  Ubuntu, AppArmor lets only a profiled binary create user namespaces; the `.deb` installs
+  `/etc/apparmor.d/unidex-rust-preview-sandbox` granting `userns` to
   `/usr/lib/unidex-rust-preview/unidex-sandbox-helper` and loads it in its post-install script (D1, D12, both decided
   by the maintainer). Availability is decided by the probe, not by the package (D1): wherever the full sandbox applies,
   the tarball included, the shell is on; on default Ubuntu without the profile it is off. Not verified: the exact
@@ -1327,18 +1455,56 @@ changes, per platform:
   connection to an abstract socket outside the command's Landlock domain, the X server's `@/tmp/.X11-unix/X0` and an
   abstract session bus included. Pathname sockets are kept out by the mount namespace alone, because Landlock does not
   restrict connecting to an existing pathname socket (threat model 7): the new root is built only from the read list,
-  the workspace and the fresh session tmpfs, and never contains the host's `/run`, `/var/run`, `/tmp`, `/dev/shm`,
-  `$XDG_RUNTIME_DIR` or the user's home; a read-list entry that is or contains one of those folders is refused when the
-  profile is built. Below ABI 6, or where Landlock is absent, `NetworkGrants` is `Unavailable(LandlockScopeMissing)`:
-  network grants and networked asks are refused with that reason and commands run without network (fail closed, P7).
-  Not verified: the Landlock ABI of the `ubuntu-26.04` runner's kernel and of a default Ubuntu install; T11's first
-  step finds out on CI which case applies there, and the networked tests assert the matching behaviour (the escape
-  matrix where network grants are available, the refusal where they are not). Residuals for T40: a networked command
-  reaches the host's loopback services (no host filtering, threat model 7), and a pathname socket that a process outside
-  the sandbox creates inside the workspace is reachable (P43-a).
+  the workspace, the fresh session tmpfs, the resolver copy (below) and any granted credential socket file, and never
+  contains the host's `/run`, `/var/run`, `/tmp`, `/dev/shm`, `$XDG_RUNTIME_DIR` or the user's home; a read-list entry
+  that is or contains one of those folders is refused when the profile is built. Below ABI 6, or where Landlock is
+  absent, `NetworkGrants` is `Unavailable(LandlockScopeMissing)`: network grants and networked asks are refused with
+  that reason and commands run without network (fail closed, P7). Not verified: the Landlock ABI of the `ubuntu-26.04`
+  runner's kernel and of a default Ubuntu install; T11's verify-first steps find out on CI which case applies there,
+  and the networked tests assert the matching behaviour (the escape matrix where network grants are available, the
+  refusal where they are not). Residuals for T40: a networked command reaches the host's loopback services (no host
+  filtering, threat model 7), and a pathname socket that a process outside the sandbox creates inside the workspace is
+  reachable (P43-a).
 - **Windows:** the AppContainer gets the `internetClient` capability only, never `internetClientServer`,
   `privateNetworkClientServer` or a loopback exemption, so loopback and the local network stay unreachable; named
   pipes, COM and WMI stay governed by the container's access as without network.
+
+**Name resolution in the Linux networked root (P1, P43; proposal).** On default Ubuntu `/etc/resolv.conf` is a symbolic
+link into a folder under `/run`, and the local stub resolver listens on a loopback address (not verified on the runner
+or on a default install: T11's first step). The networked root never holds the host's `/run` or `/var/run` (P43), so
+that link would dangle there and every lookup would fail. Instead:
+
+- Before each networked spawn the app reads the host's `/etc/resolv.conf`, following links, as one file of at most 64
+  KiB, and passes its content to the helper on a pipe the helper reads and closes before the command starts. The helper
+  writes it as a regular file at `/etc/resolv.conf` in the new root's own tmpfs base, remounted read-only, so the
+  command can neither change it nor follow it anywhere. It never binds the host's link, the link's target or the
+  target's folder. Where the read list grants files under `/etc`, the helper builds the root's `/etc` from those entries
+  so that `resolv.conf` can be a file of its own (the exact mounts are T11's).
+- The stub-resolver case: when the copy names only a loopback nameserver, a networked command reaches it over IP,
+  because it shares the host's network namespace. That is the reach to host loopback services a networked command
+  already has (the residual listed for T40 in the Linux item above), and no socket path is involved. A copy naming
+  remote nameservers works the same way.
+- Lookups through the C library also read `/etc/nsswitch.conf` from the read list. Modules that would need a socket
+  under `/run` (a resolver daemon's own socket, a name-service cache, multicast DNS) find none, and the library falls
+  through to the `dns` source, which reads the copy (not verified on the runner: T11's first step). A host whose
+  `hosts:` line names no `dns` source would leave networked commands without names, so the probe reports it.
+- Fail closed: the probe check `NetworkedResolverConfig` (section 3.1.5) runs at start, and if it is `Allowed` or ends
+  in `Error`, network grants are unavailable and the app says why (status bar, doctor). If the copy cannot be made at a
+  spawn (the file vanished, is over the cap or cannot be read), that spawn fails with
+  `SandboxError::NetworkUnavailable(ResolverConfigUnreadable)` and the shell tool reports it; a command never runs with
+  network and without names. If T11's first step finds no sound way to serve the runner's or a default install's name
+  resolution without the host's `/run` (for example a host that resolves names only through a socket), the contract is
+  that network grants are unavailable there with that reason, and T11 stops and reports before building on it.
+- Tests (T11, in `sandbox-linux (profile)`): `p43_networked_name_lookup_uses_resolver_copy_linux` (the test starts its
+  own stand-in DNS resolver on a loopback address other than the runner's resolver, on port 53, which that job lets an
+  unprivileged process bind; it points the backend's resolver source at a configuration in the test root that names
+  the stand-in, through a switch that exists only under `udx-sandbox`'s `testing` feature; a networked command resolves
+  a `.test` name to the stand-in's answer and the stand-in records the query; inside, `/etc/resolv.conf` is a regular
+  file that cannot be written and `/run` is absent); `resolver_copy_follows_link_never_binds_folder` (a resolver link
+  chain in the test root ending in a folder that also holds a stand-in socket: the root holds the copied content and
+  not the socket); `p7_resolver_config_failure_disables_network_grants_only` (an unreadable source makes `NetworkGrants`
+  unavailable with the reason, and commands still run without network); `networked_resolver_config_probe_check` (each
+  of the check's three outcomes).
 
 **Protected and denied paths inside granted trees (P8, P10, P48), per backend.** Landlock is allow-only and cannot
 subtract a sub-path, and bind mounts and Windows deny entries apply only to paths that exist when the profile is built,
@@ -1560,6 +1726,9 @@ pub enum ContextError { Guard(GuardError), ImportOutsideWorkspace(PathBuf), Dept
 // udx_engine::trust (P13; TrustState is udx_core::policy)
 pub struct TrustStore { /* StatePaths::trust_file, owner-only; keyed by WorkspaceKey (canonical path, device and inode) */ }
 impl TrustStore {
+    /// Reads StatePaths::trust_file (a missing file is an empty store) through the file guard (T14). The engine wiring
+    /// and the CLI's `trust` verb construct it here.
+    pub fn open(paths: &StatePaths, env: &dyn Env) -> Result<TrustStore, TrustError>;
     pub fn get(&self, ws: &WorkspaceKey) -> TrustState;
     pub fn trust(&self, ws: &WorkspaceKey, instruction_hash: Option<String>, proof: InteractiveProof) -> Result<(), TrustError>;
     pub fn revoke(&self, ws: &WorkspaceKey) -> Result<(), TrustError>;   // the CLI's --revoke also cleans Windows entries (3.6)
@@ -1643,13 +1812,31 @@ impl NativeEngine { pub fn new(deps: EngineDeps) -> NativeEngine; }
 impl udx_core::engine::Engine for NativeEngine {}
 pub struct EngineDeps {
     pub paths: StatePaths, pub config: Arc<Config>, pub providers: ProviderSet, pub router: Router,
-    pub tools: Vec<Arc<dyn Tool>>, pub sandbox: Arc<dyn Sandbox>, pub supervisor: Arc<ProcessSupervisor>,
+    pub tools: Vec<Arc<dyn Tool>>, pub sandbox: Arc<dyn Sandbox>,
+    pub supervisor: Arc<dyn Supervisor>,   // udx_core::sandbox::Supervisor (3.1.5): real, or testing::FakeSupervisor
     pub secrets: Arc<dyn SecretStore>, pub ledger: Arc<SpendLedger>, pub trust: Arc<TrustStore>,
     pub clock: Arc<dyn Clock>, pub ids: Arc<dyn IdGen>, pub resolver: Arc<dyn Resolver>,
 }
 pub struct LoopGuards { pub max_model_calls_per_turn: u32 /* 50 */, pub identical_call_repeats: u32 /* 3 */, pub invalid_call_streak: u32 /* 3 */ }  // D23
 pub struct RetryPolicy { pub max_attempts: u32 /* 4 */, pub base: Duration, pub cap: Duration }  // honours retry-after; only before any tool ran for that model call
+
+// udx_engine::wiring (crates/udx-engine/src/wiring.rs; T2b creates the module, its `pub mod wiring;` line in
+// udx-engine's lib.rs and this function as a stub naming T23; T23 writes the body)
+/// Builds the engine's dependencies one way for the CLI (T24), the evaluation harness (T28) and the app (T29), so
+/// none of them assembles EngineDeps itself. From its inputs: `router` by Router::from_config(&config, &providers);
+/// `tools` by m1_tools(); `sandbox` by platform_sandbox(paths, env); `supervisor` by ProcessSupervisor::new() as
+/// Arc<dyn Supervisor>; `ledger` by SpendLedger::open(&paths.spend_db); `trust` by TrustStore::open(paths, env);
+/// `clock` SystemClock, `ids` V7Ids and `resolver` SystemResolver. The caller builds `providers`: from the config with
+/// ProviderSet::from_config(&config, &*secrets, transport) normally, or ProviderSet::from_providers with the scripted
+/// mock provider in a test build and for the harness's ProviderSel::Mock. It makes no network call and starts no
+/// command (the probe runs inside platform_sandbox, as it does already).
+pub fn engine_deps(paths: &StatePaths, config: Arc<Config>, env: &dyn Env, secrets: Arc<dyn SecretStore>,
+                   providers: ProviderSet) -> Result<EngineDeps, EngineError>;
 ```
+
+`engine_deps` reports its failures as `EngineError::Setup` (section 3.1.4), whose text names the part that failed (the
+router, the spend ledger or the trust store) with the underlying error's message. The callers print it (CLI), show it
+(app) or wrap it (`EvalError::Engine`).
 
 The loop, per turn: route the role (fallback only between turns); assemble context (system blocks, instruction files
 when trusted, history with labels); compute the worst case and reserve spend; stream the model call, emitting events; on
@@ -1659,10 +1846,11 @@ and update exposure; settle spend; check prompt integrity (P59); repeat until th
 fires. A full context window stops the turn with `ContextFull` (trimming is M2). Cancellation drops the provider stream,
 kills running process groups and lets an atomic write finish or not happen.
 
-T19 builds the loop against `testing` fakes (the mock provider, fake tools, `udx_sandbox::testing::FakeSupervisor`). T23
-then wires the real tools, sandbox and supervisor into `NativeEngine` and owns the flows that cross those crates: P8's
-re-run with a wider profile and the `protected_created` card, P7's unsandboxed-shell grant, P50's asks on exposure and
-on a revoked grant, P15's image load, and the plan's review-focus tests.
+T19 builds the loop against `testing` fakes (the mock provider, fake tools, `udx_core::sandbox::testing::FakeSupervisor`,
+which T2a builds, so T19 needs no sandbox task). T23 then writes `engine_deps`, wires the real tools, sandbox and
+supervisor into `NativeEngine` and owns the flows that cross those crates: P8's re-run with a wider profile and the
+`protected_created` card, P7's unsandboxed-shell grant, P50's asks on exposure and on a revoked grant, P15's image load,
+and the engine side of the plan's review-focus tests.
 
 ```rust
 // udx_engine::log (T16)
@@ -1707,7 +1895,7 @@ pub enum ProtocolError { Unterminated, BadJson(String), UnknownTool(String), Non
 | `unidex config get KEY` / `set KEY VALUE [--dry-run]` / `unset KEY [--dry-run]` | `--dry-run` prints what the file would become and writes nothing; `unset` restores the default (C1) | `InteractiveOnly` keys need a terminal and a typed confirmation; refused headless and in `--json` without a terminal (P22, P47, P24) |
 | `unidex key set PROVIDER [--stdin]` / `key delete PROVIDER` | Stores or removes a provider key in the secret store | The key is read from the terminal without echo, or from standard input with `--stdin`; never from an argument (P23) |
 | `unidex trust [DIR] [--revoke] [--list]` | Marks a workspace trusted after showing its instruction files and their hash (P13); `--revoke` also removes the workspace's Windows access entries (section 3.6) | Interactive only, typed confirmation; refusing `<home>`, its parents and the root unless the confirmation word is the longer one P48 asks for |
-| `unidex sandbox clean DIR` / `sandbox clean --all` | Removes the Windows sandbox's recorded access entries and AppContainer profiles for one workspace or all (D3; section 3.6); prints what it removed and what failed. On macOS and Linux it reports that there is nothing to clean | Interactive or headless (it only removes access) |
+| `unidex sandbox clean DIR` / `sandbox clean --all` | Removes the Windows sandbox's recorded access entries and AppContainer profiles for one workspace or all (D3; section 3.6); prints what it removed and what failed. On macOS and Linux no backend adds entries, so it reports that there is nothing to clean | Interactive or headless (it only removes access) |
 | `unidex doctor [--json] [--online]` | Rows: config (unknown keys warn, C3), paths, secret store, sandbox (with reason and remedy, and whether network grants are available), AppArmor profile (Linux), Windows sandbox access entries (section 3.6), providers (no network unless `--online`), workspace trust | Makes no network call without `--online` (design 2, anti-goals) |
 | `unidex --version [--json]` | Unchanged from M0 | |
 
@@ -2183,12 +2371,12 @@ threat-model update (T40).
 | P3 Built-in asks; undo | `BuiltinAsk` (P3 set) and its conservative matcher (3.7); `UndoStore` | `p3_force_push_asks_in_auto_mode`, `p3_force_push_denied_unattended`, `p3_hostile_spellings_ask` (table: `env git push --force`, `nice git push`, `timeout 5 git push`, `git -C . push`, `/usr/bin/git push`, `git -c alias.p=push p`, `find . -delete`, `xargs rm -rf`, and more), `p3_overwrite_undone_byte_for_byte`, `p3_edit_undone_byte_for_byte`, `p3_no_remove_dir_all_outside_tests` (choke-point test). P3's "a folder delete lands in the trash" test is deferred with the delete tool (D14) | T13, T5, T1b |
 | P4 Ask cards in the app's words | `AskCard`; `udx_core::display`; `CardQueue`; `EgressState::composed_ranges` | `p4_bidi_override_renders_escaped`, `p4_mixed_script_host_shown_ascii`, `p4_return_inside_guard_approves_nothing`, `p4_exposure_badge_after_mock_fetch`, `p4_composed_4kb_url_shown_whole_and_marked`, `p4_no_default_choice` (view-model, all platforms); `composed_ranges_marks_changed_components` (T15); `e2e_ui_card_guard_interval` (automation, three platforms) | T27 (T13 builds the card data, T15 the ranges, T32 the UI test) |
 | P6 Random delimiters in the prompt protocol | `PromptProtocol` | `p6_fuzz_result_text_never_yields_call` (proptest), `p6_calls_parsed_only_from_current_output`, `p6_nonce_differs_per_session`, `p6_resumed_session_gets_fresh_nonce` | T18, T19 |
-| P7 Shell off unless the full sandbox applies | `Availability`, `NetworkGrants`; shell tool gating; `SessionGrant::UnsandboxedShell` | `p7_forced_unavailable_shell_absent_and_refuses`, `p7_unattended_cannot_enable_unsandboxed`, `p7_linux_restricted_userns_without_profile_is_unavailable` (`sandbox-linux`, sysctl set, no profile), `p7_probe_check_allowed_makes_unavailable`, `p7_network_grants_unavailable_below_landlock_abi_6` (Linux; a test build reporting ABI 5), `p7_networked_check_allowed_disables_network_grants_only` | T21, T23, T11, T10 |
-| P43 Sandbox profiles deny IPC | backends' profiles, with and without network (3.6); probe `IpcEscape`, `IpcEscapeNetworked` | `p43_escape_matrix_<platform>` (macOS: `open`, `osascript`, `launchctl`, `lsopen`; Linux: `systemd-run --user`, `gio open`, X11 by pathname and abstract socket, `TIOCSTI`, a parent-namespace abstract socket; Windows: `schtasks`, WMI, COM), `p43_escape_matrix_networked_<platform>` (macOS: a stand-in Unix socket outside the workspace; Linux: X11 abstract and pathname, a parent-namespace abstract socket, a stand-in Unix socket outside the workspace; Windows: a stand-in named pipe, `schtasks`, WMI, COM), `p43_networked_https_ok_secret_store_denied_<platform>` (3.6), all CI only. Residual P43-a (Linux: a pathname socket created inside the workspace from outside is reachable) pinned by `p43_workspace_socket_from_outside_reachable_residual` | T10, T11, T12 |
+| P7 Shell off unless the full sandbox applies | `Availability`, `NetworkGrants`; shell tool gating; `SessionGrant::UnsandboxedShell` | `p7_forced_unavailable_shell_absent_and_refuses`, `p7_unattended_cannot_enable_unsandboxed`, `p7_linux_restricted_userns_without_profile_is_unavailable` (`sandbox-linux`, sysctl set, no profile), `p7_probe_check_allowed_makes_unavailable`, `p7_network_grants_unavailable_below_landlock_abi_6` (Linux; a test build reporting ABI 5), `p7_networked_check_allowed_disables_network_grants_only`, `p7_resolver_config_failure_disables_network_grants_only` (Linux) | T21, T23, T11, T10 |
+| P43 Sandbox profiles deny IPC | backends' profiles, with and without network (3.6), the Linux networked root's resolver copy (3.6); probe `IpcEscape`, `IpcEscapeNetworked`, `NetworkedResolverConfig` | `p43_escape_matrix_<platform>` (macOS: `open`, `osascript`, `launchctl`, `lsopen`; Linux: `systemd-run --user`, `gio open`, X11 by pathname and abstract socket, `TIOCSTI`, a parent-namespace abstract socket; Windows: `schtasks`, WMI, COM), `p43_escape_matrix_networked_<platform>` (macOS: a stand-in Unix socket outside the workspace; Linux: X11 abstract and pathname, a parent-namespace abstract socket, a stand-in Unix socket outside the workspace; Windows: a stand-in named pipe, `schtasks`, WMI, COM), `p43_networked_https_ok_secret_store_denied_<platform>` (3.6), all CI only; `p43_networked_name_lookup_uses_resolver_copy_linux` (a networked command resolves a name against the test's own stand-in resolver through the read-only copy, with no host `/run` in the root), `resolver_copy_follows_link_never_binds_folder`, `networked_resolver_config_probe_check` (Linux, `sandbox-linux (profile)`). Residual P43-a (Linux: a pathname socket created inside the workspace from outside is reachable) pinned by `p43_workspace_socket_from_outside_reachable_residual` | T10, T11, T12 |
 | P47 Rule sources and precedence | `PermissionEngine::evaluate`, `rule_for_always`, `turn_off_builtin`, `set_mode`; config `InteractiveOnly` | `p47_workspace_allow_changes_nothing`, `p47_allow_always_npm_test_does_not_admit_npm_exec`, `p47_user_allow_git_push_still_asks`, `p47_builtin_off_for_session_with_indicator_then_asks_again` (engine and view-model), `p47_permission_widening_refused_headless`, `p47_mode_widening_refused_headless` (config key, `--mode` without a terminal, `SetMode` unattended), `p47_cli_cannot_turn_off_builtin` (engine refuses `Attended(Terminal)`; the CLI has no verb). Its MCP clause has nothing to start in M1 (no MCP client); the `.mcp.json` write is covered by P8 | T13, T3, T19, T24, T25, T27 |
 | P49 CLI escapes; typed-word asks | `udx_cli::tty` | `p49_prefilled_stdin_approves_nothing`, `p49_cursor_movement_in_output_printed_escaped`, `p49_single_key_is_not_an_answer` (Unix pty in tests; Windows console where the runner allows, else the logic unit-tested) | T24 |
-| P50 Session-owned process groups | `KillHandle`, `ProcessRegistry`, `ProcessSupervisor`, `EngineEvent::ProcessesChanged` | `p50_double_fork_setsid_gone_at_run_end` (Linux, Windows), `p50_macos_group_killed_and_marker_sweep_kills_daemon` (macOS, CI only), `p50_live_processes_listed` (three platforms, the same lifetime everywhere), `p50_kill_handle_works_while_wait_pending`, `p50_exposure_asks_about_networked_processes`, `p50_revoke_asks_about_processes_holding_grant` | T10, T11, T12, T23 |
-| P51 Limits and a free-space floor | `Limits`, `LimitKind`; `fsguard::space`; output cap; `ProcessSupervisor::watch_free_space` | `p51_fork_bomb_contained` (Linux, Windows), `p51_macos_process_limit_reads_back_count_plus_margin`, `p51_output_cut_with_marker`, `p51_store_refuses_below_floor`, `p51_unattended_fill_kills_group_with_event` (test volume: a sized tmpfs on Linux; a small disk image on macOS, CI only). Residuals for T40: no memory limit on macOS (P51-a, pinned by `p51_macos_memory_limit_absent_reported`); no fill test on Windows (P51-b, skipped with a notice) | T10, T11, T12, T21, T5 |
+| P50 Session-owned process groups | `KillHandle`, `ProcessRegistry`, `Supervisor` (implemented by `ProcessSupervisor`; `testing::FakeSupervisor` for engine tests), `EngineEvent::ProcessesChanged` | `p50_double_fork_setsid_gone_at_run_end` (Linux, Windows), `p50_macos_group_killed_and_marker_sweep_kills_daemon` (macOS, CI only), `p50_live_processes_listed` (three platforms, the same lifetime everywhere), `p50_kill_handle_works_while_wait_pending`, `p50_exposure_asks_about_networked_processes`, `p50_revoke_asks_about_processes_holding_grant` | T10, T11, T12, T23 |
+| P51 Limits and a free-space floor | `Limits`, `LimitKind`; `fsguard::space`; output cap; `Supervisor::watch_free_space` (implemented by `ProcessSupervisor`) | `p51_fork_bomb_contained` (Linux, Windows), `p51_macos_process_limit_reads_back_count_plus_margin`, `p51_output_cut_with_marker`, `p51_store_refuses_below_floor`, `p51_unattended_fill_kills_group_with_event` (test volume: a sized tmpfs on Linux; a small disk image on macOS, CI only). Residuals for T40: no memory limit on macOS (P51-a, pinned by `p51_macos_memory_limit_absent_reported`); no fill test on Windows (P51-b, skipped with a notice) | T10, T11, T12, T21, T5 |
 | P58 Rate-limited asks; denial stop | `AskLimiter`; `NoticeGate` | `p58_turn_stops_after_denials_with_event`, `p58_second_unanswered_notice_not_raised`, `p58_session_lists_only_own_asks`. Its notification-title clause has no notification in M1 (notify is M6) | T13, T27 |
 | P8 Protected paths in the workspace | `Verdict::Protected`; `SandboxProfile::write_deny` per backend (3.6); `ExitInfo::{denied_writes, protected_created}`; re-run flow | `p8_sandbox_write_to_git_hooks_fails_commit_succeeds` (three platforms), `p8_sandbox_write_to_absent_protected_path` (macOS denied; Linux and Windows reported and carded), `p8_rerun_wider_only_after_card` (macOS where denials are reported; elsewhere `p8_no_rerun_offer_without_reported_denial`), `p8_file_tool_write_mcp_json_asks`, `p8_file_tools_never_create_links_or_exec_bits`, `p8_other_agents_instruction_files_protected`. Residuals P8-a (absent paths, Linux and Windows) and P8-b (re-run offer only where denials are reported) | T5, T10 to T12, T23 |
 | P9 The guard checks the handle | `FileGuard::open_read`, `write_atomic` | `p9_swap_race_never_returns_target` (helper thread swapping folder and symlink), `p9_windows_forms_refused_without_network` (Windows), `p9_short_name_expanded_before_compare` (Windows), `p9_write_through_symlink_lands_on_target_keeping_mode_and_xattrs`, `p9_hard_linked_other_name_keeps_old_content`, `guard_property_paths_never_escape` (proptest: case variants, NFC and NFD, `..`, link chains, junctions on Windows) | T5 |
@@ -2201,7 +2389,7 @@ threat-model update (T40).
 | P59 A cut prompt stops the turn | `Provider::prompt_integrity`; `StopReason::PromptCut` | `p59_mock_local_underreport_stops_turn`, `p59_ollama_fixture_cut_detected` | T9, T19 |
 | P21 Secrets redacted from tool results | `Redactor`, `StreamRedactor`; engine result path; `web_fetch` URL check | `p21_tool_result_key_reaches_mock_provider_redacted`, `p21_fetch_url_with_key_refused_before_connect`, `p21_key_split_across_stream_chunks_redacted`, `secrets_canary_never_in_test_root` (key in tool output, error, panic, crash report; whole root scanned) | T6, T19, T22 |
 | P22 A key bound to its host | `BoundEndpoint::key_name`; `ConfigEdit` side effect; `InteractiveProof` | `p22_host_change_clears_keychain_entry`, `p22_host_change_from_tool_or_headless_refused` | T7, T25 |
-| P23 Scrubbed child environment; store out of reach | `process_env::scrubbed`, `BaseEnv`; sandbox profiles; `UseMyCredentials`; probe `SecretStoreReach`, `OtherProcessEnv` | `p23_agent_socket_variable_absent`, `p23_provider_key_absent_from_child_env`, `p23_use_my_credentials_restores_only_that_variable`, `p23_use_my_credentials_socket_reachable_only_when_granted`, `p23_secret_store_unreachable_<platform>` (asserts the specific denial; plants an item under the opt-in on CI), `p23_other_process_env_unreadable_<platform>` (a process started outside the sandbox with a canary variable) | T6, T10 to T12 |
+| P23 Scrubbed child environment; store out of reach | `process_env::scrubbed`, `BaseEnv`; sandbox profiles; `UseMyCredentials`; probe `SecretStoreReach`, `OtherProcessEnv` | `p23_agent_socket_variable_absent`, `p23_provider_key_absent_from_child_env`, `p23_use_my_credentials_restores_only_that_variable`, `p23_use_my_credentials_socket_reachable_only_when_granted` (macOS, T10), `p23_use_my_credentials_socket_reachable_only_when_granted_linux` (Linux, `sandbox-linux (profile)`, CI only: the granted socket alone is bound, a sibling socket in its folder stays absent), `p23_secret_store_unreachable_<platform>` (asserts the specific denial; plants an item under the opt-in on CI), `p23_other_process_env_unreadable_<platform>` (a process started outside the sandbox with a canary variable) | T6, T10 to T12 |
 | P57 No dumps; no headers in logs | `harden_process`; `diag`; transport's `SensitiveHeader` | `p57_linux_process_non_dumpable`, `p57_windows_error_report_dump_off` (Windows: reads back the opt-out), `p57_trace_level_provider_call_leaves_no_authorization`, `p57_secret_header_absent_from_debug_and_fixtures` | T6, T7 |
 | P24 Fetch caps; https providers | `FetchCaps`; `check_provider_endpoint` | `p24_huge_body_stops_at_cap`, `p24_compression_bomb_stops_at_decompressed_cap`, `p24_non_loopback_http_provider_refused`, `p24_attended_private_allow_not_applied_unattended`, `net_address_spellings_refused` (table of spellings), `net_rebinding_connects_to_checked_answer`, `net_redirect_to_loopback_refused`, `net_no_connection_at_start` | T22, T4, T7 |
 | P37 Release check on every artifact | `xtask release-check`; nightly step; markers in release-profile builds | `p37_marker_absent_in_release`, `p37_marker_found_in_release_profile_build_with_feature` (the positive control), `p37_test_switches_refused_exit_2` (CLI flag included), `p37_entitlements_match_reviewed_list`; the nightly runs it on every artifact | T33 (markers defined in T2a, T31, T34) |
@@ -2256,14 +2444,18 @@ parallel tasks do not collide).
 | D25 | M1's "home screen" for the start-up target is the chat window with its session list and composer | M1 has no app shell (M4) | The figure times a lighter screen than M4's; it is measured again when the shell arrives | no |
 | D26 | Our own HTML-to-text converter for `web_fetch` and our own command parser for P2, no crate | Both are small and conservative; `html5ever` and `shell-words` are larger than needed (section 2.3) | Parser bugs: mitigated by the rule that anything the parser is unsure of needs a shell (and asks), and by fuzzing | no |
 | D27 | The todo list lives in the session (its log records), not in a workspace file | It touches no file, so nothing for the guard to police | A todo list does not carry into a new session | no |
-| D28 | Networked commands (section 3.6): IP-only network filters on macOS; on Linux the host's network namespace shared, with Landlock ABI 6's abstract-socket and signal scopes required and network grants unavailable below it; `internetClient` only on Windows | Keeps P43 for networked commands with nothing installed; a user-mode network stack on Linux would need an install | Where the kernel's Landlock is older than ABI 6, commands get no network (`npm install` fails there until the kernel is newer); residual P43-a | yes (in 0015, 0016, 0017) |
+| D28 | Networked commands (section 3.6): IP-only network filters on macOS; on Linux the host's network namespace shared, with Landlock ABI 6's abstract-socket and signal scopes required and network grants unavailable below it, and names resolved through a read-only copy of the resolver configuration, never the host's `/run`; `internetClient` only on Windows | Keeps P43 for networked commands with nothing installed; a user-mode network stack on Linux would need an install | Where the kernel's Landlock is older than ABI 6, or where names resolve only through a socket under `/run`, commands get no network (`npm install` fails there); residual P43-a | yes (in 0015, 0016, 0017) |
 | D29 | The permission mode belongs to a session; the configured mode applies to trusted workspaces, an untrusted workspace starts in `ask`, and widening needs an attended session (section 3.7) | P60's least privilege for a new workspace and P47's interactive-only widening | A user who configured `auto` gets asks in a new repository until they trust it | no |
 
 ## 9. Open questions for the maintainer
 
-The maintainer answered D1, D3, D12 and D19 on 2026-11-17 (section 8). One question remains open:
+The maintainer answered D1, D3, D12 and D19 on 2026-11-17 (section 8). Two questions remain open:
 
-1. **Gate question 23, the widget kit for message bodies** (open; needed before T38, the message-body task, starts).
+1. **The milestone's token cap** (open; the controller's check-ins report against it, so it is needed before the first
+   check-in at 11M). The plan's "Total proposed budget" sets out three options with their arithmetic: (a) a cap at the
+   forecast's high end, 52M; (b) 45M, where spend at the high end stops the milestone at a check-in for a decision;
+   (c) 46M with named scope moved out of M1. What the plan needs from the answer: the letter.
+2. **Gate question 23, the widget kit for message bodies** (open; needed before T38, the message-body task, starts).
    T37 makes decision 0008's four measurements of the kit's cached form: the scroll, jump, stream and resize scenarios
    on the 5,000-message fixture; selection and copy within and across messages in the virtualised list; link activation;
    and that a message whose parse lands a frame later does not shift the rows around it. What T38 needs from the
