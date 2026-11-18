@@ -17,8 +17,8 @@ Markings:
   new proposals continue from the highest number.
 - **Accepted (Pn), 2026-11-17**: the maintainer accepted the proposal at the M0 gate; M1 builds it. Placed beside the
   proposal's own mark, whose text is unchanged. An accepted proposal keeps its original mark and text until the
-  milestone that builds it moves it into the design, as section 9 describes. For P41 only its M1 part, the definition of an
-  unattended run, is accepted now.
+  milestone that builds it moves it into the design, as section 9 describes. For P41 only its M1 part, the definition of
+  an unattended run, is accepted now.
 - **Rewritten**: a proposal whose text changed after a review. **Demoted to a backstop** and **Withdrawn**: kept so
   that numbering stays stable, with the reason.
 - **Answered**: where this document disagrees with part of the review, and why.
@@ -220,7 +220,8 @@ sandbox helper (7.1).
   event naming the rule; an "ask" in a run marked unattended becomes a deny with no card. Sandbox tests on all three CI
   platforms: no write outside the workspace, no read of a planted file under a temp `<home>`; writes inside succeed.
 - P1: from the sandbox, a connection to a loopback listener the test opens fails, and a lookup of a test name reaches
-  neither the test's stub resolver nor the system resolver's socket. The Linux variant follows the decision of 2026-11-17 in 7.1
+  neither the test's stub resolver nor the system resolver's socket. The Linux variant follows the decision of 2026-11-17
+  in 7.1
   (the `.deb` installs an AppArmor profile; the feature is off where it is absent).
 - P2: a rule-allowed `tar czf o.tgz *` beside a planted `--checkpoint-action=exec=...` file leaves no marker; compound
   commands generated around an allowed prefix always ask; a zsh glob qualifier never runs under a rule; on Windows every
