@@ -1,0 +1,5 @@
+use udx_core::paths::home_dir;
+
+fn guard_home(env: &dyn Env) -> Result<PathBuf, PathError> {
+    home_dir(env)
+}

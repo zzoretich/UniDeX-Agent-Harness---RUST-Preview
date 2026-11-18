@@ -1,0 +1,1 @@
+let c = std::env::var_os("XDG_CONFIG_HOME");

@@ -1,0 +1,3 @@
+let mut allow: HashMap<&str, bool> = HashMap::new();
+allow.insert("HOME", true);
+let env = TestEnv::new().with("HOME", "/home/user").with("USERPROFILE", "C:\\Users\\user");

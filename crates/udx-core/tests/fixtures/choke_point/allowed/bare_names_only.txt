@@ -1,0 +1,3 @@
+let temp_dir = tempfile::tempdir()?;
+let home_dir = temp_dir.path().join("home");
+fn user_var_name() -> &'static str { "x" }

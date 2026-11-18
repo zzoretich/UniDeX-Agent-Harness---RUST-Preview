@@ -1,0 +1,5 @@
+let manifest = std::env::var("CARGO_MANIFEST_DIR");
+let path = std::env::var_os("PATH");
+let a = env!("CARGO_PKG_NAME");
+let b = option_env!("CI");
+use std::env::{args, var};

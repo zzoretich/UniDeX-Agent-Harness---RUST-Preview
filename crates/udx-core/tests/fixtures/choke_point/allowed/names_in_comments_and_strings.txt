@@ -1,0 +1,4 @@
+// std::env::home_dir() is forbidden; so is env.var("HOME").
+/* use std::env as e; dirs::home_dir(); getpwuid(0); env!("HOME") */
+let message = "never call std::env::temp_dir() or env.var(\"HOME\")";
+let raw = r#"std::env::home_dir()"#;

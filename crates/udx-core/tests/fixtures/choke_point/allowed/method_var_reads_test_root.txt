@@ -1,0 +1,2 @@
+let root = env.var("UNIDEX_TEST_ROOT");
+let opt_in = env.var_os("UNIDEX_TEST_OS_SIDE_EFFECTS");
