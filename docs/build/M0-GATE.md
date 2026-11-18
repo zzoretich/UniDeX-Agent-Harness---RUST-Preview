@@ -1,6 +1,7 @@
 # M0 gate report
 
-Status: complete, awaiting the maintainer · 2026-11-17. It includes decision 0014 (packaging), the cookbook patterns
+Status: complete; signed off by the maintainer on 2026-11-17, who decided questions 1 to 5 (see "Maintainer's
+decisions" below); questions 6 to 27 are open · 2026-11-17. It includes decision 0014 (packaging), the cookbook patterns
 and the removal of the trial code.
 
 This report is for the maintainer. It says what milestone M0 built, what its trials found, and what only the
@@ -18,6 +19,23 @@ Words used throughout:
   is removed at this gate and remains in history (section a).
 - **Run by a program** means a script or the trial's own self-check drove the app and read the result back. Nobody
   operated any trial by hand. Where a person is needed, the step is listed in section d.
+
+## Maintainer's decisions (2026-11-17)
+
+The maintainer signed off milestone M0 and decided questions 1 to 5, the group due before M1 is planned. The hand
+checks in section d were not done at sign-off: they are recorded as not done and stay owed, to be done before the first
+gate that depends on them. Questions 6 to 27 are not answered and stay open, each before the milestone named in its
+heading (questions 24 to 27 whenever convenient). The design, the threat model and decision 0014 were updated to match;
+the question texts below are left as written, because they are the record of what was asked, and each of questions 1 to
+5 carries a "Decided" line.
+
+| Question | Decision |
+|---|---|
+| 1. Linux shell confinement | Option A, with C where the profile is absent. The `.deb` installs an AppArmor profile for the sandbox helper, so mount and network namespaces work. On installs without the profile (the tarball) the shell, stdio MCP servers and add-on adapters are off (fail closed), listed as a design 8 exception. |
+| 2. Threat-model proposals for M1 | Option A. All 31 proposals accepted as written: P1 to P4, P6, P7, P43, P47, P49 to P51, P58, P8 to P10, P48, P13 to P15, P54, P59, P21 to P23, P57, P24, P37, P40, P41 for its M1 part only (the definition of an unattended run; the rest of P41 stays for M6), P60 and P39. The five conflicts in M1's area are settled in the threat model's favour: (a) features that are off on default Ubuntu and Windows with no auto-allowed command become design 8 exceptions under goal G7; (b) a repository is untrusted until the user trusts it (P13); (c) reads outside the workspace ask rather than being refused, and writes outside need a rule naming the folder (P60, threat model 4.2); (d) provider hosts and permission widening change only interactively (P22, P47), which qualifies "every capability, headless"; (e) spend caps arrive in M1, not M2 (P40). |
+| 3. Reference machine and definitions | Machine option A: the reference machine is an Apple silicon desktop with 16 GB and an external display at 100 Hz. Design 9 carries the caveat that passing at 100 Hz may not mean passing on a 120 Hz laptop display (8.3 ms per frame instead of 10) and that thermal headroom differs. The baseline's definitions are adopted as this question lists them (and as `docs/baseline/electron-2.7.0.md`, "Comparison", states them), including the new target of opening a 5,000-message thread in under 100 ms to the first frame. |
+| 4. Scrolling | Option C. The scroll target is the baseline's definition (at most 1 frame interval in 1,000 over 1.5 times the refresh interval and none over twice it, from presented frames, at 2,000 and 10,000 px/s), and M1 builds a persistent shaped-text cache as the way to meet it. Whether the cache sits around GPUI or needs a GPUI change is a design call for M1, to be recorded in a decision record when made. The chat's cache of prepared messages with eviction needs no decision. |
+| 5. Packaging and identity | (i) Display name "UniDeX Rust Preview". (ii) The placeholder identifier `example.unidex.rust-preview` stays until the project has a domain or an organization, and must be replaced before anything is signed. (iii) "UniDeX contributors" stays as publisher, author, copyright and Debian maintainer, with no contact address. (iv) The daily nightly schedule stays. (v) Builds stay unsigned through M1: M1 delivers unsigned nightly builds, and signing is decided at the first tagged preview (M4). Condition (a), the two unhashed build-time fetches, still blocks the first signed build and any release. Condition (b), where the signing secrets live, is not decided and moves with signing to M4. The packaging tool choice (decision 0014) stands. |
 
 ## a. Where M0 stands
 
@@ -91,7 +109,7 @@ ran); **not verified**.
 | Rendering in CI | Can CI render the app and check frames without a GPU? | Yes: Linux X11 on software Vulkan and OpenGL, Windows Server on software Direct3D; frames checked automatically; an automation socket drives the app. Wayland passed but its check could not fail the job | CI on Linux and Windows, five runs; the socket also run by program on the dev Mac. Virtual machines: researched, not run | 0013 |
 | Vendor terms (study, not a trial) | May UniDeX drive Claude Code and Codex through ACP, and who pays? | Both only with API-key credentials until a vendor confirms otherwise | Primary sources read on 2026-11-16; a reviewer fetched every cited page. Not legal advice | 0006 |
 | Electron baseline (study) | How fast is the Electron app 2.7.0? | Warm start 724 ms (a lower bound for the shipped app), 625 idle wake-ups a minute, 239 MiB idle, scrolls at the display's rate, 304 to 641 ms to show a reply in a long thread | Program, dev Mac, development Electron binary with a mock keychain | baseline |
-| Packaging | Which tool makes the `.dmg`, the Windows installer and the `.deb`, and can CI build them nightly? | cargo-packager 0.11.8 for the `.dmg`, the Windows NSIS installer and, for now, the `.deb`; the tarball is a plain `tar`; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (cargo-packager cannot keep a setuid file or run an install script). Velopack (no `.dmg`, AppImage only on Linux) and cargo-dist (no `.dmg` or `.deb`) rejected. The record is "proposed": the tool stands unless you reopen it, and the identity awaits you (question 5) | CI, three platforms: the `.dmg`, `.deb`, tarball and Windows installer built unsigned from the cookbook window. The `.deb` was installed and removed on a Linux runner, and the Windows installer installed and removed on a Windows runner (file, library and registry checks). Nothing was opened on a display and nothing was run by a person; signing, notarization, the updater and the browser's nested bundles were not tried, and the Windows `.msi` was built and its contents listed but not installed | 0014 |
+| Packaging | Which tool makes the `.dmg`, the Windows installer and the `.deb`, and can CI build them nightly? | cargo-packager 0.11.8 for the `.dmg`, the Windows NSIS installer and, for now, the `.deb`; the tarball is a plain `tar`; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (cargo-packager cannot keep a setuid file or run an install script). Velopack (no `.dmg`, AppImage only on Linux) and cargo-dist (no `.dmg` or `.deb`) rejected. The record was "proposed" when written; the maintainer accepted it on 2026-11-17 with the identity (question 5) | CI, three platforms: the `.dmg`, `.deb`, tarball and Windows installer built unsigned from the cookbook window. The `.deb` was installed and removed on a Linux runner, and the Windows installer installed and removed on a Windows runner (file, library and registry checks). Nothing was opened on a display and nothing was run by a person; signing, notarization, the updater and the browser's nested bundles were not tried, and the Windows `.msi` was built and its contents listed but not installed | 0014 |
 
 ## c. Decisions for the maintainer
 
@@ -106,12 +124,15 @@ design carries a one-line pointer to it and its approved wording stands.
 | Before the milestone that needs it | 6 to 23 (question 23 is the one due before M1's chat window is built) |
 | Whenever convenient | 24 to 27 |
 
+The next two paragraphs describe the design as it stood before the decisions of 2026-11-17, and are kept as the record
+of what this report said when it was written; for the design as it is now, see "Maintainer's decisions" above.
+
 Changes the design already took (each settles something it left open, or states a fact about M0 beside the approved
 text without changing it): the PTY crate (5.7), how browser frames travel and CEF on Windows (5.8), what "CI-verified"
 covers in decision 0013's words, including the "(on X11)" qualifier on the Linux automation socket's frame capture (8),
 the tray crate on macOS and Windows (8, 13), the GPUI pin (13), the packaging tool for the `.dmg`, the Windows
 installer and the `.deb`, with the tarball made separately and the `.deb` moving to a second tool when the browser's
-setuid helper arrives (8, 13; decision 0014, which is "proposed"), and that M0 measured on a desktop, not the
+setuid helper arrives (8, 13; decision 0014, accepted on 2026-11-17), and that M0 measured on a desktop, not the
 reference laptop (9). Section 7 was corrected to match the checklist, and a pointer to question 6 was added at goal G4.
 If any of these should not stand, say so.
 
@@ -130,6 +151,11 @@ one-line pointer.
 ### Must be settled before M1 is planned
 
 #### 1. Which mechanism confines shell commands on Linux?
+
+**Decided (2026-11-17).** Option A, with C where the profile is absent: the `.deb` installs an AppArmor profile for the
+sandbox helper so namespaces work; on installs without it (the tarball) the shell, stdio MCP servers and add-on
+adapters are off (fail closed), listed as a design 8 exception.
+
 
 **Why.** Design 5.11 says Landlock and seccomp on Linux. The threat model's proposals for blocking a command's network
 and its calls to other programs (P1, P43) need mount and network namespaces, which default Ubuntu restricts through
@@ -152,6 +178,10 @@ needs (decision 0012), so one packaging answer serves both.
 macOS goes first. The Windows mechanism is decided inside M1's sandbox design and needs nothing now (threat model 7).
 
 #### 2. Which of the threat model's proposals does M1 build, and which design conflicts do you accept for it?
+
+**Decided (2026-11-17).** Option A: all 31 proposals accepted as written (P41 for its M1 part only, the definition of
+an unattended run), and the five conflicts settled in the threat model's favour; see "Maintainer's decisions" above.
+
 
 **Why.** The threat model proposes 61 controls, each "undecided until the maintainer accepts it" (threat model,
 markings), and ranks them in section 8. Twenty-nine are scheduled for M1: P1 to P4, P6, P7, P43, P47, P49 to P51, P58
@@ -217,6 +247,10 @@ for M0 in the threat model; M0 did not build its check (question 26).
 
 #### 3. Which machine is the reference, and how is each speed target defined?
 
+**Decided (2026-11-17).** Machine option A, with the 120 Hz and thermal caveat written into design 9; the baseline's
+definitions adopted as listed below, including the 100 ms target for opening a 5,000-message thread.
+
+
 **Why.** Design 9 names an Apple silicon laptop with 16 GB as the reference machine. Every M0 measurement was taken on
 an Apple silicon desktop with 16 GB and external displays at 100 Hz (and 60 Hz in the browser trial), under other load
 (baseline, decisions 0008 and 0012). A 120 Hz laptop display leaves 8.3 ms per frame instead of 10 (decision 0008). The
@@ -246,6 +280,11 @@ so "a miss blocks the gate" becomes a judgement call.
 
 #### 4. What does "no dropped frames" mean for the chat, and how is it met?
 
+**Decided (2026-11-17).** Option C: the baseline's definition is the target, and M1 builds a persistent shaped-text
+cache to meet it; whether it sits around GPUI or needs a GPUI change is an M1 design call, recorded in a decision
+record when made.
+
+
 **Why.** In the chat trial, scrolling 5,000 messages on a first visit had up to 20 of 1,000 frame intervals over 1.5
 times the refresh interval, worse than Electron's 2 of 9,998 (decision 0008). The likely cause is that GPUI keeps
 shaped text only from one frame to the next, so rows new to the view are shaped again; it was not isolated. A miss
@@ -268,6 +307,12 @@ kit for message bodies is a separate decision (question 23).
 did.
 
 #### 5. Packaging and identity: the app's name, its schedule, and signing
+
+**Decided (2026-11-17).** (i) "UniDeX Rust Preview". (ii) The placeholder identifier stays until the project has a
+domain or an organization, and is replaced before anything is signed. (iii) "UniDeX contributors", no address. (iv) The
+daily schedule stays. (v) Unsigned through M1; signing is decided at the first tagged preview (M4), where condition (b)
+moves too; condition (a) still blocks the first signed build and any release.
+
 
 **Why.** Decision 0014 chose cargo-packager and built unsigned packages of the cookbook window on all three platforms.
 The record is "proposed": the tool is a design call from the trial and stands unless you reopen it, and the identity is
@@ -807,6 +852,9 @@ figures. Delete them if you prefer.
 
 ## d. Hands-on checks the maintainer owes
 
+Not done at sign-off (2026-11-17): they are recorded as not done and stay owed, to be done before the first gate that
+depends on them.
+
 | Check | What to do | Instructions | About how long |
 |---|---|---|---|
 | The cookbook window | Run `cargo run -p udx-cookbook --example hello_window`; expect a window titled "UniDeX cookbook" with a label and a button that counts clicks | `crates/udx-cookbook/README.md`, "Run an example" | A few minutes, most of it the first build |
@@ -845,7 +893,7 @@ Records that disagree:
 
 - **The measurement machine and the reference machine.** The baseline's first paragraph calls its machine "the
   reference machine", while its "Conditions" and "Comparison" say it is a desktop and not the laptop design 9 names.
-  The baseline is left as it is; question 3 settles which machine is the reference.
+  The baseline is left as it is; question 3 settled it on 2026-11-17: the desktop is the reference machine.
 - **One token figure.** `docs/build/LEDGER.md` gives Task 3's reviewer 216k; the working notes say "193k+"
   at the time the task finished. This report uses the figure in `docs/build/LEDGER.md`.
 
@@ -970,6 +1018,8 @@ highest recorded for CI or packaging, so that row is still 1.3M. Task 16 is left
 report reads every record, and stage 2 also built the cookbook; it is the only task of its kind. That suggests the 0.6M
 the M1 estimate gives the gate report is low: this gate cost more than six times that.
 
+(Written before the decision of 2026-11-17 that M1's nightlies are unsigned; no figure below is changed.)
+
 **M1 as a whole: 22 million tokens**, with a check-in at 11 million. Reasoning, to be replaced by the M1 architect's
 real task list: design 6 puts one hosted and one local provider, the engine loop, core tools, the shell sandbox,
 permission cards, a session log, a GPUI chat window, `unidex chat`, the first evaluation run and signed macOS nightlies
@@ -997,14 +1047,16 @@ with a findings file. The build team proposes the same pacing for M1.
 
 ## g. What the build team recommends happen next
 
-**First, before M1 is planned:**
+**First, before M1 is planned** (items 1 to 3 were decided on 2026-11-17; item 4 was not done):
 1. Question 1 (the Linux sandbox) and question 2 (the M1 proposals and conflicts). M1's sandbox and permission specs
    cannot be written without them.
 2. Questions 3 and 4 (the reference machine and target definitions; the scroll target). Every M1 gate measurement
    depends on them.
-3. Question 5 (packaging and identity). M1 promises signed macOS nightlies, so the identifier (part ii) and the signing
-   identities (part v) are needed before the first one; the display name (part i) before any release.
-4. The cookbook window and the trial package checks (section d): the plan's own sign-off step, before M1 is planned.
+3. Question 5 (packaging and identity). Decided: M1's nightlies are unsigned, so the identifier (part ii) is replaced
+   before anything is signed and the signing identities (part v) wait for the first tagged preview (M4); the display
+   name (part i) is settled.
+4. The cookbook window and the trial package checks (section d): the plan's own sign-off step. Not done at sign-off;
+   they stay owed, to be done before the first gate that depends on them.
 5. Question 23 (the widget kit), before M1's chat window is built; M1's architect can plan around it (option C).
 
 **What M1's plan needs from M0's findings, beyond those answers** (decisions 0008, 0009 and 0013): the chat's message
@@ -1023,11 +1075,11 @@ hands-on Linux items.
 **Then, before each later milestone is planned:** questions 13 and 6 to 8 (M2, M3, M5); 9 to 12 (M4); 14 to 16 (M6);
 17 (M8); 18 to 22 (M7).
 
-**Before the first signed build, and in any case before any release** (M1 delivers signed macOS nightlies, design 6,
-so this comes inside M1): the two unhashed build-time fetches in the packaging tool, an installer plugin and a
-disk-image script, are fetched with a hash check or supplied from a verified copy, and where the signing secrets live
-and who approves their use (threat model P38) is decided (decision 0014; question 5, part v). The build team keeps the
-first on its list as a blocker; the second is the maintainer's decision.
+**Before the first signed build, and in any case before any release** (M1's nightlies are unsigned, so this now comes
+with signing, decided at the first tagged preview, M4): the two unhashed build-time fetches in the packaging tool, an
+installer plugin and a disk-image script, are fetched with a hash check or supplied from a verified copy, and where the
+signing secrets live and who approves their use (threat model P38) is decided (decision 0014; question 5, part v). The
+build team keeps the first on its list as a blocker; the second is not decided and moves to M4 with signing.
 
 **What can proceed regardless:** the platform trial's 14 steps and the browser check from `docs/acceptance/hands-on/`
 (section d; the first decides question 12, the second waits for your word on question 21); the M1 architect's crate

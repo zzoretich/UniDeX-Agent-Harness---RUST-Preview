@@ -1,6 +1,6 @@
 # 0014: Packaging tool and application identity
 
-Status: proposed, awaiting the maintainer's confirmation of the identifier and name (the tool choice is a design call from the M0 trial and stands unless the maintainer reopens it)
+Status: accepted on 2026-11-17 (see "Maintainer's decisions (2026-11-17)")
 Date: 2026-11-17
 
 ## Context
@@ -54,8 +54,25 @@ Velopack and cargo-dist are not used.
 
 ## Who decided
 
-A design call from the M0 trial, from the runs listed here. The application identity (identifier and display name) is
-the maintainer's to confirm.
+A design call from the M0 trial, from the runs listed here; the maintainer accepted it on 2026-11-17 and decided the
+application identity (see the next section).
+
+## Maintainer's decisions (2026-11-17)
+
+At the M0 gate the maintainer answered question 5 of `docs/build/M0-GATE.md`:
+
+- **Display name:** "UniDeX Rust Preview".
+- **Identifier:** the placeholder `example.unidex.rust-preview` stays until the project has a domain or an
+  organization, and must be replaced before anything is signed.
+- **Publisher, author, copyright and Debian maintainer:** "UniDeX contributors", with no contact address.
+- **Nightly schedule:** the daily schedule stays.
+- **Signing:** builds stay unsigned through M1. M1 delivers unsigned nightly builds, and signing is decided at the first
+  tagged preview (M4). Condition (a) below (the two unhashed build-time fetches) still blocks the first signed build and
+  any release. Condition (b) (where the signing secrets live) is not decided and moves with signing to M4.
+- **Packaging tool:** the choice in "Decision" stands.
+
+The trial's identifier in `packaging/Packager.toml` still ends in `.trial`; M1's packaging task replaces it with
+`example.unidex.rust-preview` when it packages a real binary target.
 
 ## Evidence
 
@@ -171,7 +188,8 @@ included in none of them.
   model P38 keeps signing secrets only in a release environment that needs the maintainer's approval, which a scheduled
   nightly cannot satisfy without a decision. The options: an approval-gated environment, which a schedule cannot use
   unattended; signing only on manually approved runs; or unsigned nightlies, with signed builds made separately. M1
-  delivers signed nightlies (design 6), so these hold before the first signed build, not only before a release.
+  delivers unsigned nightlies (decided 2026-11-17), so these hold before the first signed build, which is decided at
+  the first tagged preview (M4), and in any case before a release; (b) moves to M4 with signing.
 - Linux formats: `.deb` and a plain tarball now; the `.deb` moves to cargo-deb when the setuid helper arrives (measured to
   work). cargo-packager's AppImage is unnecessary for the browser-less build until needed.
 - Future browser component: the macOS nested bundles and the Windows bootstrap arrangement are not exercised by any
@@ -201,7 +219,7 @@ included in none of them.
   November 2026 and about 267,000 downloads. Its `.deb` lacks maintainer scripts and its `0.x` version means breaking
   changes; the config is small and isolated in `packaging/Packager.toml`, so replacing it is bounded.
 
-## Proposed identity (for the maintainer to confirm)
+## Proposed identity (as put to the maintainer; decided above)
 
 Placeholders in use today (`packaging/Packager.toml`): identifier `example.unidex.rust-preview.trial`, name
 "UniDeX Rust Preview", publisher, authors and Debian `Maintainer` "UniDeX contributors", copyright "UniDeX
@@ -259,7 +277,8 @@ paths). Debian package and program file name: `unidex-rust-preview`.
 
 - Confirm or replace the bundle identifier and the display name (proposed identity, above; the display name names the
   Windows install folder and uninstall entry and the macOS app, so it is the harder one to change later), and the publisher and Debian
-  `Maintainer` string "UniDeX contributors" (whether to add a project address), and the copyright line.
+  `Maintainer` string "UniDeX contributors" (whether to add a project address), and the copyright line. Done on
+  2026-11-17 (see "Maintainer's decisions").
 - Nothing needs supplying today: no secret exists and no workflow references one. For signed builds later: a Developer
   ID certificate and notarization credentials (macOS), a code-signing certificate or cloud signing service (Windows), an
   update signing key if the cargo-packager updater is used (see Consequences).
@@ -286,7 +305,7 @@ delete the download, and report what macOS said: that is the one result the runn
 - The first signed build is made, or any build is to be released to users: first the unhashed fetches listed under
   Supply chain (the NSIS ApplicationID plugin, the `create-dmg` script, the AppImage tooling if used) are hash-checked
   or supplied from a verified copy;
-- The first signed or notarized release is prepared (identity confirmed; secrets supplied; the pre-signing changes in
-  Consequences made); the browser is packaged
-  (re-trial nested bundles, the setuid `.deb` and the Windows bootstrap); cargo-packager has no release by
-  mid-2027 or breaks on a pinned toolchain; or a measured download size exceeds the 40 MB target.
+- The first signed or notarized release is prepared (the placeholder identifier replaced; secrets supplied; the
+  pre-signing changes in Consequences made); the browser is packaged (re-trial nested bundles, the setuid `.deb` and
+  the Windows bootstrap); cargo-packager has no release by mid-2027 or breaks on a pinned
+  toolchain; or a measured download size exceeds the 40 MB target.

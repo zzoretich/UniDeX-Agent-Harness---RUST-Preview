@@ -2,7 +2,8 @@
 
 Status: approved by the maintainer · 2026-11-16 · draft 2, revised after an independent design review · revised at
 the M0 gate, 2026-11-17: sections 5.7, 5.8, 8, 9, 13 updated from decisions 0006 to 0014, and section 7 corrected to
-match the acceptance checklist; open questions in docs/build/M0-GATE.md
+match the acceptance checklist; revised again on 2026-11-17 for the maintainer's M0 gate decisions (questions 1 to 5:
+sections 5.2, 5.3, 5.11, 6, 7, 8, 9 and 13); open questions in docs/build/M0-GATE.md
 Source product: UniDeX Agent Harness 2.7.0 (Electron), MIT, referred to below as "the Electron app".
 
 ## 1. Intent
@@ -140,6 +141,9 @@ udx-cookbook       small GPUI examples that CI builds; the agents' reference
 xtask              privacy gate, packaging, release tasks
 ```
 
+"Every capability, headless" holds with one qualification: provider hosts and permission widening change only
+interactively (threat model P22, P47).
+
 ### 5.1 Two traits that define the product
 
 - `Provider`: streaming chat with tool calls, a model catalog with capabilities (tool calling, vision, context size),
@@ -159,7 +163,7 @@ That mapping is how a setup mixes frontier and local models. A fallback happens 
 - Permissions: allow, ask or deny per tool, path and command, with modes; every decision is logged. In an unattended
   run (a routine, a duty, `run-due`) an "ask" is a "deny".
 - Internal events replace host hooks: context injection before a turn, memory capture after it, spend accounting.
-- Spend ledger with per-call and per-day caps.
+- Spend ledger with per-call and per-day caps. The caps arrive in M1 (threat model P40).
 
 Making one loop work well across very different models is the hard part, and it is designed in, not patched on:
 
@@ -180,7 +184,8 @@ Making one loop work well across very different models is the hard part, and it 
 ### 5.3 Tools
 
 Read, write and edit files; glob; grep; shell; web fetch; todo; sub-agent; skill; memory; notify; plus any tool an MCP
-server provides. File tools are scoped to the workspace.
+server provides. File tools are scoped to the workspace: reads outside it ask rather than being refused, and writes
+outside it need a rule naming the folder (threat model 4.2, P60).
 
 Skills use the open `SKILL.md` format: listed by name and description, loaded on demand, and offered as slash commands.
 A sub-agent definition is a markdown file with frontmatter (name, description, allowed tools, role). Both live in the
@@ -298,11 +303,17 @@ The Electron app leaned on Claude Code's permissions and Codex's sandbox and sti
 controls. This app executes model-chosen tools itself, so it owns all of that. A threat model is written in M0 and
 `SECURITY.md` is kept current; each milestone gate includes a security review.
 
+At the M0 gate (2026-11-17) the maintainer accepted 31 of the threat model's proposals for M1 (P1 to P4, P6, P7, P43,
+P47, P49 to P51, P58, P8 to P10, P48, P13 to P15, P54, P59, P21 to P23, P57, P24, P37, P40, P60 and P39, and P41 for
+its M1 part only, the definition of an unattended run), and settled in the threat model's favour the five conflicts
+that fall in M1's area (threat model 7.1). The threat model marks each accepted proposal "Accepted (Pn), 2026-11-17";
+the rows below state what the decisions changed. The other proposals stay undecided until their own milestones.
+
 | Boundary | Controls |
 |---|---|
-| Model output to tools | Permissions (5.2). Shell commands run inside `udx-sandbox` (seatbelt on macOS, Landlock and seccomp on Linux, a restricted token on Windows), delivered in M1 and informed by existing permissively licensed sandbox code. |
+| Model output to tools | Permissions (5.2). Shell commands run inside `udx-sandbox` (seatbelt on macOS; on Linux Landlock and seccomp inside mount and network namespaces, which the `.deb` allows by installing an AppArmor profile for the sandbox helper; a restricted token on Windows), delivered in M1 and informed by existing permissively licensed sandbox code. Where the Linux profile is absent (the tarball) the shell, stdio MCP servers and add-on adapters are off, failing closed (section 8). |
 | Files | Workspace scoping; a deny list for credential and key files; paths resolved before checks, covering letter case, Unicode forms, symlinks, hard links and Windows junctions. |
-| Untrusted content | Web pages, MCP results, browser content and files from outside the workspace are labelled as untrusted in the model's context. |
+| Untrusted content | Web pages, MCP results, browser content, files from outside the workspace and the contents of a workspace the user has not trusted are labelled as untrusted in the model's context. A repository is untrusted until the user trusts it, and third-party paths (dependency and vendor folders, git-ignored paths, submodules) stay untrusted inside a trusted one (threat model P13). |
 | Memory | Memory is injected into every turn, so a poisoned memory persists. A memory write from a turn that touched untrusted content becomes a draft for review, not a saved memory. |
 | Secrets | Keychain storage; values redacted before anything reaches a session log; API keys removed from the environment of every child process. |
 | Network | `web_fetch` refuses loopback, link-local and private addresses unless the user allows them. |
@@ -319,10 +330,10 @@ early: every unproven technology is tried in M0, and a real window exists from M
 | | Milestone | Delivers |
 |---|---|---|
 | M0 | Foundations, trials and decisions | Workspace skeleton; CI on three platforms; privacy gate; threat model; the acceptance checklist ported and section 7 completed against it; GPUI source and pins recorded; add-on vendor terms recorded; packaging tool chosen. Throwaway trials on all three platforms: a streaming chat view and terminal; text entry including CJK input and dead keys; tray, menus, multiple windows, file dialogs; a screen reader; Chromium embedded in a GPUI window; whether CI runners, and virtual machines on the development machine, can render the app. Baseline measurements of the Electron app. The cookbook crate, task ledger and decision log. |
-| M1 | Vertical slice | One hosted and one local provider, the engine loop, core tools, the shell sandbox, permission cards and a session log, in a real GPUI chat window and in `unidex chat`. The first evaluation run. Nightly builds, signed on macOS. |
+| M1 | Vertical slice | One hosted and one local provider, the engine loop, core tools, the shell sandbox, permission cards and a session log, in a real GPUI chat window and in `unidex chat`. The first evaluation run. Spend caps and the threat-model controls accepted for M1 (section 5.11). Unsigned nightly builds; signing is decided at the first tagged preview (M4). |
 | M2 | Engine breadth | All providers, model profiles, context management, sub-agents, skills, MCP client. Gate: the evaluation suite across the model matrix. |
 | M3 | Memory | Store, recall, context injection, session wrap-up, feedback rules, `unidex import`, MCP server. |
-| M4 | The app | Shell (rail, command palette, status bar, settings), Sessions and History, terminal deck, diff pane, themes, tray, links, local-model management, auto-update. First tagged preview. |
+| M4 | The app | Shell (rail, command palette, status bar, settings), Sessions and History, terminal deck, diff pane, themes, tray, links, local-model management, auto-update. First tagged preview, where signing is decided. |
 | M5 | Add-on engines | ACP engine, Claude Code and Codex, cross-review, handoff. |
 | M6 | Chief of Staff | Persona, duties, routines, notifications, proposals, Pulse. |
 | M7 | Browser | Embedded Chromium and the Computer screen. |
@@ -342,7 +353,8 @@ Design calls that change or drop features:
   provider, a key or a local model (M11).
 - Host plugins, hooks, the status line and edits to host instruction files are dropped (non-goal; none).
 - The "chat over a live terminal" view is replaced by ACP sessions (M5).
-- Cost tracking comes from provider usage data, not from host transcripts (M2).
+- Cost tracking comes from provider usage data, not from host transcripts (M2). Spend caps arrive earlier, in M1 (threat
+  model P40).
 - The Brain Map is drawn from links our own index finds; the external graph builder is not carried (M9). (Design call.)
 - Agents, skills and teams are UniDeX's own; they can be imported from other tools' folders and are never mirrored
   back (M10).
@@ -423,7 +435,7 @@ more (decision 0013; design call):
 | Wake-up for routines | launchd | systemd user timer | Task Scheduler |
 | Tray | `tray-icon` (decision 0011) | separate crate; the backend is open at the M0 gate (`docs/build/M0-GATE.md`, question 11) | `tray-icon` (decision 0011); chosen, never run on Windows |
 | Browser | CEF, off-screen (decision 0012) | CEF, off-screen; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | CEF, off-screen, under CEF's bootstrap; the OS web view as a fallback (decision 0012); chosen on headless CI evidence, nothing drawn (`docs/build/M0-GATE.md`, question 20) |
-| Package | signed, notarized `.dmg`, built with cargo-packager (decision 0014, proposed) | `.deb` (cargo-packager, then cargo-deb once the browser's setuid helper arrives; decision 0014) and a tarball made separately; AppImage only without the browser; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | NSIS installer built with cargo-packager (decision 0014), signed if a certificate is supplied |
+| Package | signed, notarized `.dmg`, built with cargo-packager (decision 0014); nightlies are unsigned through M1 | `.deb` (cargo-packager, then cargo-deb once the browser's setuid helper arrives; decision 0014) and a tarball made separately; AppImage only without the browser; open at the M0 gate (`docs/build/M0-GATE.md`, question 19) | NSIS installer built with cargo-packager (decision 0014), signed if a certificate is supplied |
 
 Known exceptions at design time:
 
@@ -431,37 +443,54 @@ Known exceptions at design time:
   Open at the M0 gate: see `docs/build/M0-GATE.md`, question 12.
 - Screenshot-based UI tests run on macOS first; GPUI's visual testing elsewhere is still in flux.
 - Signing identities are supplied by the maintainer as CI secrets. Without them a platform's builds are unsigned and
-  say so.
+  say so. Nightly builds are unsigned through M1, and signing is decided at the first tagged preview (M4).
 - The packaging tool is cargo-packager for the `.dmg`, the Windows installer and the `.deb`; the tarball is made
-  separately; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (decision 0014, proposed). The
-  application identifier, display name, publisher, the nightly schedule and the signing identities are open at the M0
-  gate: see `docs/build/M0-GATE.md`, question 5.
-- Open at the M0 gate: further exceptions proposed by the M0 trials and the threat model; see
-  `docs/build/M0-GATE.md`, questions 1, 2, 10 and 11.
+  separately; the `.deb` moves to cargo-deb when the browser's setuid helper arrives (decision 0014, accepted by the
+  maintainer on 2026-11-17). The identity is confirmed: display name "UniDeX Rust Preview"; the placeholder identifier
+  `example.unidex.rust-preview` until the project has a domain or an organization, replaced before anything is signed;
+  "UniDeX contributors" as publisher, author, copyright and Debian maintainer, with no contact address; and the daily
+  nightly schedule stays.
+- Linux installs without the AppArmor profile that the `.deb` installs for the sandbox helper (the tarball) cannot
+  rely on mount or network namespaces, so the shell, stdio MCP servers and add-on adapters are off there, failing closed
+  (threat model P7, P43; decided at the M0 gate, 2026-11-17).
+- Windows runs no command under an allow rule until a parser exists for the shell in use: every command asks (threat
+  model P2; decided at the M0 gate, 2026-11-17, with the Linux exception above, under goal G7).
+- Open at the M0 gate: further exceptions proposed by the M0 trials (`docs/build/M0-GATE.md`, questions 10 and 11) or
+  by threat-model proposals not yet decided (threat model 7.1; questions 13, 19 and 22).
 
 ## 9. Performance targets
 
-Initial targets, to be confirmed against the Electron baseline measured in M0 (`docs/baseline/electron-2.7.0.md`, which
-also proposes how each target is defined and measured). They are measured in two places, because shared CI runners have
-no GPU and cannot time frames reliably:
+Initial targets, confirmed against the Electron baseline measured in M0 (`docs/baseline/electron-2.7.0.md`), whose
+definitions of how each target is measured the maintainer adopted at the M0 gate (2026-11-17). They are measured in two
+places, because shared CI runners have no GPU and cannot time frames reliably:
 
 - In CI, on every change: benchmarks of the core, download size, and a count of idle wake-ups. A regression fails the
   change.
-- At each milestone gate, on the reference machine (an Apple silicon laptop with 16 GB): cold start, frame pacing and
-  token latency. A miss blocks the gate. M0's measurements, the Electron baseline and the trials, were taken on an
-  Apple silicon desktop with 16 GB and external displays at 100 Hz and 60 Hz, not on that laptop.
+- At each milestone gate, on the reference machine (an Apple silicon desktop with 16 GB and an external display at
+  100 Hz, named by the maintainer at the M0 gate, 2026-11-17): cold start, frame pacing and token latency. A miss
+  blocks the gate. M0's measurements, the Electron baseline and the trials, were taken on such a desktop (displays at
+  100 Hz, and 60 Hz in the browser trial), under other load.
 
-Open at the M0 gate: which machine is the reference, and how each target is defined; see `docs/build/M0-GATE.md`,
-question 3.
+Caveat: passing at 100 Hz may not mean passing on a 120 Hz laptop display, which leaves 8.3 ms per frame instead of 10,
+and thermal headroom differs between a desktop and a laptop.
 
-The app, without the browser component:
+The app, without the browser component, with each target's definition as adopted from the baseline ("Comparison"):
 
-- Cold start to first frame: under 400 ms.
-- Idle CPU: no periodic wake-ups from our code. Idle memory: under 150 MB.
-- Scrolling a 5,000-message thread: no dropped frames at the display's refresh rate. Open at the M0 gate: see
-  `docs/build/M0-GATE.md`, question 4.
-- First streamed token on screen: within 50 ms of arrival.
-- Download size: under 40 MB.
+- Cold start to first frame: under 400 ms. From spawn to the first presented frame of the main window, that frame
+  showing the home screen's navigation; the median of ten warm launches. The first launch after a reboot or install is
+  reported separately, with no pass mark.
+- Idle CPU: no periodic wake-ups from our code, a rule checked in code and with an internal counter; the measured cap is
+  at most 60 idle wake-ups and 0.1 CPU-seconds in 60 seconds across all the app's processes. Both numbers are
+  placeholders until a floor is measured on an empty native window. Idle memory: under 150 MB, the summed physical
+  footprint of all the app's processes about 90 seconds after the home screen is up.
+- Scrolling a 5,000-message thread: at most 1 frame interval in 1,000 over 1.5 times the refresh interval and none over
+  twice it, from presented frames, at 2,000 and 10,000 px/s. M1 builds a persistent shaped-text cache to meet it;
+  whether that cache sits around GPUI or needs a GPUI change is a design call for M1, recorded in a decision record
+  when made.
+- First streamed token on screen: within 50 ms of arrival, in a new thread and also in a 5,000-message thread. Arrival
+  is the engine reading the provider's bytes.
+- Opening a 5,000-message thread: under 100 ms to the first frame (a new target).
+- Download size: under 40 MB, for the compressed macOS arm64 disk image without the browser component.
 
 The browser component is measured on its own (download size, memory per tab, frame rate of the embedded view), with
 targets set from the M0 trial. Its memory does not count against the app's 150 MB. Open at the M0 gate: see
@@ -566,11 +595,10 @@ is available if the maintainer turns it on.
 Settled in M0, so no longer left open: the GPUI source and pin (the `gpui-pre` 0.3.12 snapshot, set once in the
 workspace manifest; decision 0007), the PTY crate (`alacritty_terminal`'s own PTY; decision 0009) and the tray crate on
 macOS and Windows (`tray-icon`; decision 0011). The packaging tool (cargo-packager, with cargo-deb for a `.deb` that
-needs a setuid file; decision 0014) is proposed: it stands unless the maintainer reopens it, pending the maintainer's
-confirmation of the application identity. The Linux tray backend is open
-at the M0 gate: see `docs/build/M0-GATE.md`, question 11. Decision 0007 pinned the GPUI snapshot the widget kit requires
-and deferred the kit itself; whether it is adopted is open at the M0 gate: see `docs/build/M0-GATE.md`, question 23.
-The application identity and signing are open at the M0 gate: see `docs/build/M0-GATE.md`, question 5.
+needs a setuid file; decision 0014) is accepted, and the application identity is confirmed (section 8). The Linux tray
+backend is open at the M0 gate: see `docs/build/M0-GATE.md`, question 11. Decision 0007 pinned the GPUI snapshot the
+widget kit requires and deferred the kit itself; whether it is adopted is open at the M0 gate: see
+`docs/build/M0-GATE.md`, question 23. Signing is decided at the first tagged preview (M4).
 
 ## 14. Main risks
 
