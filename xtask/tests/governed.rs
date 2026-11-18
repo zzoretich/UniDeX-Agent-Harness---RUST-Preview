@@ -122,8 +122,10 @@ fn governed_list_matches_record() {
         "Cargo.toml",
         "README.md",
     ];
-    let all: Vec<&str> = governed.iter().chain(clean.iter()).copied().collect();
-    let r = run_with(&all, true);
+    // Run 1: only the paths that must be flagged. (Run apart from the near
+    // misses, because a near miss such as `github/workflows/ci.yml` is a plain
+    // substring of a flagged path and could not otherwise be searched for.)
+    let r = run_with(&governed, true);
     assert_eq!(r.code, Some(0), "stdout: {}", r.stdout);
 
     let want: BTreeSet<String> = governed.iter().map(|s| s.to_string()).collect();
@@ -133,13 +135,31 @@ fn governed_list_matches_record() {
     for p in governed {
         assert!(summary.contains(p), "summary lacks {p}:\n{summary}");
     }
+    // A table: a header row, a separator row, and one row per flagged file.
+    let rows = summary.lines().filter(|l| l.starts_with('|')).count();
+    assert_eq!(rows, governed.len() + 2, "summary:\n{summary}");
+
+    // Run 2: only the near misses. Nothing is flagged, nothing is named.
+    let r = run_with(&clean, true);
+    assert_eq!(r.code, Some(0), "stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.lines().any(|l| l.starts_with("::")),
+        "annotation for a near miss: {:?}",
+        r.stdout
+    );
+    assert!(flagged(&r.stdout).is_empty());
+    // The tool writes a heading and a plain line, and no table, for an empty result.
+    let summary = r.summary.expect("job summary file was not written");
+    assert!(summary.contains("## Governed paths"), "summary:\n{summary}");
+    assert_eq!(
+        summary.lines().filter(|l| l.starts_with('|')).count(),
+        0,
+        "table row for a near miss:\n{summary}"
+    );
     for p in clean {
         assert!(!summary.contains(p), "summary names clean {p}:\n{summary}");
         assert!(!r.stdout.contains(p), "stdout names clean {p}");
     }
-    // A table: a header row, a separator row, and one row per flagged file.
-    let rows = summary.lines().filter(|l| l.starts_with('|')).count();
-    assert_eq!(rows, governed.len() + 2, "summary:\n{summary}");
 }
 
 #[test]
