@@ -19,6 +19,8 @@ name: governance
 #   - a write permission. The token stays at contents: read and
 #     pull-requests: read.
 #   - a secret, or any step that uses one.
+#   - a cache restore or save (actions/cache): this job builds nothing it
+#     reuses, and a cache is one more way for data to cross between runs.
 #   - pull-request-controlled text (a file name, a title, a branch name) in a
 #     shell command or a workflow expression. Pass such values through
 #     environment variables or files only.
@@ -27,7 +29,9 @@ name: governance
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `edited` covers a change of the pull request's base branch, which brings
+    # other commits into the pull request without a new push.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -69,11 +73,25 @@ jobs:
         run: |
           # pipefail: a failed API call must fail the step, not leave an empty list.
           set -euo pipefail
-          # All pages; each name is written followed by a NUL byte, so a name
-          # holding a newline stays one name. The file is data and is never
-          # interpolated into a command.
-          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
-            | jq -j '.[].filename + "\u0000"' > "${RUNNER_TEMP}/changed-files.list"
+          # All pages, kept as the API gave them. The file is data and is
+          # never interpolated into a command.
+          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" > "${RUNNER_TEMP}/pages.json"
+          # Every name, and for a rename or a copy the previous name too, each
+          # ended by a NUL byte, so a name holding a newline stays one name.
+          jq -j '.[] | (.filename, (.previous_filename // empty)) | . + "\u0000"' \
+            "${RUNNER_TEMP}/pages.json" > "${RUNNER_TEMP}/changed-files.list"
+          # The number of entries listed, for the incomplete-list check.
+          jq -s '[.[] | length] | add // 0' "${RUNNER_TEMP}/pages.json" > "${RUNNER_TEMP}/listed.count"
       - name: Flag the governed files
         shell: bash
-        run: ./target/debug/xtask governed --files "${RUNNER_TEMP}/changed-files.list"
+        env:
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # The tool refuses a count that is not a number and a commit id that
+          # is not 40 or 64 hexadecimal characters.
+          ./target/debug/xtask governed --files "${RUNNER_TEMP}/changed-files.list" \
+            --changed "${CHANGED_FILES}" --listed "$(cat "${RUNNER_TEMP}/listed.count")" \
+            --base "${BASE_SHA}" --head "${HEAD_SHA}"
