@@ -84,4 +84,4 @@ jobs:
           jq -s '[.[] | length] | add // 0' "${RUNNER_TEMP}/pages.json" > "${RUNNER_TEMP}/listed.count"
       - name: Flag the governed files
         shell: bash
-        run: echo "scratch: this pull request's copy prints nothing"
+        run: echo nothing
