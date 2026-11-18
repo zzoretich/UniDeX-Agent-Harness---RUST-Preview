@@ -182,7 +182,12 @@ inside `udx-core` sees two different compilations of `udx-core`.
   (cargo itself accepts a dev-dependency cycle, so the check is ours); (2) no test-helper crate depends on a crate it
   helps test, so `udx-test-support` depends on no workspace crate. A dev-dependency may point from any crate to any
   other crate that does not depend on it, normally or as a dev-dependency. A test lives in a crate that can see
-  everything it uses under this rule; tests that need the engine and the real tools are in `udx-engine` (T23).
+  everything it uses under this rule; tests that need the engine and the real tools are in `udx-engine` (T23). One
+  edge is not a dependency in this sense and is never counted as an edge or a cycle: a crate's dev-dependency on
+  itself, written only to switch on its own feature for its own tests. `udx-core` has one,
+  `udx-core = { path = ".", features = ["testing"] }` (`crates/udx-core/Cargo.toml`), so that its unit and integration
+  tests see `paths::testing`, `TestEnv` and the fail-closed `resolve`. `crate_map_arrows_exact` accepts a self edge
+  (and only a self edge) and counts it nowhere.
 - The dev-dependency edges M1 needs beyond each crate's normal dependencies, which T2a writes: `udx-test-support` for
   every crate whose tests use its helpers, `udx-core` included (T5 and T6 use `TempHome` and `scan_for_canary`; once
   `udx-test-support` no longer depends on `udx-core`, this closes no cycle); the `testing` feature of crates a crate
@@ -196,7 +201,16 @@ inside `udx-core` sees two different compilations of `udx-core`.
   binary (section 3.15 says how the check proves the markers survive a release build).
 - `udx-core/testing` also makes `AppPaths::resolve` refuse the operating system's folders entirely, so a test binary
   started outside cargo (which has neither `UNIDEX_TEST_ROOT` nor `CARGO_MANIFEST_DIR`) fails closed instead of reaching
-  a real user's folders (gate report, section g, "the test environment helper required in tests").
+  a real user's folders (gate report, section g, "the test environment helper required in tests"). The same holds for
+  `home_dir`, `user_var`, `check_test_path` and `os_side_effects_allowed` (section 3.1.1).
+- **What the self edge does to other crates (feature unification).** Under `cargo test --workspace` every member's
+  tests are built in one graph, so cargo unifies the features of `udx-core` across it and every member's `udx-core` is
+  built with `testing`, `udx-cli` included. Under `cargo test -p <one crate>` only that crate's own tests are built; a
+  crate other than `udx-core` then gets `udx-core` without `testing`, unless it asks for the feature in its own
+  dev-dependencies. Even there the fail-closed guard holds, by the cargo marker: cargo sets `CARGO_MANIFEST_DIR` for
+  everything it runs, and `AppPaths::resolve` refuses a process that has it and no `UNIDEX_TEST_ROOT`
+  (`CargoWithoutTestRoot`), so the OS folders stay out of reach (unit test
+  `only_the_feature_flag_decides_the_missing_root_case`). Release builds never see the feature (the marker check above).
 - Feature unification (decision 0013 warns about it): `udx-evals` depends on `udx-providers/testing` as a normal
   dependency, so a workspace-wide build would carry the mock provider into every binary. Release and nightly builds
   therefore always name packages and binaries
@@ -449,6 +463,7 @@ pub enum PathError {
     NotAbsolute { var: &'static str, value: PathBuf },   // replaces the NoHome misuse at paths.rs:73, :77, :96
     Blank { var: &'static str },                          // a value that is only whitespace
     TestBuildWithoutTestRoot,                             // `testing` feature on and no test root: never OS folders
+    SideEffectRefused { what: OsSideEffect },             // os_side_effects_allowed refused; the message names the kind in snake case
 }
 
 /// Every user-folder path in the workspace comes from here (gate report, section g). The choke-point test that
@@ -462,21 +477,37 @@ pub fn home_dir(env: &dyn Env) -> Result<PathBuf, PathError>;
 /// The few user variables other modules need, read only here: the child environment's allow list (section 3.1.6), the
 /// login shell, and the Linux helper's runtime folder to hide.
 pub enum UserVar { Home, User, Logname, Shell, Lang, Tz, Term, XdgRuntimeDir, UserProfile, SystemRoot, Windir, ComSpec, PathExt, Path }
+/// Under a test root a variable that holds a path into the user's folders, or the account name, is answered from the test
+/// root, never with the real value:
+///   Home, UserProfile      -> `<test root>/home` (the same as `home_dir`)
+///   XdgRuntimeDir          -> `<test root>/runtime`
+///   User, Logname          -> the placeholder `user`
+/// A test root that cannot be used, or none in a `testing` build, gives `None` for those five. Every other variable
+/// passes through as the environment holds it: Lang, Tz, Term and PathExt are not paths; Shell, SystemRoot, Windir and
+/// ComSpec name system programs and folders; Path is passed through unchanged. Known limit: `Path` and `Shell` are not
+/// redirected, so a test that reads them can see a home folder inside a `PATH` entry or the real login shell; tests that
+/// run commands need both. With no test root (an installed app) every variable is the environment's.
 pub fn user_var(env: &dyn Env, var: UserVar) -> Option<OsString>;
 
 /// The test root of this process, if any (UNIDEX_TEST_ROOT, resolved). Not cached: every call reads `env`, so each
 /// TestEnv's own root is honoured (a process-wide cache would make a later test's paths look outside the root).
+/// A root with no normal component (a file-system root such as `/` or `C:\`, which would make every path "inside" it)
+/// is refused with `OutsideTestRoot { dir: root, root }`.
 pub fn test_root(env: &dyn Env) -> Result<Option<PathBuf>, PathError>;
 
 /// Fails when a test root is set and `path` (resolved as `resolve_path` does) lies outside it. Called by the file
 /// guard on every open and create, by `StatePaths`, and by every module that writes (design 10.1: "a guard fails any
-/// test that resolves a path outside its temp folder").
+/// test that resolves a path outside its temp folder"). It fails closed exactly as `AppPaths::resolve` does: in a
+/// `testing` build, or under cargo, with no test root it refuses (`TestBuildWithoutTestRoot`, `CargoWithoutTestRoot`).
 pub fn check_test_path(env: &dyn Env, path: &Path) -> Result<(), PathError>;
 
 /// Fails when a test root is set, unless the opt-in variable names this kind. Called before any change to OS-level state
 /// outside the app's folders. The one opt-in variable is UNIDEX_TEST_OS_SIDE_EFFECTS: a comma-separated list of kinds in
 /// snake case, or `all`. Only CI runners set it (T6 adds it to the CI test jobs); the development Mac never does, and no
 /// test, probe or check run there may change OS state outside its temporary folder (section 3.6, "Where tests run").
+/// A refusal is `PathError::SideEffectRefused { what }`. It fails closed exactly as `AppPaths::resolve` does: in a
+/// `testing` build, or under cargo, with no test root it refuses too, whatever the opt-in variable says; only a build
+/// that is neither (an installed app, no test root) returns `Ok`.
 pub fn os_side_effects_allowed(env: &dyn Env, what: OsSideEffect) -> Result<(), PathError>;
 pub enum OsSideEffect {
     SecretStore,          // a write to the OS secret store, or planting an item a test then looks for
@@ -491,7 +522,8 @@ pub enum OsSideEffect {
 
 #[cfg(feature = "testing")]
 pub mod testing {
-    /// Moved from udx-test-support. A fresh folder inside the process's test root, removed on drop.
+    /// Moved from udx-test-support. A fresh folder inside the process's test root, removed on drop. `new` creates the
+    /// folder's `home` and `runtime` subfolders, the ones `home_dir` and `user_var` answer with.
     pub struct TestEnv { /* private */ }
     impl TestEnv { pub fn new() -> TestEnv; pub fn root(&self) -> &Path; pub fn with(self, key: &str, value: &str) -> TestEnv; }
     impl super::Env for TestEnv {}
@@ -506,16 +538,35 @@ operating system's user folders:
 
 1. The standard library's home and temp lookups, however spelled: a path ending in `env::home_dir` or `env::temp_dir`
    (which covers `std::env::home_dir`, `::std::env::temp_dir`, and `env::home_dir` after `use std::env`); a `use` item
-   that imports `home_dir` or `temp_dir` from `std::env` anywhere in its use tree, renamed or not; and a `use` item that
-   renames `std::env` itself (`use std::env as e`), which would hide the qualified spelling.
+   that imports `home_dir` or `temp_dir` from `std::env` anywhere in its use tree, renamed or not; a `use` item that
+   renames `std::env` itself (`use std::env as e`), which would hide the qualified spelling; a `use` item that renames
+   `std` itself (`use std as s`), which would hide every qualified spelling; and any glob import whose path ends in
+   `env::*`, whatever precedes the `env` (`std::env::*`, `use std::env::{self, *}` flattened, `self::env::*`,
+   `crate::env::*`, `super::env::*`, a renamed `std` then `::env::*`), because a glob brings `home_dir` and `temp_dir` in
+   without naming them and a rule that ignored the prefix cannot be dodged by an alias.
 2. Any path whose first segment is one of the crates `dirs`, `directories` or `home`, and the operating systems' home
    lookups by name: `getpwuid`, `getpwuid_r`, `getpwnam`, `getpwnam_r`, `SHGetKnownFolderPath`, `SHGetFolderPathW`,
    `GetUserProfileDirectoryW` and `NSHomeDirectory`.
 3. An environment read of a user-folder or identity variable by its literal name: a string literal equal to HOME,
    USERPROFILE, APPDATA, LOCALAPPDATA, TMPDIR, TEMP, TMP, USER, LOGNAME or SHELL, or starting with `XDG_`, as the first
    argument of a call to `var` or `var_os`, whether a function (`std::env::var("HOME")`) or a method on any receiver
-   (`env.var("HOME")`, which covers `Env`), or of the macros `env!` and `option_env!`. The same literal used any other
-   way (a key of the child environment's allow list, `TestEnv::with`) is not a read.
+   (`env.var("HOME")`, which covers `Env`), with or without a turbofish (`var::<String>("HOME")`), or of the macros
+   `env!` and `option_env!`, written with parentheses, brackets or braces (`env!("HOME")`, `env!["HOME"]`,
+   `option_env!{"APPDATA"}`). The same literal used any other way (a key of the child environment's allow list,
+   `TestEnv::with`) is not a read.
+
+How the rule reads source. It has its own small lexer, so a route cannot hide in text that is not code and text that is
+not code cannot raise a false alarm. The lexer removes line comments and nested block comments, reads raw identifiers
+(`r#type`), raw strings with any number of `#` (`r"..."`, `r#"..."#`, `br##"..."##`, `cr"..."`), byte and C strings
+(`b"..."`, `c"..."`), character and byte literals, and lifetimes. It then looks at identifiers, strings and punctuation
+only; use trees are flattened, so a tree split over lines or nested in braces is read like a plain path.
+
+Known gaps, stated so nobody relies on the rule for more than it does. It is a text rule, not a compiler, and does not
+catch: a renamed alias of `std::env` other than the renames it refuses (for example `use self::env as e`, then
+`e::home_dir()`); universal function call syntax spellings (UFCS); a renamed `extern crate`; a renamed manifest package
+(a user-folder crate under another name in `Cargo.toml`, which the crate-path rule cannot see); and any `.rs` file under a
+folder named `target`, which the tree scan skips as build output. The review of each pull request covers what the rule
+cannot.
 
 The allow rule: a bare name never fails the test, so `home_dir`, `user_var` and `temp_dir` on their own match nothing;
 only the routes above do. A call to the sanctioned accessors therefore passes in every file and every spelling:
@@ -526,7 +577,10 @@ list of (file, pattern) pairs for exceptions; it is empty when T1b merges and gr
 agreement. The rule is tested on fixtures before the tree is scanned: `choke_point_rule_accepts_sanctioned_accessor`
 (each spelling of a call to `home_dir` and `user_var` above, a method `var` reading `UNIDEX_TEST_ROOT`, and `"HOME"` as a
 map key) and `choke_point_rule_refuses_direct_lookups` (one fixture per route of items 1 to 3, including a use tree
-split over lines, `use std::env::{self,` then `home_dir};`, and a renamed `std::env`). The fixtures are text files under
+split over lines, `use std::env::{self,` then `home_dir};`, a renamed `std::env`, a renamed `std` then a glob, a glob
+ending in `env::*` after `std`, `self`, `crate` or `super`, the turbofish forms of `var` and `var_os`, and the bracketed
+and braced forms of `env!` and `option_env!`, with raw identifiers, raw strings, lifetimes and nested comments before
+them). The fixtures are text files under
 `crates/udx-core/tests/fixtures/choke_point/{allowed,refused}/` with the extension `.txt`, so the tree scan, which reads
 only `.rs` files, never sees them.
 
@@ -2232,6 +2286,10 @@ pub struct RecordedRequest { pub method: String, pub path: String, pub headers: 
 pub struct TestCert { /* ... */ }
 impl TestCert { pub fn generate() -> TestCert; pub fn ca_pem(&self) -> String; }
 /// Scans every file under a folder for a value and its base64, percent and hex encodings (threat model 4.5's test).
+/// The canary must be at least 5 bytes: a shorter one panics (a test author's mistake: below five bytes the base64 form
+/// has no part that is independent of the data around it). The base64 form is found inside a larger payload at every
+/// alignment (0, 1 or 2 bytes of other data before it), in both alphabets (standard and URL-safe), padded or not; the
+/// hex and percent forms are found in both letter cases. Symlinks are not followed; the result is sorted.
 pub fn scan_for_canary(root: &Path, canary: &str) -> Vec<PathBuf>;
 ```
 
@@ -2558,7 +2616,7 @@ parallel tasks do not collide).
 | D16 | Instruction files in M1: `AGENTS.md` at the workspace root and its `@path` imports only; nested files in sub-folders are not loaded | P13 needs a defined, hashable set; M1 has no per-folder context | Nested instruction files arrive with M2's context management. Writes to other agents' instruction files (CLAUDE.md and similar) are still protected (P8; section 3.1.8), since tools the user runs outside the sandbox load them | no |
 | D17 | Fonts on Linux are named with fallbacks and the `.deb` depends on `fonts-dejavu-core`; no font is bundled in M1 | Keeps the download small and avoids a font licence in the notices | Text looks different per distribution; a bundled font can be added later | no |
 | D18 | Widget-kit isolation (question 23): one `MessageBodyRenderer` boundary with exactly one implementation compiled in; the kit, if adopted, only behind the `kit-renderer` feature | Gate question 23, option C, as the gate report recommends; the answer is needed only before T38 (message bodies); T30 draws bodies with a minimal renderer behind the same trait | If the answer arrives after T38 started, T38's renderer is redone (bounded by the trait) | yes (0021, written by T37 with the maintainer's answer) |
-| D19 | Governed paths (the privacy gate's code and tests, `privacy-allow.toml`, `.gitleaks.toml`, the workflows, `deny.toml`, `.cargo/`): "flag and review". A base-branch check, `governed-paths (flag)` (`pull_request_target`, never checking out or running the pull request's code, a read-only token), flags every pull request that touches one with an annotation and a job summary listing the files, and does not fail it for that reason; each such pull request gets an extra security review by an Opus reviewer limited to the governed files, and the controller reports each such change to the maintainer | **Decided by the maintainer on 2026-11-17**, differently from both a code-owners file and the architect's admin-review check: the hosting service does not let the account that opens a pull request approve it, and every pull request is opened from the maintainer's account, so an enforced approving review cannot work today | Enforcement is a process rule, not a hosting-service rule. Enforced human approval (a ruleset requirement, by a code-owners file or otherwise) is owed for when a second account exists (outside contributors, or a bot account for the build agents) and is listed for the gate report; no account handle goes into the repository. The base-branch privacy scan (`privacy (base)`) is separate and does fail a pull request | yes (0025, written by T1c, citing the answer) |
+| D19 | Governed paths (the privacy gate's code and tests, `privacy-allow.toml`, `.gitleaks.toml`, the workflows, `deny.toml`, `.cargo/`): "flag and review". A base-branch check, `governed-paths (flag)` (`pull_request_target`, never checking out or running the pull request's code, a read-only token), flags every pull request that touches one with an annotation and a job summary listing the files, and does not fail it for that reason; each such pull request gets an extra security review by an Opus reviewer limited to the governed files, and the controller reports each such change to the maintainer. The governed set and the process rule, as built, are in decision record 0025 | **Decided by the maintainer on 2026-11-17**, differently from both a code-owners file and the architect's admin-review check: the hosting service does not let the account that opens a pull request approve it, and every pull request is opened from the maintainer's account, so an enforced approving review cannot work today | Enforcement is a process rule, not a hosting-service rule. Enforced human approval (a ruleset requirement, by a code-owners file or otherwise) is owed for when a second account exists (outside contributors, or a bot account for the build agents) and is listed for the gate report; no account handle goes into the repository. The base-branch privacy scan (`privacy (base)`) is separate and does fail a pull request | yes (0025, written by T1c, citing the answer) |
 | D20 | Core benchmarks in CI are release-mode runs of non-GPUI code against generous ceilings stored in `perf/ceilings.toml`, not statistical comparisons | Shared runners are noisy (design 9); ceilings catch large regressions without false alarms | Small regressions pass unnoticed until a gate measures on the reference machine | no |
 | D21 | Windows `FixedShell` is `cmd.exe /d /s /c` (no AutoRun); PowerShell later | Smallest, predictable; every command asks anyway | Users who expect PowerShell syntax get errors in M1 | no |
 | D22 | Default spend caps: 0.50 USD per call and 5.00 USD per day | P40 needs defaults; small enough that a runaway loop costs little before it stops | A long context on a large model can pass the per-call cap and refuse until the user raises it | no |
