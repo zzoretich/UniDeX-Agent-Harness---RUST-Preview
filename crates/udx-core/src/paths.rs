@@ -80,7 +80,8 @@ pub enum PathError {
     TestBuildWithoutTestRoot,
     /// A change to OS-level state that a test run may not make (amendment to A 3.1.1).
     #[error(
-        "{what:?} changes OS state and is refused under a test root; name it in UNIDEX_TEST_OS_SIDE_EFFECTS"
+        "{} changes OS state and is refused in a test run; name it in UNIDEX_TEST_OS_SIDE_EFFECTS",
+        .what.name()
     )]
     SideEffectRefused { what: OsSideEffect },
 }
@@ -167,11 +168,21 @@ fn non_empty(env: &dyn Env, key: &str) -> Option<String> {
     env.var(key).filter(|v| !v.is_empty())
 }
 
+/// A path-valued variable as the OS holds it (not lossy), or `None` when it is unset or empty.
+fn non_empty_os(env: &dyn Env, key: &str) -> Option<OsString> {
+    env.var_os(key).filter(|v| !v.is_empty())
+}
+
+/// A path-valued value that is only whitespace.
+fn is_blank(v: &OsString) -> bool {
+    v.to_str().is_some_and(|s| s.trim().is_empty())
+}
+
 /// An override variable: unset or empty is `None`, whitespace only is `Blank`.
 fn override_var(env: &dyn Env, var: &'static str) -> Result<Option<PathBuf>, PathError> {
-    match non_empty(env, var) {
+    match non_empty_os(env, var) {
         None => Ok(None),
-        Some(v) if v.trim().is_empty() => Err(PathError::Blank { var }),
+        Some(v) if is_blank(&v) => Err(PathError::Blank { var }),
         Some(v) => Ok(Some(PathBuf::from(v))),
     }
 }
@@ -195,10 +206,10 @@ fn guard(env: &dyn Env, testing: bool) -> Result<Option<PathBuf>, PathError> {
 /// The test root of this process, if any (`UNIDEX_TEST_ROOT`, resolved). Not
 /// cached: every call reads `env`, so each test environment's own root is honoured.
 pub fn test_root(env: &dyn Env) -> Result<Option<PathBuf>, PathError> {
-    let Some(raw) = non_empty(env, TEST_ROOT) else {
+    let Some(raw) = non_empty_os(env, TEST_ROOT) else {
         return Ok(None);
     };
-    if raw.trim().is_empty() {
+    if is_blank(&raw) {
         return Err(PathError::Blank { var: TEST_ROOT });
     }
     let root = PathBuf::from(raw);
@@ -208,9 +219,10 @@ pub fn test_root(env: &dyn Env) -> Result<Option<PathBuf>, PathError> {
             value: root,
         });
     }
-    resolve_path(&root)
-        .map(Some)
-        .ok_or_else(|| outside(&root, &root))
+    // A root such as `/` or `C:\` would make every path "inside" it.
+    let real =
+        resolve_path(&root).filter(|r| r.components().any(|c| matches!(c, Component::Normal(_))));
+    real.map(Some).ok_or_else(|| outside(&root, &root))
 }
 
 /// `dir` resolved, which must lie inside the resolved `root`.
@@ -295,15 +307,58 @@ fn home_dir_with(env: &dyn Env, testing: bool) -> Result<PathBuf, PathError> {
 }
 
 /// The few user variables other modules need, read only here.
+///
+/// Under a test root, a variable whose value is a path into the user's folders is answered from the test root, never
+/// with the real value: `Home` and `UserProfile` give [`home_dir`], `XdgRuntimeDir` gives `<test root>/runtime`. A test
+/// root that cannot be used, or none in a `testing` build, gives `None` for those three. Every other variable passes
+/// through: `Shell`, `Path`, `SystemRoot`, `Windir` and `ComSpec` name system programs and folders, and `User`,
+/// `Logname`, `Lang`, `Tz`, `Term` and `PathExt` are not paths.
 pub fn user_var(env: &dyn Env, var: UserVar) -> Option<OsString> {
-    env.var_os(var.name())
+    user_var_with(env, var, cfg!(feature = "testing"))
+}
+
+fn user_var_with(env: &dyn Env, var: UserVar, testing: bool) -> Option<OsString> {
+    let redirected = match var {
+        UserVar::Home | UserVar::UserProfile | UserVar::XdgRuntimeDir => true,
+        UserVar::User
+        | UserVar::Logname
+        | UserVar::Shell
+        | UserVar::Lang
+        | UserVar::Tz
+        | UserVar::Term
+        | UserVar::SystemRoot
+        | UserVar::Windir
+        | UserVar::ComSpec
+        | UserVar::PathExt
+        | UserVar::Path => false,
+    };
+    if !redirected {
+        return env.var_os(var.name());
+    }
+    match guard(env, testing) {
+        Ok(Some(root)) => {
+            let dir = if var == UserVar::XdgRuntimeDir {
+                root.join("runtime")
+            } else {
+                root.join("home")
+            };
+            inside(&root, &dir).ok().map(PathBuf::into_os_string)
+        }
+        Ok(None) => env.var_os(var.name()),
+        Err(_) => None,
+    }
 }
 
 /// Fails when a test root is set and `path` (resolved as the folders are)
 /// lies outside it. A relative path cannot be shown to lie inside, so it is
-/// refused too. With no test root there is nothing to enforce.
+/// refused too. In a `testing` build, or under cargo, with no test root it
+/// fails closed like [`AppPaths::resolve`].
 pub fn check_test_path(env: &dyn Env, path: &Path) -> Result<(), PathError> {
-    let Some(root) = test_root(env)? else {
+    check_test_path_with(env, path, cfg!(feature = "testing"))
+}
+
+fn check_test_path_with(env: &dyn Env, path: &Path, testing: bool) -> Result<(), PathError> {
+    let Some(root) = guard(env, testing)? else {
         return Ok(());
     };
     if !path.is_absolute() {
@@ -312,11 +367,20 @@ pub fn check_test_path(env: &dyn Env, path: &Path) -> Result<(), PathError> {
     inside(&root, path).map(|_| ())
 }
 
-/// Fails when a test root is set, unless `UNIDEX_TEST_OS_SIDE_EFFECTS` names
+/// Fails under a test root, and in a `testing` build or under cargo without one, unless `UNIDEX_TEST_OS_SIDE_EFFECTS` names
 /// this kind (snake case, comma-separated) or `all`. Called before any change
 /// to OS-level state outside the app's folders; only CI runners set the variable.
 pub fn os_side_effects_allowed(env: &dyn Env, what: OsSideEffect) -> Result<(), PathError> {
-    if test_root(env)?.is_none() {
+    os_side_effects_allowed_with(env, what, cfg!(feature = "testing"))
+}
+
+fn os_side_effects_allowed_with(
+    env: &dyn Env,
+    what: OsSideEffect,
+    testing: bool,
+) -> Result<(), PathError> {
+    // Fails closed like `resolve`: with no test root in a `testing` build or under cargo, never allowed.
+    if guard(env, testing)?.is_none() {
         return Ok(());
     }
     let named = non_empty(env, OS_SIDE_EFFECTS).unwrap_or_default();
@@ -343,7 +407,7 @@ pub mod testing {
     #[used]
     static UNIDEX_TESTING_MARKER_UDX_CORE: &str = "UNIDEX_TESTING_MARKER_udx_core";
 
-    /// A fresh folder inside the process's test root, removed on drop.
+    /// A fresh folder inside the process's test root, removed on drop, with its `home` folder made.
     ///
     /// As an [`Env`] it sets `UNIDEX_TEST_ROOT` to that folder, plus any
     /// variable added with [`TestEnv::with`], and nothing else.
@@ -361,11 +425,17 @@ pub mod testing {
                 .unwrap_or_else(|| {
                     panic!("{TEST_ROOT} is not set: run the tests through cargo (cargo test)")
                 });
+            // Checked before anything is created, so a relative value never makes a folder in the working folder.
+            assert!(
+                Path::new(&root).is_absolute(),
+                "{TEST_ROOT} must be an absolute path"
+            );
             std::fs::create_dir_all(&root).expect("create the test root");
             let dir = tempfile::Builder::new()
                 .prefix("udx-")
                 .tempdir_in(&root)
                 .expect("create a folder inside the test root");
+            std::fs::create_dir(dir.path().join("home")).expect("create the fake home");
             TestEnv {
                 dir,
                 vars: HashMap::new(),
@@ -500,11 +570,8 @@ mod tests {
         Map(pairs.iter().map(|(k, v)| (*k, v.to_string())).collect())
     }
 
-    fn abs(name: &str) -> String {
-        std::env::temp_dir()
-            .join(name)
-            .to_string_lossy()
-            .into_owned()
+    fn abs(base: &udx_test_support::TestRoot, name: &str) -> String {
+        base.child(name).to_string_lossy().into_owned()
     }
 
     #[test]
@@ -519,7 +586,8 @@ mod tests {
 
     #[test]
     fn os_folders_honour_absolute_overrides_and_refuse_relative_ones() {
-        let (c, d, k) = (abs("c"), abs("d"), abs("k"));
+        let base = udx_test_support::TestRoot::new();
+        let (c, d, k) = (abs(&base, "c"), abs(&base, "d"), abs(&base, "k"));
         let env = map(&[(CONFIG_DIR, &c), (DATA_DIR, &d), (CACHE_DIR, &k)]);
         let p = resolve_with(&env, false).unwrap();
         assert_eq!(p.config_dir, PathBuf::from(&c));
@@ -564,6 +632,14 @@ mod tests {
     }
 
     #[test]
+    fn process_env_var_reads_the_real_environment() {
+        let real = std::env::var("PATH").expect("cargo sets a UTF-8 PATH");
+        assert!(!real.is_empty());
+        assert_eq!(ProcessEnv.var("PATH"), Some(real));
+        assert_eq!(ProcessEnv.var("UNIDEX_NO_SUCH_VARIABLE_0000"), None);
+    }
+
+    #[test]
     fn process_env_var_os_reads_the_real_environment() {
         let real = std::env::var_os("PATH").expect("cargo sets PATH");
         assert!(!real.is_empty());
@@ -581,5 +657,72 @@ mod tests {
             Some(env.root())
         );
         assert_eq!(env.var("UNIDEX_OTHER_KEY"), None);
+    }
+
+    #[test]
+    fn without_the_testing_feature_a_missing_root_allows_what_a_test_build_refuses() {
+        let none = map(&[]);
+        let elsewhere = udx_test_support::TestRoot::new();
+        let path = elsewhere.child("x");
+        // An installed app (no test root, no `testing` build): nothing to enforce, nothing refused.
+        assert!(check_test_path_with(&none, &path, false).is_ok());
+        for kind in ALL_KINDS {
+            assert!(os_side_effects_allowed_with(&none, kind, false).is_ok());
+        }
+        assert_eq!(
+            user_var_with(&map(&[("HOME", "/home/user")]), UserVar::Home, false),
+            Some(OsString::from("/home/user"))
+        );
+        // The same Env in a `testing` build, or under cargo, fails closed.
+        assert!(matches!(
+            check_test_path_with(&none, &path, true),
+            Err(PathError::TestBuildWithoutTestRoot)
+        ));
+        let marker = map(&[
+            ("CARGO_MANIFEST_DIR", "/some/crate"),
+            (OS_SIDE_EFFECTS, "all"),
+        ]);
+        for testing in [false, true] {
+            assert!(matches!(
+                check_test_path_with(&marker, &path, testing),
+                Err(PathError::CargoWithoutTestRoot)
+            ));
+            for kind in ALL_KINDS {
+                assert!(matches!(
+                    os_side_effects_allowed_with(&marker, kind, testing),
+                    Err(PathError::CargoWithoutTestRoot)
+                ));
+            }
+        }
+        for kind in ALL_KINDS {
+            assert!(matches!(
+                os_side_effects_allowed_with(&none, kind, true),
+                Err(PathError::TestBuildWithoutTestRoot)
+            ));
+        }
+        assert_eq!(
+            user_var_with(&map(&[("HOME", "/home/user")]), UserVar::Home, true),
+            None
+        );
+    }
+
+    const ALL_KINDS: [OsSideEffect; 8] = [
+        OsSideEffect::SecretStore,
+        OsSideEffect::WakeUp,
+        OsSideEffect::WindowsAcl,
+        OsSideEffect::AppContainerProfile,
+        OsSideEffect::TrustStoreCert,
+        OsSideEffect::SandboxEscapeMatrix,
+        OsSideEffect::DiskImage,
+        OsSideEffect::PackageInstall,
+    ];
+
+    #[test]
+    fn a_refusal_names_the_kind_the_way_the_variable_spells_it() {
+        let root = udx_test_support::TestRoot::new();
+        let env = map(&[(TEST_ROOT, root.path().to_str().unwrap())]);
+        let e = os_side_effects_allowed_with(&env, OsSideEffect::SecretStore, true).unwrap_err();
+        assert!(e.to_string().contains("secret_store"), "{e}");
+        assert!(e.to_string().contains(OS_SIDE_EFFECTS), "{e}");
     }
 }

@@ -15,6 +15,11 @@ tempfile = { version = "3", optional = true }
 testing = ["dep:tempfile"]
 
 [dev-dependencies]
-tempfile = "3"
 udx-test-support = { path = "../udx-test-support" }
+# The crate's own tests need its `testing` feature: this self edge turns it on for them. It reaches other crates in one
+# case only. `cargo test --workspace` builds every member's tests in one graph, so the feature is unified into
+# `udx-core` for all of them, `udx-cli` included. `cargo test -p udx-cli` does not enable it. There, with no `testing`
+# build, a process that has no test root still cannot reach the OS folders: cargo sets CARGO_MANIFEST_DIR, and
+# `AppPaths::resolve` refuses that with `CargoWithoutTestRoot` (unit test
+# `only_the_feature_flag_decides_the_missing_root_case`). Release builds never see the feature.
 udx-core = { path = ".", features = ["testing"] }

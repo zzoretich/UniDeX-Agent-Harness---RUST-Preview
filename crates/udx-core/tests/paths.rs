@@ -22,8 +22,9 @@ impl Env for MapEnv {
     }
 }
 
-fn tmp() -> tempfile::TempDir {
-    tempfile::tempdir().unwrap()
+/// A fresh folder inside the process's test root (never the OS temp folder).
+fn tmp() -> udx_test_support::TestRoot {
+    udx_test_support::TestRoot::new()
 }
 
 fn real(p: &Path) -> PathBuf {

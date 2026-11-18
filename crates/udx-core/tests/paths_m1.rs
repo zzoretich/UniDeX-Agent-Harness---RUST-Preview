@@ -43,8 +43,9 @@ impl Env for MapEnv {
     }
 }
 
-fn tmp() -> tempfile::TempDir {
-    tempfile::tempdir().unwrap()
+/// A fresh folder inside the process's test root (never the OS temp folder).
+fn tmp() -> udx_test_support::TestRoot {
+    udx_test_support::TestRoot::new()
 }
 
 fn real(p: &Path) -> PathBuf {
@@ -159,8 +160,16 @@ fn check_test_path_refuses_outside_and_accepts_inside() {
     let name = other.path().file_name().unwrap();
     let e = check_test_path(&env, &root.path().join("..").join(name));
     assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })), "{e:?}");
-    // No test root: nothing to enforce.
-    check_test_path(&MapEnv::of([]), &other.path().join("x")).unwrap();
+    // No test root in a `testing` build: refused like `resolve`, never "nothing to enforce". (The non-testing build's
+    // answer is covered by the unit tests in `src/paths.rs`.)
+    let e = check_test_path(&MapEnv::of([]), &other.path().join("x"));
+    assert!(
+        matches!(e, Err(PathError::TestBuildWithoutTestRoot)),
+        "{e:?}"
+    );
+    let marker = MapEnv::of([("CARGO_MANIFEST_DIR", "/some/crate")]);
+    let e = check_test_path(&marker, &other.path().join("x"));
+    assert!(matches!(e, Err(PathError::CargoWithoutTestRoot)), "{e:?}");
 
     #[cfg(unix)]
     {
@@ -217,16 +226,26 @@ fn home_dir_inside_test_root() {
 /// Records every key asked for through `var` or `var_os`, and answers each.
 struct Recording {
     seen: RefCell<BTreeSet<String>>,
+    root: PathBuf,
+}
+
+impl Recording {
+    fn answer(&self, key: &str) -> String {
+        self.seen.borrow_mut().insert(key.to_ascii_uppercase());
+        if key == TEST_ROOT {
+            self.root.to_string_lossy().into_owned()
+        } else {
+            format!("v-{key}")
+        }
+    }
 }
 
 impl Env for Recording {
     fn var(&self, key: &str) -> Option<String> {
-        self.seen.borrow_mut().insert(key.to_ascii_uppercase());
-        Some(format!("v-{key}"))
+        Some(self.answer(key))
     }
     fn var_os(&self, key: &str) -> Option<OsString> {
-        self.seen.borrow_mut().insert(key.to_ascii_uppercase());
-        Some(OsString::from(format!("v-{key}")))
+        Some(OsString::from(self.answer(key)))
     }
 }
 
@@ -250,23 +269,26 @@ fn user_var_reads_only_listed_names() {
             UserVar::Path,
         ]
     };
+    // A user variable that is a path into the user's folders is answered from the test root, so `user_var` reads the
+    // test root too; the root is a valid one here, as it is under cargo.
+    let holder = tmp();
     let rec = Recording {
         seen: RefCell::new(BTreeSet::new()),
+        root: holder.path().to_path_buf(),
     };
     for v in all() {
         assert!(user_var(&rec, v).is_some());
     }
-    // Windows spells some of these in mixed case; compare without case.
+    // Windows spells some of these in mixed case; compare without case. Under a test root the three path variables
+    // that point into the user's folders (HOME, USERPROFILE, XDG_RUNTIME_DIR) are answered from the root and their
+    // real values are never read; a build without the `testing` feature reads them (unit test in `src/paths.rs`).
     let expected: BTreeSet<String> = [
-        "HOME",
         "USER",
         "LOGNAME",
         "SHELL",
         "LANG",
         "TZ",
         "TERM",
-        "XDG_RUNTIME_DIR",
-        "USERPROFILE",
         "SYSTEMROOT",
         "WINDIR",
         "COMSPEC",
@@ -275,6 +297,7 @@ fn user_var_reads_only_listed_names() {
     ]
     .iter()
     .map(|s| s.to_string())
+    .chain([TEST_ROOT.to_string()])
     .collect();
     assert_eq!(*rec.seen.borrow(), expected);
 
@@ -320,11 +343,26 @@ fn os_side_effects_refused_with_test_root() {
     for (kind, name) in every_kind() {
         assert!(os_side_effects_allowed(&env, kind).is_err(), "{name}");
     }
-    // With no test root (an installed app) nothing is refused here.
+    // No test root in a `testing` build or under cargo: refused like `resolve`, so a unit test with a hand-built
+    // Env can never be told an OS side effect is allowed. (An installed app, which has no `testing` build, is allowed;
+    // the unit tests in `src/paths.rs` cover that.) The opt-in alone does not lift it.
+    let marker = MapEnv::of([("CARGO_MANIFEST_DIR", "/some/crate"), (OPT_IN, "all")]);
+    let unrooted_all = MapEnv::of([(OPT_IN, "all")]);
     for (kind, name) in every_kind() {
+        let e = os_side_effects_allowed(&MapEnv::of([]), kind);
         assert!(
-            os_side_effects_allowed(&MapEnv::of([]), kind).is_ok(),
-            "{name}"
+            matches!(e, Err(PathError::TestBuildWithoutTestRoot)),
+            "{name}: {e:?}"
+        );
+        let e = os_side_effects_allowed(&marker, kind);
+        assert!(
+            matches!(e, Err(PathError::CargoWithoutTestRoot)),
+            "{name}: {e:?}"
+        );
+        let e = os_side_effects_allowed(&unrooted_all, kind);
+        assert!(
+            matches!(e, Err(PathError::TestBuildWithoutTestRoot)),
+            "{name}: {e:?}"
         );
     }
 }
@@ -371,4 +409,122 @@ fn os_side_effects_opt_in_by_kind() {
             );
         }
     }
+}
+
+#[test]
+fn user_var_under_a_test_root_never_returns_the_real_folders() {
+    let holder = tmp();
+    let root = real(holder.path());
+    let env = MapEnv::rooted(holder.path())
+        .with("HOME", "/home/user")
+        .with("USERPROFILE", "C:\\Users\\user")
+        .with("XDG_RUNTIME_DIR", "/run/user/1000")
+        .with("SHELL", "/bin/sh")
+        .with("PATH", "/usr/bin")
+        .with("USER", "someone")
+        .with("LANG", "en_US.UTF-8")
+        .with("SYSTEMROOT", "C:\\Windows")
+        .with("WINDIR", "C:\\Windows")
+        .with("COMSPEC", "C:\\Windows\\cmd.exe")
+        .with("LOGNAME", "someone")
+        .with("TZ", "UTC")
+        .with("TERM", "xterm")
+        .with("PATHEXT", ".EXE");
+    // Paths into the user's folders: the test root's home, and a runtime folder inside the root.
+    let home = home_dir(&env).unwrap();
+    assert_eq!(home, root.join("home"));
+    assert_eq!(
+        user_var(&env, UserVar::Home),
+        Some(home.clone().into_os_string())
+    );
+    assert_eq!(
+        user_var(&env, UserVar::UserProfile),
+        Some(home.into_os_string())
+    );
+    assert_eq!(
+        user_var(&env, UserVar::XdgRuntimeDir),
+        Some(root.join("runtime").into_os_string())
+    );
+    // Everything else passes through: paths to system programs and folders, names, locale.
+    for (var, want) in [
+        (UserVar::Shell, "/bin/sh"),
+        (UserVar::Path, "/usr/bin"),
+        (UserVar::User, "someone"),
+        (UserVar::Logname, "someone"),
+        (UserVar::Lang, "en_US.UTF-8"),
+        (UserVar::Tz, "UTC"),
+        (UserVar::Term, "xterm"),
+        (UserVar::SystemRoot, "C:\\Windows"),
+        (UserVar::Windir, "C:\\Windows"),
+        (UserVar::ComSpec, "C:\\Windows\\cmd.exe"),
+        (UserVar::PathExt, ".EXE"),
+    ] {
+        assert_eq!(user_var(&env, var), Some(OsString::from(want)), "{var:?}");
+    }
+    // A test root that cannot be used gives no real value for a path variable (fail closed), and the others still pass.
+    let bad = MapEnv::of([
+        (TEST_ROOT, "relative/root"),
+        ("HOME", "/home/user"),
+        ("LANG", "C"),
+    ]);
+    assert_eq!(user_var(&bad, UserVar::Home), None);
+    assert_eq!(user_var(&bad, UserVar::Lang), Some(OsString::from("C")));
+    // No test root in a `testing` build: also no real value.
+    let none = MapEnv::of([
+        ("HOME", "/home/user"),
+        ("USERPROFILE", "x"),
+        ("XDG_RUNTIME_DIR", "y"),
+    ]);
+    for var in [UserVar::Home, UserVar::UserProfile, UserVar::XdgRuntimeDir] {
+        assert_eq!(user_var(&none, var), None, "{var:?}");
+    }
+}
+
+#[test]
+fn a_test_root_with_no_normal_component_is_refused() {
+    let top = if cfg!(windows) { "C:\\" } else { "/" };
+    let e = test_root(&MapEnv::of([(TEST_ROOT, top)]));
+    assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })), "{e:?}");
+    let e = AppPaths::resolve(&MapEnv::of([(TEST_ROOT, top)]));
+    assert!(matches!(e, Err(PathError::OutsideTestRoot { .. })), "{e:?}");
+}
+
+#[test]
+fn test_env_creates_its_home() {
+    let env = TestEnv::new();
+    assert!(env.root().join("home").is_dir());
+    assert!(home_dir(&env).unwrap().is_dir());
+}
+
+/// An Env that answers only through `var_os`, as a non-UTF-8 value can only be read.
+struct OsOnly(PathBuf);
+
+impl Env for OsOnly {
+    fn var(&self, _key: &str) -> Option<String> {
+        None
+    }
+    fn var_os(&self, key: &str) -> Option<OsString> {
+        (key == TEST_ROOT).then(|| self.0.clone().into_os_string())
+    }
+}
+
+#[test]
+fn path_values_are_read_with_var_os() {
+    let holder = tmp();
+    let root = real(holder.path()).join("sub-0000");
+    // The exact value, not the lossy one, is what is resolved.
+    assert_eq!(test_root(&OsOnly(root.clone())).unwrap(), Some(root));
+    // A root that only `var_os` can see is still a root.
+    assert!(AppPaths::resolve(&OsOnly(real(holder.path()))).is_ok());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_non_utf8_test_root_is_kept_exactly() {
+    use std::os::unix::ffi::OsStringExt;
+    let holder = tmp();
+    let mut name = real(holder.path()).into_os_string().into_vec();
+    name.extend_from_slice(b"/odd-\xFF-name");
+    let root = PathBuf::from(OsString::from_vec(name));
+    assert_eq!(test_root(&OsOnly(root.clone())).unwrap(), Some(root));
 }
