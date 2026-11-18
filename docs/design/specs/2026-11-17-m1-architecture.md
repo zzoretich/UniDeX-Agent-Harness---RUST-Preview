@@ -280,6 +280,29 @@ Signatures are contracts (see "How to read"). Common conventions: errors are `th
 uses `#[async_trait::async_trait]` so it stays usable as `dyn`; timestamps are `u64` milliseconds since the Unix epoch;
 byte sizes are `u64`; money is `u64` micro-dollars (`MicroUsd`).
 
+**Stubs never panic (the contracts tasks, T2a and T2b).** Until its owning task merges, a public item exists as a
+stub, and no `unimplemented!`, `todo!`, `panic!` or `unreachable!` sits behind any public function either contracts
+task creates, so every task's tests pass on all three CI platforms whatever the merge order. A stub answers instead:
+
+- A function or method that returns a `Result`, or a stream of them, returns its error type's `NotBuilt` variant,
+  carrying `udx_core::stub::NotBuilt { item, task }` with the owning task's id. Every public error enum of sections
+  3.1 to 3.15 has that variant, which is not repeated in each block below; `PathError` is the exception, because T1b
+  builds its functions before the contracts tasks run. Nothing returns `NotBuilt` once the owning task has merged.
+- A sandbox backend that is not built yet reports itself unavailable, exactly as a failed probe would (section 3.6,
+  "Before a backend merges").
+- A function whose type has no error returns the value that grants nothing: `Decision::Deny` from an evaluation,
+  `CommandShape::NeedsShell` from `parse_command`, `true` from a question whose `true` adds a label, an ask or a
+  refusal (`exposes`, `is_third_party`), `false` from one whose `true` grants, `PromptIntegrity::Unknown`, `None` or an
+  empty collection from a lookup or a listing. Text a stub would escape, redact or label is replaced by a fixed
+  placeholder naming the owning task, never passed through. A constructor with no error type returns an inert value
+  whose methods follow these rules.
+
+```rust
+// udx_core::stub (T2a, written whole)
+/// What a contracts-task stub returns instead of panicking.
+pub struct NotBuilt { pub item: &'static str, pub task: &'static str }
+```
+
 ### 3.1 `udx-core`
 
 #### 3.1.0 Shared plain types (T2a, fully implemented: they are data)
@@ -361,13 +384,14 @@ pub struct WorkspaceRef { pub key: WorkspaceKey, pub path: PathBuf }
 pub fn workspace_key(root: &Path) -> Result<WorkspaceKey, WorkspaceError>;
 ```
 
-Other public types the signatures below name, with their homes (each defined in its section): `udx_core::config::KeyPath`
-(3.1.3), `udx_core::diag::Level` (3.1.11), `udx_core::ids::{SystemClock, V7Ids}` (3.1.2),
-`udx_core::fsguard::{DenyEntry, UndoRef, WindowsForm}` (3.1.8), `udx_core::net::HostPort` (3.1.9),
-`udx_core::sandbox::{Platform, KillHandle, ProcessRegistry, Supervisor, FreeSpaceWatch}` and
+Other public types the signatures below name, with their homes (each defined in its section): `udx_core::stub::NotBuilt`
+(section 3's stub rule), `udx_core::config::KeyPath` (3.1.3), `udx_core::diag::Level` (3.1.11),
+`udx_core::ids::{SystemClock, V7Ids}` (3.1.2), `udx_core::fsguard::{DenyEntry, UndoRef, WindowsForm}` (3.1.8),
+`udx_core::net::HostPort` (3.1.9), `udx_core::sandbox::{Platform, KillHandle, ProcessRegistry, Supervisor,
+FreeSpaceWatch}` and
 `udx_core::sandbox::testing::FakeSupervisor` (3.1.5), `udx_core::events::{LogError, *Summary}` (4.2, 4.3),
 `udx_providers::{ProviderSet, RouteError, TransportError}` and `testing::RequestMatcher` (3.2),
-`udx_tools::net::SystemResolver` (3.5),
+`udx_tools::net::SystemResolver` (3.5), `udx_engine::testing::{TurnHarness, HarnessOptions}` (3.11),
 `udx_engine::protocol::{ParsedCall, ProtocolError}` (3.11), `udx_engine::context::ContextError`,
 `udx_engine::trust::TrustError` (3.9), `udx_engine::spend::SpendError` (3.10), `udx_evals::{SuiteReport, EvalError}`
 (3.15), `udx_test_support::{StandInRoute, RecordedRequest, TestCert}` (3.14), `udx_ui_model::{WorkspaceVm,
@@ -667,6 +691,7 @@ pub enum UnavailableReason {
     LandlockMissing, SeccompFailed, HelperMissing, SeatbeltFailed, AppContainerFailed, JobObjectFailed,
     ProbeCheckFailed { check: ProbeCheck },  // a probe check that should have been denied was allowed
     ForcedByTestBuild,             // only with the `testing` feature (P7's test)
+    NotBuiltYet { task: String },  // this platform's backend has not merged yet (section 3.6, "Before a backend merges")
 }
 pub enum ProbeCheck { WriteOutsideWorkspace, LoopbackConnect, NameLookup, IpcEscape, IpcEscapeNetworked, SecretStoreReach,
                       ReadDeniedFile, ReadInTreeDenied, OtherProcessEnv, NetworkedResolverConfig }
@@ -1372,6 +1397,19 @@ pub fn clean_access_entries(paths: &StatePaths, env: &dyn Env, which: CleanScope
 }
 ```
 
+**Before a backend merges (P7; the stub rule of section 3).** `platform_sandbox` is written whole by T2b as a dispatch
+to the current platform's backend constructor, and T2b creates each backend as a stub that never panics: its
+`availability()` and `reprobe()` return `Unavailable { backend, reason: NotBuiltYet { task }, remedy }`, and its
+`spawn` returns `SandboxError::Unavailable(NotBuiltYet { task })`, exactly as a failed probe would (fail closed, P7).
+So until a platform's backend merges, the shell tool is absent there (stdio MCP servers and add-on adapters, when they
+arrive, follow the same availability), the status bar and `unidex doctor` say why ("The sandbox for this platform is
+not built yet in this build, so commands are off."), and the session log records the `availability` record as usual.
+T2b's `stubs_never_panic` check and each platform's test file (`tests/macos.rs`, `tests/linux.rs`,
+`tests/windows.rs`, one test each, `<platform>_backend_not_built_reports_unavailable`) assert that state; T10, T11 and
+T12 each replace their platform's stub and that test with their own probe tests. A test elsewhere never assumes a
+backend has merged: it asks `platform_sandbox` and asserts what follows from the answer (the shell absent and the
+reason shown when unavailable, for any reason; present when full).
+
 **The access-entry functions on every platform (D3).** The records file `StatePaths::sandbox_dir/grants.toml` holds one
 `[[entry]]` table per `AccessEntryRecord`, with its serde field names; a missing file is an empty list. `access_entries`
 reads it. `clean_access_entries` reads the records in its scope (`Workspace(dir)`: the records whose `workspace` is
@@ -1382,7 +1420,8 @@ is no hook: nothing is removed from the operating system and a record found ther
 from the file. Both functions are T10's and work on every platform from T10's merge, so `unidex trust --revoke`, `unidex
 sandbox clean` and the doctor's row need nothing from T12 for them (T24 reaches T10 through T23's Needs, T25 directly).
 On Windows the real removal arrives with T12's hooks; before T12 no record can exist, because only T12's backend
-writes one, so a Windows run never reaches the stubs. The write-ahead writer of the footprint below is T12's and uses
+writes one, and the hooks' stubs return an error naming T12 rather than panicking, so a planted record would be kept
+and reported. The write-ahead writer of the footprint below is T12's and uses
 the same format.
 
 **Process lifetime, the same on every platform (P50).** A group lives until the supervisor ends it (session end, app
@@ -1837,6 +1876,48 @@ pub fn engine_deps(paths: &StatePaths, config: Arc<Config>, env: &dyn Env, secre
 `engine_deps` reports its failures as `EngineError::Setup` (section 3.1.4), whose text names the part that failed (the
 router, the spend ledger or the trust store) with the underlying error's message. The callers print it (CLI), show it
 (app) or wrap it (`EvalError::Engine`).
+
+```rust
+// udx_engine::testing (crates/udx-engine/src/testing.rs, behind udx-engine's `testing` feature, which enables
+// udx-core/testing, udx-providers/testing and udx-sandbox/testing; T2b creates the stubs, T19 builds it)
+/// One session of a NativeEngine over test dependencies in a fresh TestEnv root, collecting every event it emits.
+pub struct TurnHarness { /* the engine, its session handle, the collected EventEnvelopes, the mock provider */ }
+pub struct HarnessOptions {
+    pub script: udx_providers::testing::Script,
+    pub attendance: Attendance,                    // default Attended(App)
+    pub mode: Option<PermissionMode>,              // default None: the configured mode, or Ask when untrusted
+    pub trusted: bool,                             // default false
+    pub config_toml: Option<String>,               // written as the test root's config file (caps, mode, rules, models)
+    pub tools: Option<Vec<Arc<dyn Tool>>>,         // default fake_tools(); T23 passes m1_tools()
+    pub sandbox: Option<Arc<dyn Sandbox>>,         // default udx_sandbox::testing::UnavailableSandbox; T23 the real one
+    pub supervisor: Option<Arc<dyn Supervisor>>,   // default udx_core::sandbox::testing::FakeSupervisor
+}
+impl HarnessOptions { pub fn new(script: udx_providers::testing::Script) -> HarnessOptions; }   // the defaults above
+/// Fake tools whose calls are recorded and answered from fixed results: `fake_read` (read-only), `fake_write` (a write),
+/// and `fake_long` (registers a RecordingKiller through ToolContext::processes, then waits until cancelled).
+pub fn fake_tools() -> Vec<Arc<dyn Tool>>;
+impl TurnHarness {
+    pub async fn start(opts: HarnessOptions) -> Result<TurnHarness, EngineError>;
+    /// Sends UserMessage and collects events until TurnCompleted or TurnStopped; returns that turn's events.
+    pub async fn user_turn(&mut self, text: &str) -> Result<Vec<EventEnvelope>, EngineError>;
+    /// Starts a user turn and returns when the next AskRaised arrives (None if the turn ends first).
+    pub async fn turn_until_ask(&mut self, text: &str) -> Result<Option<AskCard>, EngineError>;
+    /// Answers an ask (AskAnswer::TimedOut included) and collects until the turn ends or the next ask.
+    pub async fn answer(&mut self, ask: AskId, answer: AskAnswer) -> Result<Vec<EventEnvelope>, EngineError>;
+    pub async fn send(&self, cmd: SessionCommand) -> Result<(), EngineError>;   // SetMode, Grant, Cancel, ...
+    /// Closes the session and resumes it in a fresh NativeEngine over the same test root (a new run, a new nonce).
+    pub async fn resume(self) -> Result<TurnHarness, EngineError>;
+    pub fn events(&self) -> &[EventEnvelope];                 // every event so far, in order
+    pub fn provider_requests(&self) -> Vec<ChatRequest>;      // what the mock provider received
+    pub fn tool_calls(&self) -> Vec<(String, serde_json::Value)>;   // calls to fake_tools(), by name
+    pub fn session_log(&self) -> PathBuf;                     // the session's log in the test root
+    pub fn root(&self) -> &Path;                              // the test root
+}
+```
+
+The plan's engine tests drive turns through it: T19's golden event logs and its permission, spend, resume, cancel and
+loop-guard tests (with the default fakes), and T23's integration and review-focus tests (with `m1_tools()`, the real
+sandbox and `ProcessSupervisor` passed in `HarnessOptions`).
 
 The loop, per turn: route the role (fallback only between turns); assemble context (system blocks, instruction files
 when trusted, history with labels); compute the worst case and reserve spend; stream the model call, emitting events; on

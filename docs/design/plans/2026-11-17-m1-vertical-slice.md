@@ -170,7 +170,7 @@ Wave 1  T3 (T2b) -> T6 (T3) -> T7 (T4, T6)   T4 (T2b)   T5 (T1b, T2b)
 Wave 2  T8, T9 (T7)   T10 (T5, T6) -> T11, T12 (T10)   T13 (T3, T5)   T14 (T3, T5)   T15 (T3)
         T16 (T3, T5, T6)   T17 (T3)
 Wave 3  T18 (T14)   T19 (T7, T13 to T18)   T20 (T5)   T21 (T10, T13)   T22 (T4, T6)   T26 (T2b) -> T27 (T13, T26)
-        T23 (T10, T19 to T22) -> T24 (T23), T28 (T23)   T25 (T3, T6, T7, T10, T12)
+        T23 (T10, T19 to T22) -> T24 (T23), T28 (T23)   T25 (T3, T6, T7, T10)
 Wave 4  T29 (T23, T27) -> T30 -> T31 -> T32   T33 (T11, T29)   T34 (T30) -> T35 (T33, T34)
 Wave 5  T36, T37 (T34, T35) -> maintainer answers question 23 -> T38 (T26, T30) -> T39 (T36, T38)
 Wave 6  T40 (T3 to T28, T32, T33, T38)   T41 (everything)
@@ -423,11 +423,12 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   dependency and feature it will need, including target-specific and test-only ones, with exactly A 2.1's arrows) and a
   placeholder `src/lib.rs` (`src/main.rs` for `udx-app` with the bin target `unidex-rust-preview`; the bin
   `unidex-sandbox-helper` in `udx-sandbox`) holding only the crate's doc comment. In `udx-core`, create and fully
-  implement (they are data, with serde): `src/{model.rs,policy.rs,content.rs,workspace.rs,engine.rs,ask.rs,sandbox.rs}`,
-  `src/events/{mod.rs,engine_event.rs,session_record.rs,summary.rs}`, and the id and attendance types in
+  implement (they are data, with serde): `src/{model.rs,policy.rs,content.rs,workspace.rs,engine.rs,ask.rs,sandbox.rs,
+  stub.rs}`, `src/events/{mod.rs,engine_event.rs,session_record.rs,summary.rs}`, and the id and attendance types in
   `src/{ids.rs,attendance.rs}`; create every other `udx-core` module of A 3.1 (`state.rs`, `config/`, `display.rs`,
-  `opener.rs`, `net.rs`, `secret/`, `process_env.rs`, `diag.rs`, `harden.rs`, `fsguard/`) with its public items and
-  bodies `unimplemented!("T<n>")` naming the owning task. Tests: `crates/udx-core/tests/{events_golden.rs,crate_map.rs,
+  `opener.rs`, `net.rs`, `secret/`, `process_env.rs`, `diag.rs`, `harden.rs`, `fsguard/`) with its public items as
+  stubs under A 3's rule "Stubs never panic" (a `NotBuilt` error naming the owning task, or the value that grants
+  nothing), never `unimplemented!`. Tests: `crates/udx-core/tests/{events_golden.rs,crate_map.rs,
   fake_supervisor.rs}`, `crates/udx-core/tests/golden/events/v1/*.ndjson`,
   `crates/udx-core/tests/golden/session-log/v1/*.jsonl`.
 - **Consumes.** T1b's paths module. **Produces.** A 3.1.0 whole; A 3.1.4, 3.1.5 and 3.8's types, including the
@@ -435,8 +436,9 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   RecordingKiller}` written whole, not as stubs, so T19 and T21 use the fake supervisor without any sandbox task; the
   declarations of `SystemClock` and `V7Ids` (A 3.1.2; T3 writes their bodies); A 4's event and record types with A
   4.1's serde shape; every manifest, with the dev-dependency edges of A 2.2 (`udx-tools` to `udx-sandbox` with
-  `testing` among them). Features: `testing` on `udx-core`, `udx-providers`, `udx-sandbox`,
-  `udx-tools`, `udx-engine`, each defining its `UNIDEX_TESTING_MARKER_<crate>` static; on `udx-app`, `automation`
+  `testing` among them). Features: `testing` on `udx-core`, `udx-providers`, `udx-sandbox`, `udx-tools`, `udx-engine`,
+  each defining its `UNIDEX_TESTING_MARKER_<crate>` static (`udx-engine`'s also enables the `testing` features of
+  `udx-core`, `udx-providers` and `udx-sandbox`, whose fakes `TurnHarness` uses, A 3.11); on `udx-app`, `automation`
   (enables `gpui/test-support`), `perf` (enables `gpui/profiler`, `udx-providers/testing` and `udx-core/testing`, A 3.13)
   and `kit-renderer` (empty until question 23 says otherwise).
 - **Tests:**
@@ -466,8 +468,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 
 ### Task 2b: Contracts: the stubs of every other crate, wired
 
-- **Role and budget.** Sonnet builder, Opus reviewer. No separate test author: the compile and two source checks are
-  its tests. Code unit, 1.0M.
+- **Role and budget.** Sonnet builder, Opus reviewer. No separate test author: the compile, two source checks and the
+  never-panic check are its tests. Code unit, 1.0M.
 - **Needs.** T2a. **Runs beside.** Nothing (it touches every crate's sources).
 - **Files.** Create every module file of A 3.2 to 3.15 in `crates/{udx-providers,udx-tools,udx-sandbox,udx-engine,
   udx-ui-model,udx-app,udx-evals}/src/**`, replacing T2a's placeholder `lib.rs` (or `main.rs`) with the full module
@@ -475,19 +477,42 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `crates/udx-engine/src/wiring.rs` with `engine_deps` as a stub naming T23 and its `pub mod wiring;` line in
   `udx-engine`'s `lib.rs` (A 3.11), so T23 edits only `wiring.rs`; `crates/udx-sandbox/src/entries.rs` with
   `access_entries` and `clean_access_entries` as stubs naming T10, and the crate-private Windows hooks `remove_entry`
-  and `delete_profile` as stubs naming T12 (A 3.6); each crate's
-  `src/testing.rs` (or `testing/mod.rs`) with its testing items as stubs; `crates/udx-cli/src/{main.rs,chat.rs,run.rs,
-  config.rs,doctor.rs,trust.rs,key.rs,sandbox.rs,tty.rs,render.rs,wire.rs}` with every M1 subcommand registered and
-  dispatching to stubs; `crates/udx-core/tests/stubs.rs`. No manifest changes.
-- **Consumes.** T2a's types and manifests. **Produces.** Every public item of A 3.2 to 3.15 as a stub whose body is
-  `unimplemented!("T<n>")` naming the owning task; the `udx-app` binary's `main` that parses no flags yet; the hidden
-  argument `--udx-sandbox-probe <check>` dispatching to `udx_sandbox::probe_main` (stub) in both binaries' `main`.
-- **Tests:** `every_stub_names_its_task` (a source scan asserting each `unimplemented!` carries a task id that exists
-  in this plan); `public_items_match_contract_names` (a source scan for each public type named in A 3 and A 4, by its
-  home path).
+  and `delete_profile` as stubs naming T12 (A 3.6); `platform_sandbox` written whole as a dispatch to each platform's
+  backend, and each backend (`macos/`, `linux/`, `windows/`) as a not-built stub (A 3.6, "Before a backend merges");
+  each crate's `src/testing.rs` (or `testing/mod.rs`) with its testing items as stubs; `crates/udx-cli/src/{main.rs,
+  chat.rs,run.rs,config.rs,doctor.rs,trust.rs,key.rs,sandbox.rs,tty.rs,render.rs,wire.rs}` with every M1 subcommand
+  registered and dispatching to stubs; tests `crates/udx-core/tests/stubs.rs`, one
+  `crates/<crate>/tests/stubs_never_panic.rs` per library crate, `crates/udx-cli/tests/stubs_never_panic.rs`, and
+  `crates/udx-sandbox/tests/{macos.rs,linux.rs,windows.rs}` holding one test each, which T10, T11 and T12 replace. No
+  manifest changes.
+- **Consumes.** T2a's types and manifests. **Produces.** Every public item of A 3.2 to 3.15 as a stub under A 3's rule
+  "Stubs never panic": a function returning a `Result` (or a stream of them) returns its error's `NotBuilt` naming the
+  owning task; a backend not built yet reports `Unavailable(NotBuiltYet)`; anything else returns the value that grants
+  nothing. No `unimplemented!`, `todo!`, `panic!` or `unreachable!` sits behind any public function this task or T2a
+  creates. Also: the `udx-app` binary's `main` that parses no flags yet; the hidden argument
+  `--udx-sandbox-probe <check>` dispatching to `udx_sandbox::probe_main` (a stub that prints an `Error` outcome naming
+  the backend's task and exits nonzero) in both binaries' `main`.
+- **Tests:**
+  - `every_stub_names_its_task` (a source scan asserting each `NotBuilt` and `NotBuiltYet` carries a task id that
+    exists in this plan); `public_items_match_contract_names` (a source scan for each public type named in A 3 and A
+    4, by its home path); `no_panicking_stub` (a source scan, kept for good: no `unimplemented!` or `todo!` in any
+    `src/` file of a workspace crate, `udx-cookbook` excluded).
+  - `stubs_never_panic` (one per crate, on all three CI platforms): calls every stubbed public constructor and entry
+    point of that crate (every constructor, and every function or trait method that returns a `Result`, a stream, an
+    `Availability`, or a `Box<dyn ..>` or `Arc<dyn ..>`; T2a's `udx-core` stubs included), with inputs inside the test
+    root and URLs on a closed loopback port, and asserts that each call returns, never panics, and that every
+    `NotBuilt` it sees names a task in this plan. While an item is still a stub the call returns its `NotBuilt` error
+    (or `Unavailable(NotBuiltYet)` for a backend); once its owner has merged the call returns whatever the real code
+    returns, so owners need not edit this file. The CLI's version runs every subcommand through `assert_cmd` and
+    asserts it never exits with 101 (a panic's exit code); while a verb is a stub it prints the not-built message
+    naming its task and exits 1.
+  - `<platform>_backend_not_built_reports_unavailable` (in `tests/macos.rs`, `tests/linux.rs`, `tests/windows.rs`):
+    `platform_sandbox` reports `Unavailable { reason: NotBuiltYet { .. }, .. }`, `spawn` refuses with it, and
+    `probe_main` exits nonzero without panicking.
 - **Done when.** The common commands; the stubs compile with exactly the crate map's dependency arrows
-  (`crate_map_arrows_exact` from T2a passes with no manifest edit); `cargo build -p udx-app --bin unidex-rust-preview
-  --release` still has no `test-support`.
+  (`crate_map_arrows_exact` from T2a passes with no manifest edit); `stubs_never_panic` and the three platform tests
+  pass on all three CI platforms (a typed "not built" error or an `Unavailable` state everywhere, never a panic);
+  `cargo build -p udx-app --bin unidex-rust-preview --release` still has no `test-support`.
 - **Platform notes.** Target-specific stubs (`#[cfg(target_os = ...)]` backends) compile on their CI platform only.
   Nothing here changes OS state.
 
@@ -754,9 +779,11 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   pending. `probe.rs` runs the checks through a private trait each backend implements in its own folder, and
   `supervisor.rs` holds only `KillHandle`s, so T11 and T12 add no lines to either file.
 - **Tests** (macOS; each escape payload only writes a marker in the test root if it succeeds):
-  - `macos_probe_full_on_runner`; `p7_probe_check_allowed_makes_unavailable` (a deliberately broken profile in a test
-    build is reported `Unavailable(ProbeCheckFailed)`); `p7_networked_check_allowed_disables_network_grants_only`;
-    `probe_outcomes_name_the_denial` (no outcome is a bare failure; a missing resource is `NotApplicable`).
+  - `macos_probe_full_on_runner`, which replaces T2b's `macos_backend_not_built_reports_unavailable` in
+    `tests/macos.rs` as this task replaces the macOS backend stub; `p7_probe_check_allowed_makes_unavailable` (a
+    deliberately broken profile in a test build is reported `Unavailable(ProbeCheckFailed)`);
+    `p7_networked_check_allowed_disables_network_grants_only`; `probe_outcomes_name_the_denial` (no outcome is a bare
+    failure; a missing resource is `NotApplicable`).
   - `p1_no_loopback_connect`, `p1_no_name_lookup`.
   - `p43_escape_matrix_macos` (`open`, `osascript`, `launchctl`, an `lsopen` attempt) and
     `p43_escape_matrix_networked_macos` (a stand-in Unix socket the test binds outside the workspace refuses the
@@ -867,7 +894,11 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     T10's macOS test): a stand-in agent socket in a folder of the test root outside the workspace, beside a second
     socket; without the grant neither is in the new root; with it, the granted socket is connectable at its own path
     and the second one is still absent, with and without a network grant.
-  - `linux_probe_full_with_profile` (profile job); `p7_network_grants_unavailable_below_landlock_abi_6` (a test build
+  - `linux_probe_full_with_profile` (profile job), which replaces T2b's `linux_backend_not_built_reports_unavailable`
+    in `tests/linux.rs` as this task replaces the Linux backend stub; on the normal Linux test job, which has the
+    restriction and no profile, tests elsewhere now see `Unavailable(UserNamespacesRestricted)` instead of
+    `NotBuiltYet` and pass unchanged, since they assert what `platform_sandbox` reports;
+    `p7_network_grants_unavailable_below_landlock_abi_6` (a test build
     reporting ABI 5).
   - `p1_no_loopback_connect`, `p1_no_name_lookup` (neither the stub resolver nor the system resolver's socket is
     reached).
@@ -928,7 +959,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `clean_access_entries` calls, for one workspace or all, never-trusted workspaces included; the first card's notice
   text.
 - **Tests** (Windows runner; access entries and profiles under the opt-in `windows_acl,app_container_profile`):
-  - `windows_probe_full_on_runner`.
+  - `windows_probe_full_on_runner`, which replaces T2b's `windows_backend_not_built_reports_unavailable` in
+    `tests/windows.rs` as this task replaces the Windows backend stub.
   - `p1_no_loopback_connect`, `p1_no_name_lookup`.
   - `p43_escape_matrix_windows` (`schtasks /create`, WMI `Win32_Process.Create` through PowerShell, a COM activation)
     and `p43_escape_matrix_networked_windows` (with `internetClient`: a stand-in named pipe outside the container's
@@ -1122,8 +1154,10 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   **Produces.** A 3.11 (`NativeEngine`, `EngineDeps` with `supervisor: Arc<dyn Supervisor>`, `LoopGuards`,
   `RetryPolicy`), the `Engine` trait's implementation (A 3.1.4) including every
   `SessionCommand` rule (widening `SetMode` refused unattended, `TurnOffBuiltinAsk` only from `Attended(App)`),
-  `testing::TurnHarness`.
-- **Tests** (scripted mock provider, fake tools and the fake supervisor from `testing`):
+  `udx_engine::testing::{TurnHarness, HarnessOptions, fake_tools}` exactly as A 3.11 gives them (T2b's stubs replaced).
+- **Tests** (through `TurnHarness` with its defaults: the scripted mock provider, `fake_tools()`, the testing sandbox
+  and the fake supervisor; T23's integration tests use the same harness with the real parts passed in
+  `HarnessOptions`):
   - Golden event-log tests (design 10.1): a plain reply; one tool call; two parallel read calls; a write after a read;
     an ask answered allow, deny and timed out; a denied call not executed and leaving a permission record naming the
     rule; an "ask" in an unattended run becoming a deny with no card; a resumed session.
@@ -1222,13 +1256,13 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   module), `crates/udx-engine/src/turn/{rerun.rs,images.rs,processes.rs}` and their lines in
   `crates/udx-engine/src/turn/mod.rs`; tests `crates/udx-engine/tests/{integration_files.rs,integration_shell.rs,
   integration_processes.rs,integration_images.rs,wiring.rs,review_focus.rs}`.
-- **Consumes.** T19's engine, the real tools (T20 to T22), the macOS backend and supervisor (T10), `Router::from_config`
-  and `ProviderSet` (T7), `SpendLedger::open` (T17), `TrustStore::open` (T14), `SystemClock` and `V7Ids` (T3),
-  `SystemResolver` (T22). **Produces.** `udx_engine::wiring::engine_deps` exactly as A 3.11 gives it (the function the
-  CLI, the app and the evaluation harness call); the flows A 3.11 assigns here: P8's wider re-run on an approved card
-  (only for a backend-reported denial) and the card for `protected_created`; P7's unsandboxed-shell grant; P50's asks
-  on exposure and on a revoked grant; P15's image load (`SessionCommand::LoadImage` through the egress gate and
-  `fetch_bytes`, ending in `ImageLoaded` or `ImageRefused`).
+- **Consumes.** T19's engine and `TurnHarness`, the real tools (T20 to T22), the macOS backend and supervisor (T10),
+  `Router::from_config` and `ProviderSet` (T7), `SpendLedger::open` (T17), `TrustStore::open` (T14), `SystemClock`
+  and `V7Ids` (T3), `SystemResolver` (T22). **Produces.** `udx_engine::wiring::engine_deps` exactly as A 3.11 gives
+  it (the function the CLI, the app and the evaluation harness call); the flows A 3.11 assigns here: P8's wider
+  re-run on an approved card (only for a backend-reported denial) and the card for `protected_created`; P7's
+  unsandboxed-shell grant; P50's asks on exposure and on a revoked grant; P15's image load
+  (`SessionCommand::LoadImage` through the egress gate and `fetch_bytes`, ending in `ImageLoaded` or `ImageRefused`).
 - **Tests:**
   - `p8_file_tool_write_mcp_json_asks`; `p8_rerun_wider_only_after_card` (where the backend reports denials) and
     `p8_no_rerun_offer_without_reported_denial` (where it does not); `p8_protected_created_raises_card`.
@@ -1238,7 +1272,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     (end to end).
   - `wiring_builds_deps_from_config_in_test_root` (with a `ProviderSet::from_providers` holding the mock provider:
     every field filled as A 3.11 says, the supervisor is the real one behind `Arc<dyn Supervisor>`, no socket opened;
-    it calls `platform_sandbox`, so it runs where that platform's backend has merged, like the shell-dependent tests);
+    on all three CI platforms whatever the merge order: where a platform's backend has not merged, `sandbox` reports
+    `Unavailable(NotBuiltYet)` and the test asserts that, and the shell tool's absence, instead of a full sandbox);
     `wiring_reports_setup_errors` (an unroutable role and an unreadable trust file each give `EngineError::Setup`
     naming the part).
   - The review-focus tests (Review Focus above), engine side: `review_focus_hostile_workspace_paths` (the guard, the
@@ -1298,12 +1333,16 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Done when.** The common commands; `unidex chat` and `unidex run` against the mock provider demonstrated in the pull
   request with a transcript (no real key).
 - **Platform notes.** Pseudo-terminal tests are Unix only; the Windows console path is unit-tested where the runner has
-  no console. Nothing here changes OS state.
+  no console. Every test passes on all three CI platforms whatever the merge order of T11 and T12: the CLI builds its
+  engine through `engine_deps`, and where a platform's backend has not merged `platform_sandbox` reports
+  `Unavailable(NotBuiltYet)` (A 3.6), so the shell tool is absent and a test that looks at the sandbox asserts that
+  state. Nothing here changes OS state.
 
 ### Task 25: CLI: `config`, `doctor` and `sandbox clean` (acceptance rows C1 and C3)
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Small code unit, 0.7M.
-- **Needs.** T3, T6, T7, T10, T12. **Runs beside.** T24.
+- **Needs.** T3, T6, T7, T10 (not T12: its access-entry calls are T10's platform-neutral functions, and before T12
+  merges the Windows doctor row reports `Unavailable(NotBuiltYet)`, A 3.6). **Runs beside.** T24.
 - **Files.** `crates/udx-cli/src/{config.rs,doctor.rs,sandbox.rs}`; tests
   `crates/udx-cli/tests/{config.rs,doctor.rs,sandbox.rs}`.
 - **Consumes.** `Config`, `apply`, `open_secret_store`, `platform_sandbox`, and T10's platform-neutral `access_entries`
@@ -1318,10 +1357,13 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `p47_permission_widening_refused_headless` (allow rules and a widening `permissions.mode`);
   `doctor_reports_sandbox_reason_and_remedy` (testing sandbox); `doctor_reports_network_grants_unavailable`;
   `doctor_lists_acl_entries` (from planted records, every platform); `sandbox_clean_reports_nothing_on_unix`;
-  `doctor_offline_by_default`; `doctor_json_stable`.
+  `doctor_offline_by_default`; `doctor_json_stable`; `doctor_sandbox_row_matches_platform_sandbox` (the row shows
+  what `platform_sandbox` reports: `NotBuiltYet` with its plain-words remedy where the backend has not merged, the
+  real reason or `Full` once it has).
 - **Done when.** The common commands.
-- **Platform notes.** All three CI platforms; the real removal of access entries is T12's (Windows, opt-in). Nothing
-  here changes OS state.
+- **Platform notes.** All three CI platforms, whatever the merge order of T11 and T12 (the sandbox row asserts what
+  `platform_sandbox` reports); the real removal of access entries is T12's (Windows, opt-in). Nothing here changes OS
+  state.
 
 ### Task 26: Markdown model, streaming document and the prepared-message cache
 
@@ -1372,14 +1414,17 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   provider for `ProviderSel::Mock` (T7). **Produces.** A 3.15's harness (`Task`, `Check`, `RunConfig`,
   `TaskResult`, `SuiteReport`, `EvalError`, `run_suite`), the task set, the egress-ask measurement output (asks per task
   and per P14 cap).
-- **Tests:** `suite_runs_against_mock_and_all_pass` (each task's mock script solves it);
+- **Tests:** `suite_runs_against_mock_and_all_pass` (each task's mock script solves it; where the sandbox is
+  unavailable the shell tasks are listed in `SuiteReport.skipped` with the reason instead);
   `canary_tasks_fail_when_canary_leaks` (a deliberately leaking script makes the task fail);
   `report_records_pass_rate_invalid_calls_turns_cost_asks`; `workspace_copied_into_test_root`; `budget_cap_stops_task`;
   `skipped_tasks_listed_with_reason`.
 - **Done when.** The common commands; `cargo run -p udx-evals -- run --suite m1 --provider mock` writes the report.
-- **Platform notes.** The mock suite runs on three CI platforms inside the normal test job; the shell tasks run only
-  where the sandbox is full (macOS, `sandbox-linux (profile)`, Windows once T12 merged) and are reported as skipped
-  with the reason elsewhere. Nothing here changes OS state.
+- **Platform notes.** The mock suite runs and passes on three CI platforms inside the normal test job whatever the
+  merge order of T11 and T12: the harness asks `platform_sandbox`, runs the shell tasks where it reports `Full`
+  (macOS, `sandbox-linux (profile)`, Windows once its backend is built) and reports them as skipped with the reason
+  where it reports `Unavailable` (`NotBuiltYet` before a backend merges, or a runner without the full sandbox), which
+  `skipped_tasks_listed_with_reason` asserts. Nothing here changes OS state.
 
 ## Wave 4: the app, its tests and its packages
 
@@ -1406,7 +1451,10 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   builder's own scripted check (no screen capture of the person's desktop; the frame comes from the `ui` jobs once T32
   exists).
 - **Platform notes.** Linux fonts: the face chosen on the runner is recorded in the pull request (decision 0013 left it
-  unverified). Opening the window on the development Mac needs the maintainer's approval; nothing changes OS state.
+  unverified). The binary and its tests run on all three CI platforms whatever the merge order of T11 and T12: the app
+  builds its engine through `engine_deps`, and where a backend has not merged `platform_sandbox` reports
+  `Unavailable(NotBuiltYet)`, so the shell is off and the status bar says why (A 3.6); nothing panics. Opening the
+  window on the development Mac needs the maintainer's approval; nothing changes OS state.
 
 ### Task 30: The chat window
 
@@ -1794,7 +1842,7 @@ Scope the maintainer could move out of M1, with what each saves and what it cost
   - D3's footprint is not built: no access entries, records or AppContainer profiles; `unidex sandbox clean` and
     `unidex trust --revoke` have nothing to remove on Windows either; record 0016 is not written.
   - The doctor task (T25) changes: on Windows its sandbox row reports the shell off with that reason, its "Windows
-    sandbox access entries" row reports none, and T12 leaves its Needs.
+    sandbox access entries" row reports none (T25 no longer needs T12 either way).
   - The Windows rows of the coverage tables change from tested to "shell off on Windows": in A section 6 the Windows
     tests of P1, P8, P10, P23, P43, P48, P50 and P51 are not written, and P7's
     `p7_forced_unavailable_shell_absent_and_refuses` pins the shell's absence instead; the Windows column of A 3.1.5's
