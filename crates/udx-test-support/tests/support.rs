@@ -75,7 +75,7 @@ fn base64(input: &[u8], url_safe: bool) -> String {
                 _ => c,
             });
         }
-        while url_safe == false && out.len() % 4 != 0 {
+        while !url_safe && !out.len().is_multiple_of(4) {
             out.push('=');
         }
     }
