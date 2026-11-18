@@ -19,7 +19,7 @@ Every brief carries these (design 11.2).
 - **Provenance (design 11.4).** Read permissively licensed code as reference only; copy nothing from code under any
   other licence; do not read or describe the editor GPUI comes from beyond what decision 0007 says. A fragment adapted
   from permissively licensed code carries its attribution in a comment and in the third-party notices.
-- **Contracts first (design 11.2).** The public items of the architecture file are created by T2 and changed only with
+- **Contracts first (design 11.2).** The public items of the architecture file are created by T2a and changed only with
   the controller's agreement, written in the pull request. A builder who finds a contract unbuildable stops and reports;
   the controller amends the architecture file in its own small pull request.
 - **Nothing is installed** on the development machine (a toolchain target, a tool, a model server) without the
@@ -36,20 +36,20 @@ Every brief carries these (design 11.2).
 
   | File or folder | Edited by |
   |---|---|
-  | `Cargo.toml` (root), every member's `Cargo.toml` dependency and feature tables, `Cargo.lock` | T2 only; a later need for a dependency stops the task and becomes a sequenced change. Exception: `[package.metadata.deb]` in `crates/udx-app/Cargo.toml`, by T29 |
+  | `Cargo.toml` (root), every member's `Cargo.toml` dependency and feature tables, `Cargo.lock` | T2a only; a later need for a dependency stops the task and becomes a sequenced change. Exception: `[package.metadata.deb]` in `crates/udx-app/Cargo.toml`, by T33 |
   | `deny.toml` | nobody in M1 (any need stops the task) |
-  | `privacy-allow.toml`, `.gitleaks.toml` | T1a, T1b, then T2 (which adds the entries for every vector file path reserved below); nobody after T2 |
-  | `.github/workflows/ci.yml` | T1b, T4, T11, T31, never two at once |
-  | New workflows | `governance.yml` (T1b), `sandbox-linux.yml` (T10), `ui.yml` (T28); `nightly.yml`: T1b (its concurrency group), then T29 |
-  | `xtask/src/main.rs` | T1b, T29, T31, never two at once |
-  | `crates/*/src/lib.rs` (module lists) | T2 only |
-  | `crates/udx-app/src/main.rs`, `crates/udx-cli/src/main.rs` | T2 creates them; then T23 and T20 respectively, only |
+  | `privacy-allow.toml`, `.gitleaks.toml` | T1a, T1c, then T2a (which adds the entries for every vector file path reserved below); nobody after T2a |
+  | `.github/workflows/ci.yml` | T1c, T6, T12, T34, never two at once |
+  | New workflows | `governance.yml` (T1c), `sandbox-linux.yml` (T11), `ui.yml` (T31); `nightly.yml`: T1c (its concurrency group), then T33 |
+  | `xtask/src/main.rs` | T1c, T33, T34, never two at once |
+  | `crates/*/src/lib.rs` (module lists) | T2a only |
+  | `crates/udx-app/src/main.rs`, `crates/udx-cli/src/main.rs` | T2a creates them; then T29 and T24 respectively, only |
   | `docs/build/LEDGER.md`, `docs/decisions/README.md` | the controller only, after each merge (M0 lost time to index conflicts) |
 
-- **Decision record numbers are reserved** so parallel tasks do not collide: 0015 Linux sandbox (T10), 0016 Windows
-  sandbox (T11), 0017 macOS sandbox (T9), 0018 the two providers (T8), 0019 session log format (T14), 0020 shaped-text
-  cache (T27), 0021 widget kit for message bodies (T25), 0022 the `.deb` built with cargo-deb (T29), 0023 spend ledger
-  (T15), 0024 HTTP and TLS stack (T6), 0025 governed-paths review (T1b), 0026 state root before the vault (T3).
+- **Decision record numbers are reserved** so parallel tasks do not collide: 0015 Linux sandbox (T11), 0016 Windows
+  sandbox (T12), 0017 macOS sandbox (T10), 0018 the two providers (T9), 0019 session log format (T16), 0020 shaped-text
+  cache (T39), 0021 widget kit for message bodies (T37), 0022 the `.deb` built with cargo-deb (T33), 0023 spend ledger
+  (T17), 0024 HTTP and TLS stack (T7), 0025 governed-paths review (T1c), 0026 state root before the vault (T3).
 - **One task, one branch, one pull request** in its own worktree, small enough to review in one read (design 11.2). At
   most two compiling agents run at once locally (design 11.3); document work runs beside them. `cargo check` before any
   full build; sccache on when available (decision 0007).
@@ -89,37 +89,37 @@ Arrows read "needs". Tasks on one line may run beside each other (disjoint files
 so the controller runs at most two of them at once.
 
 ```
-Wave 0  T1a ─┐                T1c ─┐
-             T1b ─────────────────── T2
-Wave 1  T3 ── T4 ── T6        T3b ── T6        T5
-Wave 2  T7, T8 (T6)   T9 (T4, T5) ── T10, T11   T12 (T3, T5)   T13 (T3, T5)   T14 (T3, T4, T5)   T15 (T3)
-Wave 3  T16 (T6, T12-T15)   T17 (T5)   T18 (T9, T12)   T19 (T3b, T4, T13)   T22m (T2) ── T22 (T12)
-        T20 (T16-T19)   T21 (T3, T4, T6, T9)   T30 (T16-T19)
-Wave 4  T23 (T16, T22) ── T26 ── T28, T31      T29 (T23, T10)
-Wave 5  T24, T25 (T31) ── maintainer answers question 23 ── T26b (T26) ── T27 (T24, T26b)
-Wave 6  T32 (after the security tasks merge)   T33 (everything)
+Wave 0  T1a ─┐                T1b ─┐
+             T1c ─────────────────── T2a
+Wave 1  T3 ── T6 ── T7        T4 ── T7        T5
+Wave 2  T8, T9 (T7)   T10 (T6, T5) ── T11, T12   T13 (T3, T5)   T14 (T3, T5)   T16 (T3, T6, T5)   T17 (T3)
+Wave 3  T19 (T7, T13-T17)   T20 (T5)   T21 (T10, T13)   T22 (T4, T6, T14)   T26 (T2a) ── T27 (T13)
+        T24 (T19-T22)   T25 (T3, T6, T7, T10)   T28 (T19-T22)
+Wave 4  T29 (T19, T27) ── T30 ── T31, T34      T33 (T29, T11)
+Wave 5  T36, T37 (T34) ── maintainer answers question 23 ── T38 (T30) ── T39 (T36, T38)
+Wave 6  T40 (after the security tasks merge)   T41 (everything)
 ```
 
 | Wave | Tasks | Compiling pairs the controller can run together |
 |---|---|---|
-| 0 | T1a, T1c, then T1b, then T2 | T1a with T1c |
-| 1 | T3, T3b, T5, then T4, then T6 | T3 with T5; T3b with T5; T4 with T5 |
-| 2 | T7, T8, T9, T10, T11, T12, T13, T14, T15 | any two; T10 and T11 after T9 (they reuse its supervisor and probe framework) |
-| 3 | T16, T17, T18, T19, T20, T21, T22m, T22, T30 | any two whose dependencies merged |
-| 4 | T23, T26, T28, T29, T31 | T28 with T29; T29 with T31 not together (both edit `xtask/src/main.rs`) |
-| 5 | T24, T25, T26b, T27 | T24 with T25 |
-| 6 | T32 (document), T33 (gate) | T32 runs beside anything |
+| 0 | T1a, T1b, then T1c, then T2a | T1a with T1b |
+| 1 | T3, T4, T5, then T6, then T7 | T3 with T5; T4 with T5; T6 with T5 |
+| 2 | T8, T9, T10, T11, T12, T13, T14, T16, T17 | any two; T11 and T12 after T10 (they reuse its supervisor and probe framework) |
+| 3 | T19, T20, T21, T22, T24, T25, T26, T27, T28 | any two whose dependencies merged |
+| 4 | T29, T30, T31, T33, T34 | T31 with T33; T33 with T34 not together (both edit `xtask/src/main.rs`) |
+| 5 | T36, T37, T38, T39 | T36 with T37 |
+| 6 | T40 (document), T41 (gate) | T40 runs beside anything |
 
 ## Wave 0: the first task of M1, then the contracts
 
 The gate report requires every item of its section g, "The first task of M1: harden the privacy gate and the path
-guard", in M1's first task. That is too large for one pull request, so the first task is three pull requests, T1a, T1b
-and T1c, which together hold every item; nothing else starts before all three merge.
+guard", in M1's first task. That is too large for one pull request, so the first task is three pull requests, T1a, T1c
+and T1b, which together hold every item; nothing else starts before all three merge.
 
-### T1a. Privacy gate: what it cannot see, and the false positive
+### Task 1a: Privacy gate: what it cannot see, and the false positive
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** Nothing. **Runs beside.** T1c.
+- **Needs.** Nothing. **Runs beside.** T1b.
 - **Files.** Modify `xtask/src/privacy/scan.rs`, `xtask/src/privacy/rules.rs`, `xtask/src/privacy/git.rs`,
   `xtask/src/privacy/mod.rs`, `xtask/tests/privacy.rs`, `xtask/tests/privacy_mutants.rs`,
   `xtask/tests/github_committer.rs`, `privacy-allow.toml` (only if a vector needs it), `.cargo/mutants.toml` (only for a
@@ -155,7 +155,7 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Platform notes.** UTF-16 and non-UTF-8 name tests run on all three CI platforms; the non-UTF-8 name test is Unix
   only (Windows file names are UTF-16), skipped with a printed notice on Windows.
 
-### T1c. Path guard: hardening, the single choke point, and the test-support cycle
+### Task 1b: Path guard: hardening, the single choke point, and the test-support cycle
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
 - **Needs.** Nothing. **Runs beside.** T1a.
@@ -164,7 +164,7 @@ and T1c, which together hold every item; nothing else starts before all three me
   (drop `udx-core`), `crates/udx-test-support/src/lib.rs`. Create `crates/udx-core/tests/choke_point.rs`.
 - **Produces.** A 3.1.1 (`PathError` additions, `test_root`, `check_test_path`, `os_side_effects_allowed`,
   `OsSideEffect`, `paths::testing::TestEnv`) and A 3.14 (`TestRoot`, and stubs for `TempHome`, `HttpStandIn`,
-  `scan_for_canary` that T2 fills).
+  `scan_for_canary` that T2a fills).
 - **Items covered (gate report, section g, "The path guard" and "Architecture notes").** Tests for a relative override
   and a missing root; the right error for absolute-path failures (`paths.rs:73`, `:77`, `:96`, now `NotAbsolute`);
   values that are only whitespace (`paths.rs:63`, now `Blank`); a printed notice when a test is skipped because it runs
@@ -194,10 +194,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   `cargo mutants -p udx-core` locally with no missed mutant.
 - **Platform notes.** All tests on three CI platforms; the root notice is Unix only.
 
-### T1b. Privacy gate: local secret scan, pre-push hook, installer, and CI coverage
+### Task 1c: Privacy gate: local secret scan, pre-push hook, installer, and CI coverage
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. CI or packaging, 1.3M.
-- **Needs.** T1a (shares `xtask/src/privacy/`). **Runs beside.** T1c if T1c has not merged.
+- **Needs.** T1a (shares `xtask/src/privacy/`). **Runs beside.** T1b if T1b has not merged.
 - **Files.** Create `xtask/src/privacy/secrets.rs`, `xtask/tests/secrets.rs`, `xtask/tests/hooks.rs`,
   `xtask/tests/vectors/secrets/` (invented key-shaped values), `.github/workflows/governance.yml`,
   `docs/decisions/0025-governed-paths-review.md`. Modify `xtask/src/main.rs`, `xtask/src/hooks.rs`,
@@ -225,9 +225,9 @@ and T1c, which together hold every item; nothing else starts before all three me
   or routed: the nightly's concurrency group, so a scheduled run and a manual run do not cancel each other
   (`nightly.yml:41-43`): done here, the group gains `github.event_name`; the macOS cookbook step that recompiles the
   platform crates (`ci.yml:137-143`): done here, by building the examples in the same feature resolution as the tests
-  and measuring the saving; per-crate test helpers: done in T1c; no direct `chrono` dependency: enforced in T1c's
+  and measuring the saving; per-crate test helpers: done in T1b; no direct `chrono` dependency: enforced in T1b's
   choke-point test; test vectors on reserved domains: done in T1a; package a binary target, not an example
-  (`Packager.toml:28-30`): routed to T29, because no app binary exists before T23; T29 also adds a nightly step that
+  (`Packager.toml:28-30`): routed to T33, because no app binary exists before T29; T33 also adds a nightly step that
   fails if a staged program comes from an `examples` folder.
 - **Tests:**
   - `secret_patterns_flag_each_vector` and `secret_patterns_ignore_look_alikes` (placeholders such as `sk-ant-EXAMPLE`,
@@ -247,15 +247,15 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Repository settings.** The maintainer adds `governed-paths` to the ruleset's required checks.
 - **Record.** 0025.
 
-### T2. Contracts: the crates, every public signature, the event types and the dependencies
+### Task 2a: Contracts: the crates, every public signature, the event types and the dependencies
 
 - **Role and budget.** Opus core builder (every later task builds on its output), Opus reviewer. No separate test
   author: its tests are the golden files and the compile itself. Core code, 1.3M.
-- **Needs.** T1b and T1c. **Runs beside.** Nothing (it touches every crate).
+- **Needs.** T1c and T1b. **Runs beside.** Nothing (it touches every crate).
 - **Files.** Modify `Cargo.toml` (members stay `crates/*`; `[workspace.dependencies]` gains every external crate of A
   2.3 at the versions the lockfile resolves), `Cargo.lock`, `crates/udx-core/Cargo.toml`, `crates/udx-core/src/lib.rs`,
   `crates/udx-cli/Cargo.toml`, `crates/udx-cli/src/main.rs` (every M1 subcommand registered, dispatching to stub modules
-  `chat.rs`, `run.rs`, `config.rs`, `doctor.rs`, `trust.rs`, `key.rs`, `tty.rs`, `render.rs`, `wire.rs`, which T2
+  `chat.rs`, `run.rs`, `config.rs`, `doctor.rs`, `trust.rs`, `key.rs`, `tty.rs`, `render.rs`, `wire.rs`, which T2a
   creates), `crates/udx-test-support/{Cargo.toml,src/lib.rs}`, `privacy-allow.toml`, `.gitleaks.toml`. Create the crates
   `udx-providers`, `udx-tools`, `udx-sandbox`, `udx-engine`, `udx-ui-model`, `udx-app`, `udx-evals`, each with
   `Cargo.toml` (all dependencies and features it will need, including target-specific ones), `src/lib.rs` (or
@@ -283,14 +283,14 @@ and T1c, which together hold every item; nothing else starts before all three me
 
 ## Wave 1: core foundations
 
-### T3. Config, state paths, ids, clock and attendance
+### Task 3: Config, state paths, ids, clock and attendance
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T2. **Runs beside.** T5, T3b.
+- **Needs.** T2a. **Runs beside.** T5, T4.
 - **Files.** `crates/udx-core/src/{state.rs,ids.rs,attendance.rs}`,
   `crates/udx-core/src/config/{mod.rs,schema.rs,interactive.rs}`; tests
   `crates/udx-core/tests/{config.rs,state.rs,attendance.rs}`; `docs/decisions/0026-state-root-before-the-vault.md`.
-- **Produces.** A 3.1.1 (`StatePaths`), A 3.1.2, A 3.1.3. **Consumes.** `AppPaths`, `check_test_path` (T1c).
+- **Produces.** A 3.1.1 (`StatePaths`), A 3.1.2, A 3.1.3. **Consumes.** `AppPaths`, `check_test_path` (T1b).
 - **Tests:**
   - `config_rows_cover_every_section_with_source` (default, user file with line, env, flag, workspace narrowing).
   - `config_unknown_key_reported_with_line_not_an_error`; `config_malformed_toml_reports_line` (hostile input: a
@@ -307,10 +307,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Platform notes.** Owner-only file checks differ per platform; Windows ACL assertions run on the Windows runner.
 - **Record.** 0026.
 
-### T3b. Display escaping, the opener and address classification
+### Task 4: Display escaping, the opener and address classification
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit at the lower cap, 0.7M.
-- **Needs.** T2. **Runs beside.** T3, T5.
+- **Needs.** T2a. **Runs beside.** T3, T5.
 - **Files.** `crates/udx-core/src/{display.rs,opener.rs,net.rs}`; tests
   `crates/udx-core/tests/{display.rs,opener.rs,net.rs}`; `crates/udx-core/tests/vectors/addresses.toml`.
 - **Produces.** A 3.1.9, A 3.1.10.
@@ -325,42 +325,14 @@ and T1c, which together hold every item; nothing else starts before all three me
     -compatible IPv6, bracketed forms, trailing dots, the metadata-service address, every private, loopback, link-local,
     shared and documentation range.
   - `p24_non_loopback_http_provider_refused`, `provider_endpoint_with_credentials_refused`.
-- **Done when.** The common commands; the vector file passes the privacy scan through its allow entry from T2.
+- **Done when.** The common commands; the vector file passes the privacy scan through its allow entry from T2a.
 - **Platform notes.** The opener's real launch is never exercised in tests (no window, no browser): the launcher is
   injected.
 
-### T4. Secrets, redaction, child environment, diagnostics and process hardening
-
-- **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T3 (for `StatePaths`). **Runs beside.** T5.
-- **Files.** `crates/udx-core/src/secret/{mod.rs,redact.rs,macos.rs,linux.rs,windows.rs,env.rs,memory.rs}`,
-  `crates/udx-core/src/{process_env.rs,diag.rs,harden.rs}`; tests
-  `crates/udx-core/tests/{secrets.rs,redact.rs,process_env.rs,diag.rs}`; `crates/udx-core/tests/vectors/secrets/`;
-  `.github/workflows/ci.yml` (test job: set `UNIDEX_TEST_OS_SECRET_STORE=1` on the macOS and Windows runners only).
-- **Produces.** A 3.1.6, A 3.1.7, A 3.1.11.
-- **Verify first.** That `objc2-security` 0.3.2's `SecItem` bindings cover add, copy-matching and delete for generic
-  passwords; otherwise use `security-framework` (transitive already) and say so (A 2.3). That `oo7` 0.6.0 can be used
-  with the Tokio runtime the workspace already resolves. How a Windows process opts out of error-report dumps.
-- **Tests:**
-  - `redactor_redacts_value_and_each_encoding` (base64 both alphabets, padded and not; percent; hex);
-    `redactor_redacts_token_shapes` (bearer header, PEM block, key prefixes); `redactor_leaves_ordinary_text`.
-  - `secrets_canary_never_in_test_root`: a planted key in a tool-output string, an error message, a panic and a
-    simulated crash report written through `diag`; the whole test root is scanned with `scan_for_canary` (P21, P57).
-  - `secret_debug_and_display_print_redacted`.
-  - `os_store_refused_without_opt_in` (with a test root and no variable, `open_secret_store` returns the memory store
-    and never touches the OS store); `os_store_round_trip` (CI opt-in only, macOS keychain and Windows Credential
-    Manager; the Linux runner has no unlocked Secret Service, so `env_fallback_used_when_no_store` runs there).
-  - `p23_agent_socket_variable_absent`, `p23_provider_key_absent_from_child_env`, `p23_loader_variables_absent`,
-    `p23_parent_agent_markers_absent`, `p23_use_my_credentials_restores_only_that_variable`.
-  - `p57_linux_process_non_dumpable` (reads `/proc/self/status` after `harden_process`);
-    `p57_rust_log_trace_has_no_effect`.
-- **Done when.** The common commands; on CI the opt-in store test ran on macOS and Windows (named in the pull request).
-- **Platform notes.** The OS store tests run only on CI runners, never on the development Mac (A 3.1.1).
-
-### T5. File guard
+### Task 5: File guard
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T2, T1c. **Runs beside.** T3, T3b, T4, T6.
+- **Needs.** T2a, T1b. **Runs beside.** T3, T4, T6, T7.
 - **Files.** In `crates/udx-core/src/fsguard/`: `mod.rs`, `deny.rs`, `read_allow.rs`, `persistence.rs`, `protected.rs`,
   `open_unix.rs`, `open_windows.rs`, `write.rs`, `undo.rs`, `private.rs`, `space.rs`, `workspace.rs`; tests
   `crates/udx-core/tests/{fsguard.rs,fsguard_props.rs,fsguard_race.rs,fsguard_windows.rs}`.
@@ -396,10 +368,38 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Platform notes.** Junction and Windows-form tests run only on the Windows runner; `openat2` tests only on Linux;
   `O_NOFOLLOW_ANY` on macOS. Each falls back to a skip with a printed notice elsewhere, never a silent pass.
 
-### T6. Provider transport, fixtures, mock provider, endpoint binding, routing
+### Task 6: Secrets, redaction, child environment, diagnostics and process hardening
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T3b (`check_provider_endpoint`), T4 (`Secret`, `Redactor`). **Runs beside.** T5.
+- **Needs.** T3 (for `StatePaths`). **Runs beside.** T5.
+- **Files.** `crates/udx-core/src/secret/{mod.rs,redact.rs,macos.rs,linux.rs,windows.rs,env.rs,memory.rs}`,
+  `crates/udx-core/src/{process_env.rs,diag.rs,harden.rs}`; tests
+  `crates/udx-core/tests/{secrets.rs,redact.rs,process_env.rs,diag.rs}`; `crates/udx-core/tests/vectors/secrets/`;
+  `.github/workflows/ci.yml` (test job: set `UNIDEX_TEST_OS_SECRET_STORE=1` on the macOS and Windows runners only).
+- **Produces.** A 3.1.6, A 3.1.7, A 3.1.11.
+- **Verify first.** That `objc2-security` 0.3.2's `SecItem` bindings cover add, copy-matching and delete for generic
+  passwords; otherwise use `security-framework` (transitive already) and say so (A 2.3). That `oo7` 0.6.0 can be used
+  with the Tokio runtime the workspace already resolves. How a Windows process opts out of error-report dumps.
+- **Tests:**
+  - `redactor_redacts_value_and_each_encoding` (base64 both alphabets, padded and not; percent; hex);
+    `redactor_redacts_token_shapes` (bearer header, PEM block, key prefixes); `redactor_leaves_ordinary_text`.
+  - `secrets_canary_never_in_test_root`: a planted key in a tool-output string, an error message, a panic and a
+    simulated crash report written through `diag`; the whole test root is scanned with `scan_for_canary` (P21, P57).
+  - `secret_debug_and_display_print_redacted`.
+  - `os_store_refused_without_opt_in` (with a test root and no variable, `open_secret_store` returns the memory store
+    and never touches the OS store); `os_store_round_trip` (CI opt-in only, macOS keychain and Windows Credential
+    Manager; the Linux runner has no unlocked Secret Service, so `env_fallback_used_when_no_store` runs there).
+  - `p23_agent_socket_variable_absent`, `p23_provider_key_absent_from_child_env`, `p23_loader_variables_absent`,
+    `p23_parent_agent_markers_absent`, `p23_use_my_credentials_restores_only_that_variable`.
+  - `p57_linux_process_non_dumpable` (reads `/proc/self/status` after `harden_process`);
+    `p57_rust_log_trace_has_no_effect`.
+- **Done when.** The common commands; on CI the opt-in store test ran on macOS and Windows (named in the pull request).
+- **Platform notes.** The OS store tests run only on CI runners, never on the development Mac (A 3.1.1).
+
+### Task 7: Provider transport, fixtures, mock provider, endpoint binding, routing
+
+- **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
+- **Needs.** T4 (`check_provider_endpoint`), T6 (`Secret`, `Redactor`). **Runs beside.** T5.
 - **Files.** `crates/udx-providers/src/{transport.rs,endpoint.rs,router.rs,sanitize.rs,price.rs}`,
   `crates/udx-providers/src/testing/{mod.rs,mock.rs,fixture.rs,conformance.rs}`; tests
   `crates/udx-providers/tests/{transport.rs,router.rs,mock.rs}`; `docs/decisions/0024-http-and-tls-stack.md`.
@@ -424,10 +424,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 
 ## Wave 2: providers, sandboxes, permissions, context, log and spend
 
-### T7. Anthropic provider
+### Task 8: Anthropic provider
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T6. **Runs beside.** T8, and any wave-2 task.
+- **Needs.** T7. **Runs beside.** T9, and any wave-2 task.
 - **Files.** `crates/udx-providers/src/anthropic/{mod.rs,sse.rs,wire.rs,prices.toml}`; tests
   `crates/udx-providers/tests/anthropic.rs`; fixtures `crates/udx-providers/tests/fixtures/anthropic/*.json`.
 - **Produces.** `AnthropicProvider` (A 3.3).
@@ -443,10 +443,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   opt-in run; either way reviewed for secrets before commit.
 - **Platform notes.** None (pure Rust over fixtures).
 
-### T8. Ollama provider and the prompt-integrity measurement
+### Task 9: Ollama provider and the prompt-integrity measurement
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T6. **Runs beside.** T7.
+- **Needs.** T7. **Runs beside.** T8.
 - **Files.** `crates/udx-providers/src/ollama/{mod.rs,ndjson.rs,wire.rs,integrity.rs}`; tests
   `crates/udx-providers/tests/ollama.rs`; fixtures `crates/udx-providers/tests/fixtures/ollama/*.json`;
   `docs/decisions/0018-m1-providers.md`.
@@ -462,10 +462,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Done when.** The common commands.
 - **Record.** 0018 (both providers, citing section 5 of the architecture file).
 
-### T9. macOS sandbox, the process supervisor and the probe framework
+### Task 10: macOS sandbox, the process supervisor and the probe framework
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T4 (`process_env`), T5 (`sandbox_lists`). **Runs beside.** T12, T13, T14, T15, T7, T8.
+- **Needs.** T6 (`process_env`), T5 (`sandbox_lists`). **Runs beside.** T13, T14, T16, T17, T8, T9.
 - **Files.** `crates/udx-sandbox/src/{supervisor.rs,probe.rs,limits.rs,macos/mod.rs,macos/profile.sb,macos/sweep.rs}`,
   `crates/udx-sandbox/src/testing.rs`; tests `crates/udx-sandbox/tests/{macos.rs,supervisor.rs,escape_macos.rs}`;
   `docs/decisions/0017-macos-sandbox.md`.
@@ -494,11 +494,11 @@ and T1c, which together hold every item; nothing else starts before all three me
   three platforms.
 - **Record.** 0017.
 
-### T10. Linux sandbox: namespaces, Landlock, seccomp and the AppArmor profile
+### Task 11: Linux sandbox: namespaces, Landlock, seccomp and the AppArmor profile
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M (the controller should
   expect this one to be the most likely to need its reserve; see "Risks").
-- **Needs.** T9. **Runs beside.** T11 (different files; both verified in CI only).
+- **Needs.** T10. **Runs beside.** T12 (different files; both verified in CI only).
 - **Files.** `crates/udx-sandbox/src/linux/{mod.rs,helper.rs,mounts.rs,seccomp.rs,landlock.rs,cgroup.rs}`,
   `crates/udx-sandbox/src/bin/unidex-sandbox-helper.rs`; `packaging/linux/apparmor/unidex-rust-preview-sandbox`; tests
   `crates/udx-sandbox/tests/{linux.rs,escape_linux.rs}`; `.github/workflows/sandbox-linux.yml`;
@@ -513,7 +513,7 @@ and T1c, which together hold every item; nothing else starts before all three me
   full sandbox tests. Both upload the probe's report.
 - **Tests:**
   - `p7_linux_restricted_userns_without_profile_is_unavailable` (restricted job):
-    `Unavailable(UserNamespacesRestricted)` with the remedy text; the shell tool is absent (through T18's tool once
+    `Unavailable(UserNamespacesRestricted)` with the remedy text; the shell tool is absent (through T21's tool once
     merged; until then the probe result).
   - `linux_probe_full_with_profile` (profile job).
   - `p1_no_loopback_connect`, `p1_no_name_lookup` (neither the stub resolver nor the system resolver's socket is
@@ -536,10 +536,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   required checks.
 - **Record.** 0015.
 
-### T11. Windows sandbox: AppContainer and job object
+### Task 12: Windows sandbox: AppContainer and job object
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T9. **Runs beside.** T10.
+- **Needs.** T10. **Runs beside.** T11.
 - **Files.** `crates/udx-sandbox/src/windows/{mod.rs,appcontainer.rs,job.rs,acl.rs,grants.rs}`; tests
   `crates/udx-sandbox/tests/{windows.rs,escape_windows.rs}`; `.github/workflows/ci.yml` (Windows test job: set
   `UNIDEX_TEST_OS_SIDE_EFFECTS=1`); `docs/decisions/0016-windows-sandbox.md`.
@@ -566,10 +566,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Platform notes.** Windows, CI only.
 - **Record.** 0016.
 
-### T12. Permissions, built-in asks, modes, the ask limiter and the command parser
+### Task 13: Permissions, built-in asks, modes, the ask limiter and the command parser
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T3, T5. **Runs beside.** T13, T14, T15, T9.
+- **Needs.** T3, T5. **Runs beside.** T14, T16, T17, T10.
 - **Files.** `crates/udx-engine/src/permissions/{mod.rs,rules.rs,builtin.rs,modes.rs,limiter.rs,card.rs}`,
   `crates/udx-tools/src/shell/parse.rs`; tests `crates/udx-engine/tests/permissions.rs`,
   `crates/udx-tools/tests/parse.rs`.
@@ -591,12 +591,12 @@ and T1c, which together hold every item; nothing else starts before all three me
   - `precedence_deny_beats_everything`, `outside_write_needs_folder_rule`, `unattended_ask_becomes_deny_with_no_card`.
   - `card_title_is_app_words_and_subject_escaped` (a model-supplied command with a right-to-left override).
 - **Done when.** The common commands; mutation testing of `crates/udx-engine/src/permissions/` and
-  `crates/udx-tools/src/shell/parse.rs` with no missed mutant (run locally; CI scope arrives with T31).
+  `crates/udx-tools/src/shell/parse.rs` with no missed mutant (run locally; CI scope arrives with T34).
 
-### T13. Context, labels, exposure, workspace trust, instruction files and egress
+### Task 14: Context, labels, exposure, workspace trust, instruction files and egress
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T3, T5. **Runs beside.** T12, T14, T15.
+- **Needs.** T3, T5. **Runs beside.** T13, T16, T17.
 - **Files.** `crates/udx-engine/src/context/{mod.rs,labels.rs,exposure.rs,instructions.rs,third_party.rs}`,
   `crates/udx-engine/src/{trust.rs,egress.rs}`; tests `crates/udx-engine/tests/{context.rs,trust.rs,egress.rs}`.
 - **Produces.** A 3.9.
@@ -616,15 +616,15 @@ and T1c, which together hold every item; nothing else starts before all three me
     shares trust; a different folder at a reused path after deletion does not).
 - **Done when.** The common commands; mutation testing of `egress.rs` locally with no missed mutant.
 
-### T14. Session log: writer, reader, redaction and the open-from-the-end path
+### Task 16: Session log: writer, reader, redaction and the open-from-the-end path
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T3, T4, T5. **Runs beside.** T12, T13, T15.
+- **Needs.** T3, T6, T5. **Runs beside.** T13, T14, T17.
 - **Files.** `crates/udx-engine/src/log/{mod.rs,writer.rs,reader.rs}`; tests `crates/udx-engine/tests/log.rs`;
   `docs/decisions/0019-session-log-format.md`.
-- **Produces.** A 3.11's `SessionLogWriter`, `SessionLogReader`; consumes A 4's record types (T2).
+- **Produces.** A 3.11's `SessionLogWriter`, `SessionLogReader`; consumes A 4's record types (T2a).
 - **Tests:**
-  - `log_round_trips_every_record_v1` (against T2's golden files).
+  - `log_round_trips_every_record_v1` (against T2a's golden files).
   - `log_redacts_before_write` (a key in a tool result, an argument and an error never reaches the file; the whole test
     root is scanned).
   - `log_file_owner_only_and_not_through_symlink` (P39).
@@ -638,10 +638,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Done when.** The common commands.
 - **Record.** 0019 (format v1, versioning rules, location, D8).
 
-### T15. Spend ledger
+### Task 17: Spend ledger
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit at the lower cap, 0.7M.
-- **Needs.** T3. **Runs beside.** T12, T13, T14.
+- **Needs.** T3. **Runs beside.** T13, T14, T16.
 - **Files.** `crates/udx-engine/src/spend.rs`; tests `crates/udx-engine/tests/spend.rs`;
   `docs/decisions/0023-spend-ledger.md`.
 - **Produces.** A 3.10.
@@ -656,10 +656,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 
 ## Wave 3: the engine loop, tools, CLI and view-model
 
-### T16. The engine loop, the prompt-based protocol and `NativeEngine`
+### Task 19: The engine loop, the prompt-based protocol and `NativeEngine`
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T6, T12, T13, T14, T15. **Runs beside.** T17, T22m.
+- **Needs.** T7, T13, T14, T16, T17. **Runs beside.** T20, T26.
 - **Files.** `crates/udx-engine/src/{engine.rs,protocol.rs}`,
   `crates/udx-engine/src/turn/{mod.rs,stream.rs,tools.rs,retry.rs,guards.rs,resume.rs}`,
   `crates/udx-engine/src/testing.rs`; tests
@@ -684,10 +684,10 @@ and T1c, which together hold every item; nothing else starts before all three me
     `huge_tool_args_refused`, `tool_call_ids_duplicated_handled`.
 - **Done when.** The common commands; the golden files reviewed line by line in the pull request.
 
-### T17. File tools and `todo`
+### Task 20: File tools and `todo`
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T5. **Runs beside.** T16, T18.
+- **Needs.** T5. **Runs beside.** T19, T21.
 - **Files.** `crates/udx-tools/src/files/{read.rs,write.rs,edit.rs,glob.rs,grep.rs}`, `crates/udx-tools/src/todo.rs`;
   tests `crates/udx-tools/tests/files.rs`.
 - **Produces.** `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `todo` (A 3.4).
@@ -699,10 +699,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   `todo_round_trip_in_log`.
 - **Done when.** The common commands.
 
-### T18. The shell tool
+### Task 21: The shell tool
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T9, T12. **Runs beside.** T17, T19.
+- **Needs.** T10, T13. **Runs beside.** T20, T22.
 - **Files.** `crates/udx-tools/src/shell/{mod.rs,run.rs}`; tests `crates/udx-tools/tests/shell.rs`.
 - **Produces.** `shell` (A 3.4).
 - **Tests:** `p7_forced_unavailable_shell_absent_and_refuses` (testing sandbox);
@@ -711,15 +711,15 @@ and T1c, which together hold every item; nothing else starts before all three me
   `simple_runs_direct_needs_shell_runs_fixed_shell`; `fixed_shell_has_no_startup_files` (a planted `.profile` and `ENV`
   do nothing); `p51_output_cut_with_marker`; `p8_rerun_wider_only_after_card`; `cwd_must_be_inside_workspace`;
   `secret_never_in_argv`.
-- **Done when.** The common commands; on macOS locally and on CI, on Linux in `sandbox-linux (profile)` once T10 has
-  merged, on Windows in the test job once T11 has merged (each later platform is added by the controller as a follow-up
+- **Done when.** The common commands; on macOS locally and on CI, on Linux in `sandbox-linux (profile)` once T11 has
+  merged, on Windows in the test job once T12 has merged (each later platform is added by the controller as a follow-up
   line in the ledger, not a code change, if the tests pass unchanged).
-- **Platform notes.** Until T10 and T11 merge, Linux and Windows run only the `testing` sandbox cases.
+- **Platform notes.** Until T11 and T12 merge, Linux and Windows run only the `testing` sandbox cases.
 
-### T19. `web_fetch` and its network policy
+### Task 22: `web_fetch` and its network policy
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T3b, T4, T13. **Runs beside.** T17, T18.
+- **Needs.** T4, T6, T14. **Runs beside.** T20, T21.
 - **Files.** `crates/udx-tools/src/web_fetch/{mod.rs,policy.rs,resolve.rs,html.rs,decode.rs}`,
   `crates/udx-tools/src/testing.rs`; tests `crates/udx-tools/tests/web_fetch.rs`.
 - **Produces.** `web_fetch`, `NetPolicy`, `FetchCaps`, `Resolver`, `testing::StubResolver` (A 3.5).
@@ -735,10 +735,10 @@ and T1c, which together hold every item; nothing else starts before all three me
     `net_no_connection_at_start` (constructing the tool and the engine opens no socket).
 - **Done when.** The common commands; mutation testing of `policy.rs` locally with no missed mutant.
 
-### T20. CLI: `chat`, `run`, `trust`, `key`
+### Task 24: CLI: `chat`, `run`, `trust`, `key`
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T16, T17, T18, T19. **Runs beside.** T21, T22.
+- **Needs.** T19, T20, T21, T22. **Runs beside.** T25, T27.
 - **Files.** `crates/udx-cli/src/{main.rs,chat.rs,run.rs,trust.rs,key.rs,tty.rs,render.rs,wire.rs}`; tests
   `crates/udx-cli/tests/{chat.rs,run.rs,trust.rs,key.rs,tty.rs}`.
 - **Produces.** A 3.12 verbs `chat`, `run`, `trust`, `key`; `udx_cli::tty`. Calls `harden_process` first in `main`.
@@ -755,13 +755,13 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Done when.** The common commands; `unidex chat` and `unidex run` against the mock provider demonstrated in the pull
   request with a transcript (no real key).
 
-### T21. CLI: `config` and `doctor` (acceptance rows C1 and C3)
+### Task 25: CLI: `config` and `doctor` (acceptance rows C1 and C3)
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit at the lower cap, 0.7M.
-- **Needs.** T3, T4, T6, T9. **Runs beside.** T20.
+- **Needs.** T3, T6, T7, T10. **Runs beside.** T24.
 - **Files.** `crates/udx-cli/src/{config.rs,doctor.rs}`; tests `crates/udx-cli/tests/{config.rs,doctor.rs}`.
-- **Produces.** A 3.12 verbs `config` and `doctor`. (T20 owns `main.rs`; T21's subcommands are registered there by a
-  stub T2 created, so T21 edits only its own files.)
+- **Produces.** A 3.12 verbs `config` and `doctor`. (T24 owns `main.rs`; T25's subcommands are registered there by a
+  stub T2a created, so T25 edits only its own files.)
 - **Tests:** `c1_list_shows_every_section_with_source`; `c1_dry_run_prints_diff_and_writes_nothing` (file hash
   unchanged); `c1_unset_restores_default`; `c3_doctor_warns_unknown_key_with_line`;
   `p22_host_change_from_tool_or_headless_refused`; `p22_host_change_clears_keychain_entry` (memory store);
@@ -769,10 +769,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   `doctor_offline_by_default`; `doctor_json_stable`.
 - **Done when.** The common commands.
 
-### T22m. Markdown model, streaming document and the prepared-message cache
+### Task 26: Markdown model, streaming document and the prepared-message cache
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit at the lower cap, 0.7M.
-- **Needs.** T2. **Runs beside.** T16, T17.
+- **Needs.** T2a. **Runs beside.** T19, T20.
 - **Files.** `crates/udx-ui-model/src/{markdown.rs,stream_doc.rs,cache.rs}`; tests
   `crates/udx-ui-model/tests/{markdown.rs,stream_doc.rs,cache.rs}`.
 - **Produces.** A 3.13 `MessageBody`, `Block`, `Inline`, `LinkRef`, `ImageRef`, `StreamDoc`, `BodyDelta`,
@@ -784,10 +784,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   invalid UTF-8 replaced, a table with 10,000 columns): no panic and bounded time.
 - **Done when.** The common commands.
 
-### T22. Chat view-model: screen, thread, cards, notices and status
+### Task 27: Chat view-model: screen, thread, cards, notices and status
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T22m, T12. **Runs beside.** T20, T21.
+- **Needs.** T26, T13. **Runs beside.** T24, T25.
 - **Files.** `crates/udx-ui-model/src/{screen.rs,thread.rs,card.rs,notice.rs,status.rs,actions.rs}`; tests
   `crates/udx-ui-model/tests/{screen.rs,cards.rs,notices.rs,p60.rs}`.
 - **Produces.** A 3.13 `ChatScreen`, `ChatAction`, `Effect`, `ScreenChange`, `StatusVm`, `CardQueue`, `NoticeGate`,
@@ -801,10 +801,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   `streaming_delta_updates_one_row`; `cancel_effect_sent`.
 - **Done when.** The common commands; the view-model tests run on three CI platforms (design 10.1).
 
-### T30. The evaluation harness and the M1 task set
+### Task 28: The evaluation harness and the M1 task set
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
-- **Needs.** T16, T17, T18, T19. **Runs beside.** wave-4 tasks.
+- **Needs.** T19, T20, T21, T22. **Runs beside.** wave-4 tasks.
 - **Files.** `crates/udx-evals/src/{task.rs,run.rs,check.rs,report.rs}`, `crates/udx-evals/src/bin/udx-evals.rs`,
   `crates/udx-evals/tasks/<id>/{task.toml,workspace/,mock-script.json}` for the 12 tasks of A 3.15; tests
   `crates/udx-evals/tests/suite_mock.rs`.
@@ -818,13 +818,13 @@ and T1c, which together hold every item; nothing else starts before all three me
 
 ## Wave 4: the app, its tests and its packages
 
-### T23. App foundations
+### Task 29: App foundations
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T16, T22. **Runs beside.** T30.
+- **Needs.** T19, T27. **Runs beside.** T28.
 - **Files.** `crates/udx-app/src/{main.rs,app.rs,bridge.rs,theme.rs,fonts.rs,registry.rs,gpu.rs,workspace.rs}`; tests
   `crates/udx-app/tests/{gpu.rs,registry.rs,bridge.rs}`.
-- **Produces.** The binary's entry point (parses every M1 flag of A 3.13 and calls the `automation` and `perf` hooks T2
+- **Produces.** The binary's entry point (parses every M1 flag of A 3.13 and calls the `automation` and `perf` hooks T2a
   declared, compiled only with their features; refuses them with exit 2 otherwise), the Tokio-to-GPUI bridge (decision
   0008's batch-draining pattern from the cookbook's `streaming_list`), the theme from the Electron app's tokens for this
   window, named fonts with fallbacks (A D17), `ElementRegistry` and `tagged`, `is_software_renderer`, the "Open folder"
@@ -834,31 +834,31 @@ and T1c, which together hold every item; nothing else starts before all three me
   while idle); `release_build_refuses_test_flags` (exit 2 for each flag); `open_folder_home_needs_confirmation`
   (view-model path).
 - **Done when.** The common commands; the window opens on macOS for the builder's own scripted check (no screen capture
-  of the person's desktop; the frame comes from the `ui` jobs once T28 exists).
+  of the person's desktop; the frame comes from the `ui` jobs once T31 exists).
 - **Platform notes.** Linux fonts: the face GPUI logs on the runner is recorded in the pull request (decision 0013 left
   it unverified).
 
-### T26. The chat window
+### Task 30: The chat window
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T23. **Runs beside.** T29.
+- **Needs.** T29. **Runs beside.** T33.
 - **Files.** `crates/udx-app/src/chat/{window.rs,thread_list.rs,composer.rs,cards.rs,status.rs,sessions.rs}`,
   `crates/udx-app/src/render/{mod.rs,minimal.rs}`; tests `crates/udx-app/tests/chat_view.rs`.
 - **Produces.** The M1 chat window of A 3.13 on GPUI's `list` (decision 0008): session list, message rows and tool rows,
   composer with text input (the cookbook's `text_input` pattern), ask cards with the guard interval, the status bar, the
   trust banner, the prepared-message cache wired to `PreparedCache`. Message bodies go through the `MessageBodyRenderer`
-  trait with a minimal renderer (plain paragraphs as styled text), replaced in T26b.
+  trait with a minimal renderer (plain paragraphs as styled text), replaced in T38.
 - **Tests** (`#[gpui::test]` view tests): `card_appears_and_return_inside_guard_does_nothing`;
   `composer_send_dispatches_action`; `streaming_row_remeasured_only`;
   `cache_evicts_offscreen_rows_and_restores_on_return`; `status_shows_sandbox_reason`.
-- **Done when.** The common commands; the `ui (macos)` frame artifact attached (after T28) or a `#[gpui::test]`
+- **Done when.** The common commands; the `ui (macos)` frame artifact attached (after T31) or a `#[gpui::test]`
   rendering check until then.
 
-### T28. The automation socket and the end-to-end UI jobs
+### Task 31: The automation socket and the end-to-end UI jobs
 
 - **Role and budget.** Sonnet test author, Opus builder (the endpoint's security properties), Opus reviewer. CI or
   packaging, 1.3M.
-- **Needs.** T26. **Runs beside.** T29.
+- **Needs.** T30. **Runs beside.** T33.
 - **Files.** `crates/udx-app/src/automation/{mod.rs,endpoint_unix.rs,endpoint_windows.rs,verbs.rs,capture.rs}`;
   `crates/udx-app/tests/automation_endpoint.rs`; the driver in `crates/udx-app/tests/e2e/` (a Rust test that starts the
   test build and speaks the protocol); `.github/workflows/ui.yml`.
@@ -878,10 +878,10 @@ and T1c, which together hold every item; nothing else starts before all three me
 - **Done when.** The common commands; all four `ui` jobs green on the task's pull request.
 - **Repository settings.** The maintainer adds the four `ui` checks to the required checks.
 
-### T29. Nightly packages of the real app and the release check
+### Task 33: Nightly packages of the real app and the release check
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. CI or packaging, 1.3M.
-- **Needs.** T23, T10 (the helper and the AppArmor profile file). **Runs beside.** T26, T28 (not T31).
+- **Needs.** T29, T11 (the helper and the AppArmor profile file). **Runs beside.** T30, T31 (not T34).
 - **Files.** `.github/workflows/nightly.yml`; `packaging/Packager.toml`; `packaging/linux/deb/{postinst,prerm}`;
   `packaging/macos/entitlements.toml`; `crates/udx-app/Cargo.toml` (`[package.metadata.deb]` only);
   `xtask/src/{main.rs,release_check.rs}`; tests `xtask/tests/release_check.rs`;
@@ -907,10 +907,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   (gate report, section d).
 - **Record.** 0022.
 
-### T31. Perf instrumentation, the gate's scenarios, CI perf checks and the mutation scope
+### Task 34: Perf instrumentation, the gate's scenarios, CI perf checks and the mutation scope
 
 - **Role and budget.** Sonnet test author, Opus builder (GPUI profiler use), Opus reviewer. CI or packaging, 1.3M.
-- **Needs.** T26. **Runs beside.** T28 (not T29).
+- **Needs.** T30. **Runs beside.** T31 (not T33).
 - **Files.** `crates/udx-app/src/perf/{mod.rs,scenarios.rs,recorder.rs}`; `xtask/src/{main.rs,bench.rs,fixture.rs}`;
   `perf/ceilings.toml`; `.github/workflows/ci.yml` (job `perf-checks`; `mutants` scope and path filter); tests
   `xtask/tests/fixture.rs`.
@@ -927,16 +927,16 @@ and T1c, which together hold every item; nothing else starts before all three me
   the 30-minute limit (the maintainer then updates the required check names).
 - **Tests:** `fixture_conversion_counts`; `bench_ceiling_exceeded_fails`; `perf_marker_present_only_with_feature`.
 - **Done when.** The common commands; `perf-checks` green; the scenarios run on the development Mac with the perf build
-  and write their files (the numbers are T33's).
+  and write their files (the numbers are T41's).
 - **Repository settings.** The maintainer adds `perf-checks` to the required checks.
 
 ## Wave 5: the scroll target and the message bodies
 
-### T24. Measurement: what makes first-visit frames slow
+### Task 36: Measurement: what makes first-visit frames slow
 
 - **Role and budget.** Opus builder, Sonnet reviewer. Trial, 1.3M. Throwaway measurement code stays on the task's
-  branch; only the findings merge (into record 0020's draft, which T27 completes).
-- **Needs.** T31. **Runs beside.** T25.
+  branch; only the findings merge (into record 0020's draft, which T39 completes).
+- **Needs.** T34. **Runs beside.** T37.
 - **Files.** Merged: `docs/decisions/0020-shaped-text-cache.md` (status "draft: measurement"), nothing else.
 - **What it measures** (A D4; decision 0008 said the cause is likely, not proven): on the development Mac (100 Hz
   display, the reference machine), the perf build's scroll scenarios at 2,000 and 10,000 px/s on the 5,000-message
@@ -944,33 +944,33 @@ and T1c, which together hold every item; nothing else starts before all three me
   with every row's markdown prepared and its text shaped and kept before the scroll. Presented-frame intervals over 1.5
   and 2 times the refresh interval for each, three runs each, the machine's load recorded.
 - **Output.** Which share of slow frames each step removes; whether a persistent shaped-text cache is expected to meet
-  the target; if not, what else (row layout, image placeholders, tool rows) the measurement implicates. T27 is re-scoped
-  from it before T27 starts.
+  the target; if not, what else (row layout, image placeholders, tool rows) the measurement implicates. T39 is re-scoped
+  from it before T39 starts.
 - **Done when.** The record's draft holds the tables and the runs' commands; the reviewer reproduces one run.
 
-### T25. Measurement: the widget kit for message bodies (gate question 23)
+### Task 37: Measurement: the widget kit for message bodies (gate question 23)
 
 - **Role and budget.** Opus builder, Sonnet reviewer. Trial, 1.3M. Its code (a `kit-renderer` implementation of
   `MessageBodyRenderer` in the kit's cached form) stays on its branch; only the record merges.
-- **Needs.** T31. **Runs beside.** T24.
+- **Needs.** T34. **Runs beside.** T36.
 - **Files.** Merged: `docs/decisions/0021-widget-kit-for-message-bodies.md` (status "proposed: awaiting the
   maintainer").
 - **What it measures** (decision 0008's four, all on the development Mac with the perf build): the cached form in the
   scroll, jump, stream and resize scenarios; selection and copy within a message and across messages in the virtualised
   list; link activation through the opener; and that a long message whose parse lands a frame later does not shift the
   rows around it. Also: the crates the kit adds and `cargo deny` on them (0BSD is allowed; decision 0007).
-- **What T26b needs from the maintainer's answer** (A section 9): one word, "adopt" or "own renderer". The record states
+- **What T38 needs from the maintainer's answer** (A section 9): one word, "adopt" or "own renderer". The record states
   the build team's recommendation from the numbers; the maintainer's answer is written into it by the controller.
 - **Done when.** The record holds the numbers and the recommendation; the maintainer has answered.
 - **Record.** 0021.
 
-### T26b. Message bodies
+### Task 38: Message bodies
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T26, T22m, and the maintainer's answer to question 23 (T25). **Runs beside.** nothing compiling in
+- **Needs.** T30, T26, and the maintainer's answer to question 23 (T37). **Runs beside.** nothing compiling in
   `udx-app`.
 - **Files.** `crates/udx-app/src/render/{plain.rs,blocks.rs,selection.rs,links.rs}` (own renderer) or
-  `crates/udx-app/src/render/kit.rs` brought from T25's branch (kit adopted; then `crates/udx-app/Cargo.toml` gains
+  `crates/udx-app/src/render/kit.rs` brought from T37's branch (kit adopted; then `crates/udx-app/Cargo.toml` gains
   `gpui-base` behind `kit-renderer` as a sequenced dependency change approved by the controller), and
   `crates/udx-app/src/render/minimal.rs` removed; tests `crates/udx-app/tests/bodies.rs`.
 - **Produces.** The message-body renderer behind `MessageBodyRenderer`: paragraphs, headings, lists, quotes, tables,
@@ -982,10 +982,10 @@ and T1c, which together hold every item; nothing else starts before all three me
   `streaming_body_appends_without_shifting_rows_above`; `rtl_and_cjk_runs_render_without_panic`.
 - **Done when.** The common commands; the `ui (macos)` frame artifact attached.
 
-### T27. The persistent shaped-text cache
+### Task 39: The persistent shaped-text cache
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T24, T26b. **Runs beside.** T32.
+- **Needs.** T36, T38. **Runs beside.** T40.
 - **Files.** `crates/udx-app/src/shaped_cache.rs`, `crates/udx-app/src/render/plain.rs` (use the cache); tests
   `crates/udx-app/tests/shaped_cache.rs`; `docs/decisions/0020-shaped-text-cache.md` (completed).
 - **Produces.** `ShapedTextCache` (A 3.13), its budget shared with the prepared-message cache's memory target.
@@ -999,22 +999,22 @@ and T1c, which together hold every item; nothing else starts before all three me
 
 ## Wave 6: records and the gate
 
-### T32. Threat model, `SECURITY.md` and design updates
+### Task 40: Threat model, `SECURITY.md` and design updates
 
 - **Role and budget.** Sonnet builder, Opus reviewer. Document, 0.6M.
-- **Needs.** The security tasks merged (T3 to T22). **Runs beside.** anything.
+- **Needs.** The security tasks merged (T3 to T27). **Runs beside.** anything.
 - **Files.** `docs/security/THREAT-MODEL.md`, `SECURITY.md`, `docs/design/specs/2026-11-16-unidex-rust-design.md`
   (sections 5.11 and 8 only, and only what the maintainer's recorded decisions and decision records 0015 to 0026 imply:
   the per-platform sandbox mechanisms, the Linux and Windows section 8 exceptions, the proposals moved into 5.11),
   `docs/acceptance/CHECKLIST.md` (C1 and C3: milestone "M1", the "?" removed).
 - **What it does.** Threat model 9: each M1 control marked built or tested with the test's name; each of the 31
   proposals moved into design 5.11 and its "Proposed" mark dropped; residuals that M1 found (D2's sweep, D3's tool
-  compatibility, D15's case folding, P10's compatibility list from T30 and T11) added to section 7.
+  compatibility, D15's case folding, P10's compatibility list from T28 and T12) added to section 7.
 - **Done when.** The privacy scan; a reviewer checks every row of the architecture file's section 6 against the threat
   model's update. It must not overwrite the maintainer's decisions recorded in the design by the other session of
   2026-11-17; it starts from the design as it stands on `main`.
 
-### T33. The M1 gate
+### Task 41: The M1 gate
 
 - **Role and budget.** Opus drafter, Opus security reviewer (the gate's security review), Sonnet reviewer of the
   documents. Research document 1.2M plus the security review 0.5M: 1.7M.
@@ -1031,13 +1031,13 @@ Per-task caps, in millions of tokens:
 
 | Wave | Tasks and caps | Sum |
 |---|---|---|
-| 0 | T1a 1.0, T1c 1.0, T1b 1.3, T2 1.3 | 4.6 |
-| 1 | T3 1.0, T3b 0.7, T4 1.0, T5 1.3, T6 1.0 | 5.0 |
-| 2 | T7 1.0, T8 1.0, T9 1.3, T10 1.3, T11 1.3, T12 1.3, T13 1.3, T14 1.0, T15 0.7 | 10.2 |
-| 3 | T16 1.3, T17 1.0, T18 1.0, T19 1.0, T20 1.0, T21 0.7, T22m 0.7, T22 1.0, T30 1.0 | 8.7 |
-| 4 | T23 1.3, T26 1.3, T28 1.3, T29 1.3, T31 1.3 | 6.5 |
-| 5 | T24 1.3, T25 1.3, T26b 1.3, T27 1.3 | 5.2 |
-| 6 | T32 0.6, T33 1.7 | 2.3 |
+| 0 | T1a 1.0, T1b 1.0, T1c 1.3, T2a 1.3 | 4.6 |
+| 1 | T3 1.0, T4 0.7, T6 1.0, T5 1.3, T7 1.0 | 5.0 |
+| 2 | T8 1.0, T9 1.0, T10 1.3, T11 1.3, T12 1.3, T13 1.3, T14 1.3, T16 1.0, T17 0.7 | 10.2 |
+| 3 | T19 1.3, T20 1.0, T21 1.0, T22 1.0, T24 1.0, T25 0.7, T26 0.7, T27 1.0, T28 1.0 | 8.7 |
+| 4 | T29 1.3, T30 1.3, T31 1.3, T33 1.3, T34 1.3 | 6.5 |
+| 5 | T36 1.3, T37 1.3, T38 1.3, T39 1.3 | 5.2 |
+| 6 | T40 0.6, T41 1.7 | 2.3 |
 | | This architect pass (the gate report's line) | 0.5 |
 | | **Total of caps** | **43.0** |
 
@@ -1045,14 +1045,14 @@ Arithmetic: 4.6 + 5.0 + 10.2 + 8.7 + 6.5 + 5.2 + 2.3 + 0.5 = 43.0M, for 38 tasks
 
 Against the gate report's proposed M1 budget of 21.9M (check-in at 11M): the caps sum to 43.0M, 21.1M more. The gate
 report's figure was a reading of design 6 before the maintainer's answers, and every task it listed has a counterpart
-here at the same cap (the engine loop T16, streaming into GPUI T23, the three sandboxes T9 to T11, permission cards T12,
-the chat window T26; the two providers T7 and T8, file tools T17, shell and web tools T18, the session log T14,
-`unidex chat` T20, the mock provider and golden tests T6, the evaluation harness T30; nightlies T29 and the automation
-socket T28; the threat model update T32). The 21.1M on top is: the first task, T1a, T1b and T1c (3.3M); security work
-from the 31 accepted proposals that design 6 does not list as tasks, the file guard T5, labelling, trust and egress T13,
-secrets and the child environment T4, display, opener and address rules T3b, the spend ledger T15 and `web_fetch` as its
-own task T19 (6.0M); the contracts T2 (1.3M); core utilities, config and doctor and the view-model, T3, T21, T22m and
-T22 (3.4M); the scroll target and question 23, T24, T25, T26b and T27 (5.2M); performance instrumentation T31 (1.3M);
+here at the same cap (the engine loop T19, streaming into GPUI T29, the three sandboxes T10 to T12, permission cards T13,
+the chat window T30; the two providers T8 and T9, file tools T20, shell and web tools T21, the session log T16,
+`unidex chat` T24, the mock provider and golden tests T7, the evaluation harness T28; nightlies T33 and the automation
+socket T31; the threat model update T40). The 21.1M on top is: the first task, T1a, T1c and T1b (3.3M); security work
+from the 31 accepted proposals that design 6 does not list as tasks, the file guard T5, labelling, trust and egress T14,
+secrets and the child environment T6, display, opener and address rules T4, the spend ledger T17 and `web_fetch` as its
+own task T22 (6.0M); the contracts T2a (1.3M); core utilities, config and doctor and the view-model, T3, T25, T26 and
+T27 (3.4M); the scroll target and question 23, T36, T37, T38 and T39 (5.2M); performance instrumentation T34 (1.3M);
 and the gate at a realistic cap, 1.7M instead of 0.6M plus 0.5M (0.6M). 3.3 + 6.0 + 1.3 + 3.4 + 5.2 + 1.3 + 0.6 = 21.1M.
 
 Caps are not forecasts (section f). M0's tasks used 64 % of the caps the same rule would have given them: the rule
@@ -1065,11 +1065,11 @@ or about 30.3M if the gate costs what M0's did (3.7M).
 **Proposal for the maintainer:** a milestone cap of 30M, with check-ins at 11M (the gate report's point) and at 22M (the
 old cap), each task stopped at its own cap. Reductions that keep the scope, with what each costs:
 
-- Merge T24 into T27 as its first phase (saves 1.3M of cap): the measurement then shares the cache task's budget and
+- Merge T36 into T39 as its first phase (saves 1.3M of cap): the measurement then shares the cache task's budget and
   stop point.
-- Merge T3b into T3 and T22m into T22 (saves 1.4M): larger pull requests.
-- Merge T21 into T20 and T15 into T14 (saves 1.4M): larger pull requests in two crates already shared.
-- Move T31's mutation-scope widening to M2 (saves little; design 10.1 asks for it).
+- Merge T4 into T3 and T26 into T27 (saves 1.4M): larger pull requests.
+- Merge T25 into T24 and T17 into T16 (saves 1.4M): larger pull requests in two crates already shared.
+- Move T34's mutation-scope widening to M2 (saves little; design 10.1 asks for it).
 - Nothing in the security set can move without the maintainer reopening question 2.
 
 Together the three merges save 4.1M of caps (43.0M becomes 38.9M) and lower the forecast to about 25.7M
@@ -1079,24 +1079,24 @@ maintainer can decide (question 2's proposals, or the scroll target's cache work
 ## Order of work
 
 The waves above, in order; within a wave, the controller runs at most two compiling tasks at once, prefers the tasks
-other tasks wait on (T5, T9, T12, T13 in wave 2; T16 in wave 3; T23 and T26 in wave 4), and runs document and review
-work beside them. Question 23 is put to the maintainer as soon as T25's record is ready, so the answer arrives before
-T26b. The gate's prerequisites (a hosted key with a spend cap; a local model server with one small model) are asked for
-when T30 merges, so they are in place by T33.
+other tasks wait on (T5, T10, T13, T14 in wave 2; T19 in wave 3; T29 and T30 in wave 4), and runs document and review
+work beside them. Question 23 is put to the maintainer as soon as T37's record is ready, so the answer arrives before
+T38. The gate's prerequisites (a hosted key with a spend cap; a local model server with one small model) are asked for
+when T28 merges, so they are in place by T41.
 
 ## What M1's gate will measure, and how
 
 | Measure | How | Where |
 |---|---|---|
 | Start-up | Perf build; launcher clock before spawn to the first presented frame showing the chat window's session list and composer; one warm-up, ten launches, median and range; a first launch after a build reported separately | Development Mac, 100 Hz display |
-| Idle | 30 s after the home screen, 60 s sampled with `top -l 61 -s 1` (IDLEW and CPU per process), five runs; the app's own idle counter must read zero; compared with the empty-window floor T31 measured | Development Mac |
+| Idle | 30 s after the home screen, 60 s sampled with `top -l 61 -s 1` (IDLEW and CPU per process), five runs; the app's own idle counter must read zero; compared with the empty-window floor T34 measured | Development Mac |
 | Idle memory | `footprint -p` summed over the app's processes at the end of each idle window; and after a full scroll of the 5,000-message thread | Development Mac |
 | Scrolling | Perf build scenarios at 2,000 px/s (10 s) and 10,000 px/s (5 s) from five start points, two launches; presented-frame intervals from GPUI's profiler; counts over 1.5 and 2 times the refresh interval, the median, 95th and 99th percentiles and the longest | Development Mac |
 | First token | Perf build with the scripted mock provider: first delta 200 ms and 2 s after the prompt; engine read time to the first presented frame containing it; five turns in a new thread and five in the 5,000-message thread | Development Mac |
 | Opening the long thread | Perf build: the open action to the first frame showing the thread | Development Mac |
 | Download size | Byte size of the nightly's macOS arm64 `.dmg`; the nightly's size check | CI (nightly) |
 | Core benchmarks, idle counter, size | `perf-checks`, the `ui` jobs' idle check, the nightly size check | CI, every change |
-| Security | Every test of the architecture file's section 6 green on its platforms; a security review of the merged code against the 31 proposals; the threat model updated (T32) | CI and review |
+| Security | Every test of the architecture file's section 6 green on its platforms; a security review of the merged code against the 31 proposals; the threat model updated (T40) | CI and review |
 | Acceptance | C1 and C3 tests green | CI |
 | First evaluation run | `udx-evals` M1 suite: mock in CI; one hosted model and one small local model on the development Mac after the maintainer's approvals; pass rate, invalid tool calls, turns, cost, asks (and P14's ask rates, which set the cap defaults) | CI and development Mac |
 | Packages | Nightly from the gate's commit green on three platforms with the release check | CI (nightly) |
@@ -1106,22 +1106,22 @@ Every frame figure in the report carries the caveat that a 120 Hz laptop leaves 
 
 ## Risks most likely to blow the budget (most likely first)
 
-1. **The Linux and Windows sandboxes are CI-only work on unknown runner behaviour** (T10, T11). Whether the runner
+1. **The Linux and Windows sandboxes are CI-only work on unknown runner behaviour** (T11, T12). Whether the runner
    restricts user namespaces, the AppArmor profile syntax, cgroup delegation, AppContainer access entries and which
    tools run inside an AppContainer can each cost a CI round of ten or more minutes, and M0's trials show fix rounds of
    140k to 614k tokens. Mitigation: each task's "verify first" step runs on CI before the build; the controller stops a
    task at its cap rather than funding another round.
-2. **Fix rounds from security reviews across many security tasks** (T5, T9 to T19). M0's reviews caught real holes in
+2. **Fix rounds from security reviews across many security tasks** (T5, T10 to T22). M0's reviews caught real holes in
    every security-relevant task (section f, "What the reviews caught"); a fix round is not funded by the 20 % margin.
    Mitigation: test authors write the threat model's tests first, so most findings are caught before review.
-3. **The scroll target** (T24, T26b, T27). If shaping is not the main cause, the cache does not meet "at most 1 in
+3. **The scroll target** (T36, T38, T39). If shaping is not the main cause, the cache does not meet "at most 1 in
    1,000" and further work (row layout, tool rows) is unplanned; on a 120 Hz display the margin shrinks further.
-   Mitigation: T24 measures before T27 is built, and T27 is re-scoped from its numbers.
-4. **The gate's own cost** (T33). M0's gate cost 3.7M against 0.6M planned; 1.7M is capped here.
-5. **GPUI churn in the app tasks** (T23, T26, T28, T31): pre-1.0 APIs, the test-support and profiler features, the
+   Mitigation: T36 measures before T39 is built, and T39 is re-scoped from its numbers.
+4. **The gate's own cost** (T41). M0's gate cost 3.7M against 0.6M planned; 1.7M is capped here.
+5. **GPUI churn in the app tasks** (T29, T30, T31, T34): pre-1.0 APIs, the test-support and profiler features, the
    Wayland hard check and three-platform UI jobs; mitigated by the cookbook patterns and the pinned source.
 6. **Contract churn**: a signature in the architecture file that proves wrong in a later task costs a controller
-   amendment and rework in every task built on it. T2's Opus builder and review are where this is cheapest to catch.
+   amendment and rework in every task built on it. T2a's Opus builder and review are where this is cheapest to catch.
 7. **Hosted macOS runner availability** (M0's repeated capacity messages) delays merges and re-runs.
-8. **Question 23 answered late** delays T26b and T27; T26's minimal renderer keeps the rest moving.
+8. **Question 23 answered late** delays T38 and T39; T30's minimal renderer keeps the rest moving.
 9. **Usage-limit stops** (gate report, "Pacing"): large Opus agents run one at a time, re-reviews wait for fix rounds.
