@@ -1,3 +1,5 @@
+mod governed;
+
 use clap::{Args, Parser, Subcommand};
 use std::process::ExitCode;
 use xtask::privacy::{Mode, Options};
@@ -13,11 +15,21 @@ struct Cli {
 enum Cmd {
     /// Scan for personal information. Exit 0 clean, 1 findings, 2 error.
     Privacy(PrivacyArgs),
+    /// Flag the governed files among a pull request's changed files.
+    /// Exit 0 whether or not any are flagged, 1 on an error.
+    Governed(GovernedArgs),
     /// Manage git hooks.
     Hooks {
         #[command(subcommand)]
         action: HooksCmd,
     },
+}
+
+#[derive(Args)]
+struct GovernedArgs {
+    /// A file of changed paths, each ended by a NUL byte.
+    #[arg(long, value_name = "LIST_FILE")]
+    files: std::path::PathBuf,
 }
 
 #[derive(Subcommand)]
@@ -72,6 +84,19 @@ fn main() -> ExitCode {
                 git_message: a.git_message,
             });
             ExitCode::from(code as u8)
+        }
+        Cmd::Governed(a) => {
+            let summary = std::env::var_os("GITHUB_STEP_SUMMARY")
+                .filter(|v| !v.is_empty())
+                .map(std::path::PathBuf::from);
+            let mut out = std::io::stdout().lock();
+            match governed::run(&a.files, summary.as_deref(), &mut out) {
+                Ok(_) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("governed: {e}");
+                    ExitCode::from(1)
+                }
+            }
         }
         Cmd::Hooks {
             action: HooksCmd::Install,

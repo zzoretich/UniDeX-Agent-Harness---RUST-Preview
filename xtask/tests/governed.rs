@@ -89,6 +89,13 @@ fn governed_list_matches_record() {
         "deny.toml",
         ".cargo/config.toml",
         ".cargo/nested/deeper/x.toml",
+        // Widenings ruled by the controller (record 0025): a `.cargo` folder
+        // at any depth, and everything under `.github/`.
+        "crates/x/.cargo/config.toml",
+        "crates/udx-core/.cargo/config.toml",
+        ".github/CODEOWNERS",
+        ".github/ISSUE_TEMPLATE/bug.md",
+        ".github/actions/setup/nested/action.yml",
     ];
     // Near misses: the brief's two, and paths just outside a pattern.
     let clean = [
@@ -110,11 +117,8 @@ fn governed_list_matches_record() {
         ".gitleaks.toml.old",
         "crates/udx-core/deny.toml",
         "deny.toml.sample",
-        ".github/CODEOWNERS",
-        ".github/ISSUE_TEMPLATE/bug.md",
         "github/workflows/ci.yml",
         ".cargo-extra/config.toml",
-        "crates/udx-core/.cargo/config.toml",
         "Cargo.toml",
         "README.md",
     ];
@@ -225,4 +229,28 @@ fn governed_fails_on_unreadable_list() {
     let r = run_on(dir.path(), dir.path(), true);
     assert!(matches!(r.code, Some(c) if c != 0), "folder: {:?}", r.code);
     assert!(flagged(&r.stdout).is_empty());
+}
+
+#[test]
+fn governed_names_escaped_in_summary() {
+    let nasty = ".cargo/a|b`c`<img src=x>\nd";
+    let r = run_with(&[nasty, "deny.toml"], true);
+    assert_eq!(r.code, Some(0), "stdout: {}", r.stdout);
+    let summary = r.summary.expect("job summary file was not written");
+    assert!(!summary.contains('<'), "raw < in summary:\n{summary}");
+    assert!(!summary.contains('\r'), "raw CR in summary");
+    for l in summary.lines() {
+        assert!(
+            l.is_empty() || l.starts_with('|') || l.starts_with('#'),
+            "stray summary line: {l:?}"
+        );
+    }
+    // Header, separator and one row for each of the two flagged names.
+    let rows: Vec<&str> = summary.lines().filter(|l| l.starts_with('|')).collect();
+    assert_eq!(rows.len(), 4, "summary:\n{summary}");
+    // Each row has exactly its two cells: three unescaped pipes, no more.
+    for row in rows {
+        assert_eq!(row.matches('|').count(), 3, "row: {row:?}");
+    }
+    assert!(!summary.contains('`'), "raw backtick in summary");
 }
