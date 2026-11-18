@@ -67,7 +67,8 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          set -eu
+          # pipefail: a failed API call must fail the step, not leave an empty list.
+          set -euo pipefail
           # All pages; each name is written followed by a NUL byte, so a name
           # holding a newline stays one name. The file is data and is never
           # interpolated into a command.
