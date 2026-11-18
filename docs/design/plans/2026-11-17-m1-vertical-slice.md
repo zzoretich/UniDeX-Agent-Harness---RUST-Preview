@@ -138,20 +138,24 @@ Every builder's brief carries this section and the Review Focus with the task's 
 ## Review Focus
 
 The five input classes or failure modes most likely to bite a person using M1 that no single task's tests would
-otherwise exercise, most likely first. Each has a named test in the task that owns the integration (T23, which wires
-the real tools, sandbox and supervisor into the engine); reviewers of every task keep them in mind.
+otherwise exercise, most likely first. Each has a named test in a task whose Needs cover everything that test uses:
+T23 (the real tools, sandbox and supervisor wired into the engine) for the engine side, T24 for the CLI's output, and
+T9 for the local provider's half of item 4. Reviewers of every task keep them in mind.
 
 1. **Unusual workspace paths** (spaces, quotes, parentheses, non-ASCII names in NFC and NFD, Windows paths past 260
-   characters) through the guard, the sandbox profile's parameters, the session-log key and folder, and the CLI's
-   escaped output: `review_focus_hostile_workspace_paths` (T23).
+   characters) through the guard, the sandbox profile's parameters and the session-log key and folder:
+   `review_focus_hostile_workspace_paths` (T23); and through the CLI's escaped output:
+   `review_focus_hostile_workspace_paths_cli` (T24, which needs T23 and owns `udx_cli`).
 2. **Cancel or crash in the middle of a turn, then resume**: a write half done, a command still running, a spend
    reservation open, a truncated last log line: `review_focus_cancel_then_resume` (T23).
 3. **Large real repositories** (100,000 files with `node_modules` and git-ignored secret files): the per-command
    deny-list scan and masks, glob and grep, and start-up of a sandboxed command stay bounded and correct:
    `review_focus_large_workspace` (T23; T12 also measures Windows access-entry propagation on such a tree).
 4. **A small local model's quirks**: a small context window, tool calls without ids, output that imitates the prompt
-   protocol's delimiters, a prompt the server silently cut: `review_focus_local_model_quirks` (T23, Ollama fixtures
-   through the real engine).
+   protocol's delimiters, a prompt the server silently cut. Split at the `StreamEvent` contract (A 3.2), so each half
+   sits in a task that can see what it uses: `review_focus_local_model_quirks_provider` (T9, Ollama fixtures through
+   `OllamaProvider`: what the provider emits for each quirk) and `review_focus_local_model_quirks` (T23, the scripted
+   mock provider emitting exactly that through the real engine and tools).
 5. **Two front ends at once on one workspace** (the app and `unidex chat`, or two CLI sessions): the shared spend
    ledger, the trust file and the session list: `review_focus_two_front_ends` (T23, two processes).
 
@@ -239,10 +243,12 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
 - **Needs.** Nothing. **Runs beside.** T1a, T1c.
-- **Files.** Modify `crates/udx-core/src/paths.rs`, `crates/udx-core/Cargo.toml` (drop the dev-dependency on
-  `udx-test-support`; add the `testing` feature), `crates/udx-core/tests/paths.rs`, `crates/udx-test-support/Cargo.toml`
-  (drop `udx-core`), `crates/udx-test-support/src/lib.rs`. Create `crates/udx-core/tests/choke_point.rs`,
-  `crates/udx-test-support/src/stand_in.rs` (the stand-in's API as stubs naming T7).
+- **Files.** Modify `crates/udx-core/src/paths.rs`, `crates/udx-core/Cargo.toml` (add the `testing` feature; the
+  dev-dependency on `udx-test-support` stays, since once that crate no longer depends on `udx-core` it closes no cycle,
+  A 2.2), `crates/udx-core/tests/paths.rs`, `crates/udx-test-support/Cargo.toml` (drop `udx-core`),
+  `crates/udx-test-support/src/lib.rs`. Create `crates/udx-core/tests/choke_point.rs`, its fixtures
+  `crates/udx-core/tests/fixtures/choke_point/{allowed,refused}/*.txt`, and `crates/udx-test-support/src/stand_in.rs`
+  (the stand-in's API as stubs naming T7).
 - **Consumes.** Nothing new. **Produces.** A 3.1.1 (`Env::var_os`, the `PathError` additions, `home_dir`, `UserVar`,
   `user_var`, `test_root` (not cached), `check_test_path`, `os_side_effects_allowed` and `OsSideEffect` with the single
   opt-in variable `UNIDEX_TEST_OS_SIDE_EFFECTS`, `paths::testing::TestEnv`) and A 3.14 (`TestRoot`, `TempHome` and
@@ -270,19 +276,28 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `home_dir_inside_test_root` and `user_var_reads_only_listed_names`.
   - `os_side_effects_refused_with_test_root` for each `OsSideEffect`; `os_side_effects_opt_in_by_kind` (the variable
     names kinds in snake case, comma-separated, or `all`; an unnamed kind stays refused).
-  - `choke_point_no_direct_user_folder_access`: scans every `.rs` file under `crates/` except
-    `crates/udx-core/src/paths.rs` and `crates/udx-cookbook/`, and fails on `directories::`, `dirs::`, `home_dir`,
-    `temp_dir()`, and a string literal naming HOME, USERPROFILE, APPDATA, LOCALAPPDATA, TMPDIR, TEMP, TMP, USER,
-    LOGNAME, SHELL or XDG_* passed to an environment read. `xtask/` is excluded by name, with the reason written in the
-    test (the build tool, never shipped; its tests are moved onto the test root by T1a). The test's named allow list of
-    (file, pattern) pairs is empty at merge and grows only with the controller's agreement.
+  - `choke_point_rule_accepts_sanctioned_accessor` and `choke_point_rule_refuses_direct_lookups`: the rule of A 3.1.1
+    ("The choke-point rule") run over the fixture files. A legitimate caller passes: `udx_core::paths::home_dir(env)`,
+    `crate::paths::home_dir(env)`, `home_dir(env)` after `use udx_core::paths::home_dir`, the same for `user_var`, a
+    method `var` reading `UNIDEX_TEST_ROOT`, and `"HOME"` as a map key. Each direct lookup fails: `std::env::home_dir()`,
+    `env::home_dir()` after `use std::env`, a use tree importing `home_dir` or `temp_dir` from `std::env` (one split
+    over lines, one renamed), `use std::env as e`, `std::env::temp_dir()`, a path into `dirs`, `directories` or `home`,
+    each OS home lookup the rule names (`getpwuid`, `SHGetKnownFolderPath`, ...), `std::env::var("HOME")`,
+    `env.var("USERPROFILE")`, `std::env::var_os("XDG_CONFIG_HOME")`, and `env!("HOME")`.
+  - `choke_point_no_direct_user_folder_access`: the same rule over every `.rs` file under `crates/` except
+    `crates/udx-core/src/paths.rs` and `crates/udx-cookbook/` (the fixtures are `.txt`, so the scan never reads them).
+    The bare names `home_dir`, `user_var` and `temp_dir` never fail it; only the routes to the OS do, so T1b's own
+    `home_dir_inside_test_root`, `GuardConfig`'s home (T5) and the CLI's and app's P48 checks pass. `xtask/` lies
+    outside `crates/`; the test says why it is not scanned (the build tool, never shipped; its tests are moved onto the
+    test root by T1a). The test's named allow list of (file, pattern) pairs is empty at merge and grows only with the
+    controller's agreement.
   - `choke_point_no_remove_dir_all`: fails on `remove_dir_all` outside `#[cfg(test)]` code, test folders and a named
     allow list of temp-folder cleanups (P3; A D14).
   - `choke_point_no_direct_chrono`: fails if any workspace member's `Cargo.toml` names `chrono` (gate report, section
     g; decision 0007).
   - `temp_home_plants_files`, `scan_for_canary_finds_each_encoding` (plain, base64 both alphabets, percent, hex).
-- **Done when.** The common commands; `cargo tree -p udx-core -e dev` shows no `udx-test-support`;
-  `cargo mutants -p udx-core` locally with no missed mutant.
+- **Done when.** The common commands; `cargo tree -p udx-test-support -e normal,dev` shows no workspace crate (so
+  `udx-core`'s dev-dependency on it closes no cycle, A 2.2); `cargo mutants -p udx-core` locally with no missed mutant.
 - **Platform notes.** All tests on three CI platforms; the root notice is Unix only. Nothing here changes OS state.
 
 ### Task 1c: Governed paths: flag and review
@@ -412,10 +427,15 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `src/events/{mod.rs,engine_event.rs,session_record.rs,summary.rs}`, and the id and attendance types in
   `src/{ids.rs,attendance.rs}`; create every other `udx-core` module of A 3.1 (`state.rs`, `config/`, `display.rs`,
   `opener.rs`, `net.rs`, `secret/`, `process_env.rs`, `diag.rs`, `harden.rs`, `fsguard/`) with its public items and
-  bodies `unimplemented!("T<n>")` naming the owning task. Tests: `crates/udx-core/tests/{events_golden.rs,crate_map.rs}`,
-  `crates/udx-core/tests/golden/events/v1/*.ndjson`, `crates/udx-core/tests/golden/session-log/v1/*.jsonl`.
-- **Consumes.** T1b's paths module. **Produces.** A 3.1.0 whole; A 3.1.4, 3.1.5 and 3.8's types; A 4's event and record
-  types with A 4.1's serde shape; every manifest. Features: `testing` on `udx-core`, `udx-providers`, `udx-sandbox`,
+  bodies `unimplemented!("T<n>")` naming the owning task. Tests: `crates/udx-core/tests/{events_golden.rs,crate_map.rs,
+  fake_supervisor.rs}`, `crates/udx-core/tests/golden/events/v1/*.ndjson`,
+  `crates/udx-core/tests/golden/session-log/v1/*.jsonl`.
+- **Consumes.** T1b's paths module. **Produces.** A 3.1.0 whole; A 3.1.4, 3.1.5 and 3.8's types, including the
+  `Supervisor` trait and `FreeSpaceWatch` (A 3.1.5); `udx_core::sandbox::testing::{FakeSupervisor, SupervisorCall,
+  RecordingKiller}` written whole, not as stubs, so T19 and T21 use the fake supervisor without any sandbox task; the
+  declarations of `SystemClock` and `V7Ids` (A 3.1.2; T3 writes their bodies); A 4's event and record types with A
+  4.1's serde shape; every manifest, with the dev-dependency edges of A 2.2 (`udx-tools` to `udx-sandbox` with
+  `testing` among them). Features: `testing` on `udx-core`, `udx-providers`, `udx-sandbox`,
   `udx-tools`, `udx-engine`, each defining its `UNIDEX_TESTING_MARKER_<crate>` static; on `udx-app`, `automation`
   (enables `gpui/test-support`), `perf` (enables `gpui/profiler`, `udx-providers/testing` and `udx-core/testing`, A 3.13)
   and `kit-renderer` (empty until question 23 says otherwise).
@@ -427,7 +447,14 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
     `unknown_record_type_kept`, `unknown_field_ignored`, `newer_version_refused`, `known_type_bad_body_is_corrupt`;
     `new_optional_field_absent_keeps_golden` (an added `Option` field left `None` leaves the golden line unchanged).
   - `crate_map_arrows_exact`: from `cargo metadata`, each workspace crate's normal workspace dependencies equal A 2.1's
-    table exactly, and no dev-dependency points from a lower crate to a higher one.
+    table exactly; the graph of normal and dev-dependencies between workspace crates has no cycle, dev-dependencies
+    counted; and `udx-test-support` has no workspace dependency of any kind (A 2.2's rule). Run on synthetic metadata
+    holding a dev-dependency cycle, or with `udx-test-support` depending on `udx-core`, the check fails; with
+    `udx-tools` dev-depending on `udx-sandbox`, it passes.
+  - `fake_supervisor_records_registrations_and_kills`: registrations, unregistrations, `kill`, `end_session`,
+    `end_all` and a free-space watch and its drop are recorded in order; `end_session` calls `kill_group` on that
+    session's registered `RecordingKiller`s and on no other session's; `live` and `holding_network_or_credentials`
+    answer from the registered `ProcessInfo`; `as_registry` returns the same object.
   - `golden_files_pass_both_scans`: the golden files hold no value either scanner flags (the test-vector convention).
 - **Done when.** The common commands, including `cargo deny --locked check` with every new crate (the pull request
   lists every crate added to the lockfile and its licence, and the `rcgen` version and licence read with `cargo info`);
@@ -444,7 +471,11 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Needs.** T2a. **Runs beside.** Nothing (it touches every crate's sources).
 - **Files.** Create every module file of A 3.2 to 3.15 in `crates/{udx-providers,udx-tools,udx-sandbox,udx-engine,
   udx-ui-model,udx-app,udx-evals}/src/**`, replacing T2a's placeholder `lib.rs` (or `main.rs`) with the full module
-  list; `crates/udx-tools/src/registry.rs` with `m1_tools()` written whole (wiring only, A 3.4); each crate's
+  list; `crates/udx-tools/src/registry.rs` with `m1_tools()` written whole (wiring only, A 3.4);
+  `crates/udx-engine/src/wiring.rs` with `engine_deps` as a stub naming T23 and its `pub mod wiring;` line in
+  `udx-engine`'s `lib.rs` (A 3.11), so T23 edits only `wiring.rs`; `crates/udx-sandbox/src/entries.rs` with
+  `access_entries` and `clean_access_entries` as stubs naming T10, and the crate-private Windows hooks `remove_entry`
+  and `delete_profile` as stubs naming T12 (A 3.6); each crate's
   `src/testing.rs` (or `testing/mod.rs`) with its testing items as stubs; `crates/udx-cli/src/{main.rs,chat.rs,run.rs,
   config.rs,doctor.rs,trust.rs,key.rs,sandbox.rs,tty.rs,render.rs,wire.rs}` with every M1 subcommand registered and
   dispatching to stubs; `crates/udx-core/tests/stubs.rs`. No manifest changes.
@@ -471,8 +502,9 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `crates/udx-core/tests/{config.rs,state.rs,attendance.rs,workspace_key.rs}`;
   `docs/decisions/0026-state-root-before-the-vault.md`.
 - **Consumes.** `AppPaths`, `check_test_path`, `os_side_effects_allowed` (T1b). **Produces.** A 3.1.1 (`StatePaths`),
-  A 3.1.2 (`IdGen`, `Clock`, `detect_cli_attendance`), A 3.1.3 (`Config`, `KeyPath`, `ConfigEdit` with its target path,
-  `apply` taking `Env`, `InteractiveProof`), A 3.1.0's `workspace_key`.
+  A 3.1.2 (`IdGen`, `Clock`, their production `V7Ids` and `SystemClock`, `detect_cli_attendance`), A 3.1.3
+  (`Config`, `KeyPath`, `ConfigEdit` with its target path, `apply` taking `Env`, `InteractiveProof`), A 3.1.0's
+  `workspace_key`.
 - **Tests:**
   - `config_rows_cover_every_section_with_source` (default, user file with line, env, flag, workspace narrowing).
   - `config_unknown_key_reported_with_line_not_an_error`; `config_malformed_toml_reports_line` (hostile input: a
@@ -617,7 +649,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `crates/udx-test-support/src/stand_in.rs`; tests `crates/udx-providers/tests/{transport.rs,router.rs,mock.rs,set.rs}`,
   `crates/udx-test-support/tests/stand_in.rs`; `docs/decisions/0024-http-and-tls-stack.md`.
 - **Consumes.** `Secret`, `Redactor`, `check_provider_endpoint`, `Config`. **Produces.** A 3.2 (all but the two
-  providers): `ReqwestTransport`, `HttpTransport`, `BoundEndpoint`, `Router`, `RouteError`, `ProviderSet`,
+  providers): `ReqwestTransport`, `HttpTransport`, `TransportError`, `BoundEndpoint`, `Router`, `RouteError`,
+  `ProviderSet` (with `from_providers`),
   `sanitize_tools`, `testing::{MockProvider, RequestMatcher, FixtureTransport}`, and the conformance harness the two
   provider tasks call; A 3.14's `HttpStandIn` over HTTP and TLS with `TestCert`.
 - **Verify first.** reqwest 0.13.5 without default features, with `rustls-no-provider`, `http2` and `stream`, and the
@@ -629,7 +662,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `p57_secret_header_absent_from_debug_and_fixtures`; `p57_trace_level_provider_call_leaves_no_authorization` (with
     `RUST_LOG=trace`, a mock exchange leaves no `authorization` anywhere under the test root).
   - `transport_refuses_redirects_and_env_proxy` (against the loopback stand-in with `HTTPS_PROXY` set to a dead port).
-  - `router_falls_back_only_between_turns`; `router_reports_reason`; `provider_set_from_config`.
+  - `router_falls_back_only_between_turns`; `router_reports_reason`; `provider_set_from_config`;
+    `provider_set_from_providers` (a set holding the mock provider routes through `Router::from_config`).
   - `mock_provider_replays_script_and_records_requests`; `mock_first_delta_delay_honoured`;
     `mock_request_matcher_mismatch_fails_call`.
   - `fixture_transport_rejects_request_mismatch`.
@@ -679,7 +713,13 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Tests:** the conformance cases; `p59_ollama_fixture_cut_detected` (a fixture whose reported prompt count is below
   the lower bound); `ollama_num_ctx_sent_as_set`; `ollama_tools_capability_read_from_show`;
   `ollama_probe_recognises_server` and `ollama_probe_unrecognised_on_other_json`;
-  `ollama_tool_call_without_id_gets_engine_id`.
+  `ollama_tool_call_without_id_gets_engine_id`; `review_focus_local_model_quirks_provider` (Review Focus 4, provider
+  half; fixtures `crates/udx-providers/tests/fixtures/ollama/quirk_*.json`): two parallel tool calls without ids get
+  distinct engine-made ids (`udx-<uuid>`); a model whose `/api/show` reports a small context window yields it in
+  `ModelInfo.context_window` and sends `num_ctx` as set; assistant text that imitates the prompt protocol's
+  delimiters arrives as `TextDelta` unchanged (the provider parses no call from text); a reported prompt count below
+  the lower bound gives `PromptIntegrity::Cut`. The `StreamEvent` sequence each fixture yields is asserted in full,
+  so T23's engine half can script the same sequence.
 - **Done when.** The common commands.
 - **Platform notes.** Pure Rust over fixtures; all three CI platforms. Nothing installed; the live run is the
   maintainer's opt-in only.
@@ -689,12 +729,16 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
 - **Needs.** T5 (`sandbox_lists`), T6 (`process_env`). **Runs beside.** T13 to T17, T8, T9.
-- **Files.** `crates/udx-sandbox/src/{supervisor.rs,probe.rs,limits.rs,space_watch.rs,macos/mod.rs,macos/profile.sb,
-  macos/sweep.rs,macos/denials.rs}`, `crates/udx-sandbox/src/testing.rs`; tests
-  `crates/udx-sandbox/tests/{macos.rs,supervisor.rs,probe.rs,escape_macos.rs}`; `docs/decisions/0017-macos-sandbox.md`.
-- **Consumes.** `SandboxLists`, `ChildEnv`, `StatePaths`. **Produces.** `ProcessSupervisor` (implementing
-  `ProcessRegistry`, with `watch_free_space`), `KillHandle` and `GroupKiller` implementations, `probe_main` and the
-  probe used by every backend (`ProbeReport`, `ProbeOutcome`), `testing::{UnavailableSandbox, FakeSupervisor}`, the
+- **Files.** `crates/udx-sandbox/src/{supervisor.rs,probe.rs,limits.rs,space_watch.rs,entries.rs,macos/mod.rs,
+  macos/profile.sb,macos/sweep.rs,macos/denials.rs}`, `crates/udx-sandbox/src/testing.rs`; tests
+  `crates/udx-sandbox/tests/{macos.rs,supervisor.rs,probe.rs,entries.rs,escape_macos.rs}`;
+  `docs/decisions/0017-macos-sandbox.md`.
+- **Consumes.** `SandboxLists`, `ChildEnv`, `StatePaths`, the `Supervisor` and `ProcessRegistry` traits (T2a).
+  **Produces.** `ProcessSupervisor` (implementing `udx_core::sandbox::{ProcessRegistry, Supervisor}`, with
+  `watch_free_space`), `KillHandle` and `GroupKiller` implementations, `probe_main` and the probe used by every backend
+  (`ProbeReport`, `ProbeOutcome`), `testing::UnavailableSandbox` (the fake supervisor is T2a's, in `udx-core`),
+  `access_entries` and `clean_access_entries` working on every platform (A 3.6, "The access-entry functions on every
+  platform": the records file, the scope filter, the rewrite, the Windows hooks called only under `cfg(windows)`), the
   macOS backend (A 3.6) with its networked profile, D2's marker sweep.
 - **Verify first** (each on the macOS CI runner, recorded in record 0017): the seatbelt operation and filter names that
   keep `process-info*`, `signal` and `sysctl-read` to the sandbox's own processes and a named sysctl list (not
@@ -743,12 +787,20 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `children_waited_by_pid` (two children exit in either order; each wait returns its own status; a third unrelated
     child is not reaped).
   - `free_space_watch_idle_when_no_unattended_group` (no timer is registered while nothing runs).
+  - `access_entries_missing_file_is_empty` and `access_entries_reads_records` (three platforms);
+    `clean_workspace_scope_only_its_records` (records planted for two workspaces in the test root: `Workspace(dir)`
+    removes only that one's, `All` removes every record, capability entries included) and
+    `clean_failure_keeps_record_and_reports`, both unit tests of `entries.rs` with a remover injected through a
+    crate-internal seam, so they run on three platforms and on Windows reach no T12 hook before T12 merges;
+    `clean_drops_records_without_os_entries` (macOS and Linux, through the public function: a planted record is
+    dropped from the file and nothing else changes).
 - **Done when.** The common commands, run locally on macOS (only the tests whose effects stay in the test root) and
   green on the macOS CI runner with the opt-in tests.
-- **Platform notes.** macOS only for the backend; `supervisor.rs`, `probe.rs` and `space_watch.rs` are platform-neutral
-  and unit-tested on three platforms. CI only: the escape matrices, the daemon sweep, the trust-store certificate, the
-  disk image and the planted secret-store item. Locally: write outside the workspace aimed at a file in the test root,
-  loopback connect to the test's own listener, planted files under a `TempHome`, profile quoting, the probe.
+- **Platform notes.** macOS only for the backend; `supervisor.rs`, `probe.rs`, `space_watch.rs` and `entries.rs` are
+  platform-neutral and unit-tested on three platforms. CI only: the escape matrices, the daemon sweep, the trust-store
+  certificate, the disk image and the planted secret-store item. Locally: write outside the workspace aimed at a file
+  in the test root, loopback connect to the test's own listener, planted files under a `TempHome`, profile quoting,
+  the probe.
 - **Record.** 0017 (the macOS profile, D2, the networked profile's part of D28, and what the verify-first steps found).
 
 ### Task 11: Linux sandbox: namespaces, Landlock, seccomp and the AppArmor profile
@@ -757,17 +809,29 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   expect this one to be the most likely to need its reserve; see "Risks").
 - **Needs.** T10. **Runs beside.** T12 (different files; both verified in CI only).
 - **Files.** `crates/udx-sandbox/src/linux/{mod.rs,helper.rs,mounts.rs,masks.rs,seccomp.rs,landlock.rs,cgroup.rs}`,
-  `crates/udx-sandbox/src/bin/unidex-sandbox-helper.rs`; `packaging/linux/apparmor/unidex-rust-preview-sandbox`; tests
-  `crates/udx-sandbox/tests/{linux.rs,escape_linux.rs}`; `.github/workflows/sandbox-linux.yml`;
-  `docs/decisions/0015-linux-sandbox.md`.
+  `crates/udx-sandbox/src/linux/resolver.rs`, `crates/udx-sandbox/src/bin/unidex-sandbox-helper.rs`;
+  `packaging/linux/apparmor/unidex-rust-preview-sandbox`; tests
+  `crates/udx-sandbox/tests/{linux.rs,escape_linux.rs,linux_resolver.rs}` (the last with the test's own small DNS
+  stand-in, no new crate); `.github/workflows/sandbox-linux.yml`; `docs/decisions/0015-linux-sandbox.md`.
 - **Consumes.** T10's supervisor, probe framework and `KillHandle`. **Produces.** The Linux backend and helper (A 3.6),
-  D1's probe-decided availability (decided by the maintainer on 2026-11-17), the Linux part of D28.
-- **Verify first** (on the Ubuntu runner, in this order, before building): which Landlock ABI the runner's kernel
-  offers and whether Landlock is enabled, because it decides which networked case applies (ABI 6 or higher: network
-  grants available with the abstract-socket and signal scopes; below: `NetworkGrants::Unavailable(LandlockScopeMissing)`
-  and the networked tests assert the refusal); whether `kernel.apparmor_restrict_unprivileged_userns` is on by
-  default; the AppArmor profile syntax that grants `userns` to one binary on that AppArmor version; whether a delegated
-  cgroup is writable for the runner's user.
+  D1's probe-decided availability (decided by the maintainer on 2026-11-17), the Linux part of D28, name resolution in
+  the networked root (A 3.6, "Name resolution in the Linux networked root"), the probe check `NetworkedResolverConfig`,
+  and the single-socket binding of `credential_sockets`.
+- **Verify first** (on the Ubuntu runner, in this order, before building):
+  1. Name resolution for a networked command, which nothing in the repository verifies yet: the target of the runner's
+     `/etc/resolv.conf` link and the nameservers its content names (a loopback stub resolver is expected on Ubuntu's
+     default configuration); the `hosts:` line of its `/etc/nsswitch.conf` and that the C library falls through to the
+     `dns` source when the modules' sockets under `/run` are absent; that the helper can place a regular file at the
+     new root's `/etc/resolv.conf` beside the read list's `/etc` entries; and, in a prototype networked root holding
+     the copy and no `/run`, that a lookup reaches the step's own stand-in resolver on a loopback address (no lookup
+     leaves the runner). What a default desktop or server install does differently, if anything, cannot be seen on CI
+     and is recorded as not verified. If no sound way exists without the host's `/run`, the task stops and reports, and
+     the contract of A 3.6 applies: network grants unavailable there with the reason.
+  2. Which Landlock ABI the runner's kernel offers and whether Landlock is enabled, because it decides which networked
+     case applies (ABI 6 or higher: network grants available with the abstract-socket and signal scopes; below:
+     `NetworkGrants::Unavailable(LandlockScopeMissing)` and the networked tests assert the refusal).
+  3. Whether `kernel.apparmor_restrict_unprivileged_userns` is on by default; the AppArmor profile syntax that grants
+     `userns` to one binary on that AppArmor version; whether a delegated cgroup is writable for the runner's user.
 - **What it builds (A 3.6).** The helper as the PID namespace's first process (it reaps orphans, so a background
   process outlives its command as on the other platforms), its arguments ended by `--`; a network namespace only for
   commands without network; for a networked command, Landlock ABI 6 with `Scope::AbstractUnixSocket` and
@@ -777,17 +841,32 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `write_deny` path, from a walk before each command (cap `limits.deny_walk_entries`, default 500,000; past it every
   command in that workspace asks); a before-and-after check of `write_deny` paths filling `ExitInfo::protected_created`;
   the seccomp filter of A 3.6 (including `clone3` refused with `ENOSYS`, `io_uring_*`, `unshare`, `setns`); closing
-  inherited descriptors before exec.
+  inherited descriptors before exec; for a networked command, the read-only copy of the host's resolver configuration
+  at `/etc/resolv.conf` (never the host's link or its folder) with the per-spawn failure and the probe check of A 3.6;
+  each granted `credential_sockets` path bound alone, never its folder.
 - **`sandbox-linux.yml`.** Two jobs on `ubuntu-26.04`: `sandbox-linux (restricted)` sets the sysctl to 1, installs no
-  profile, and runs the fail-closed tests; `sandbox-linux (profile)` sets the sysctl to 1, installs the profile from
-  `packaging/linux/apparmor/` with the helper at the profile's path, loads it with `apparmor_parser -r`, sets
+  profile, and runs `cargo test --workspace --locked -- p7_` (every P7 test, so T21's shell-tool case runs there with
+  the real, unavailable backend once T21 has merged); `sandbox-linux (profile)` sets the sysctl to 1, installs the
+  profile from `packaging/linux/apparmor/` with the helper at the profile's path, loads it with `apparmor_parser -r`,
+  lowers `net.ipv4.ip_unprivileged_port_start` to 53 on the runner (so the resolver test's stand-in can bind port 53 on
+  a loopback address without privileges; a disposable runner's setting, never the development Mac's), sets
   `UNIDEX_TEST_OS_SIDE_EFFECTS=sandbox_escape_matrix`, starts a test Xvfb on a test display, and runs
   `cargo test --workspace --locked`, so every crate's sandbox-dependent tests (the shell tool, the engine integration,
   the evaluation suite's shell tasks) run with the full sandbox once their tasks merge. Both upload the probe's report.
 - **Tests:**
-  - `p7_linux_restricted_userns_without_profile_is_unavailable` (restricted job):
-    `Unavailable(UserNamespacesRestricted)` with the remedy text; the shell tool is absent (through T21's tool once
-    merged; until then the probe result).
+  - `p7_linux_restricted_userns_without_profile_is_unavailable` (restricted job): the probe reports
+    `Unavailable(UserNamespacesRestricted)` with the remedy text. That the shell tool is then absent is T21's
+    `p7_forced_unavailable_shell_absent_and_refuses`, which runs in this job with the real backend once T21 has
+    merged; no `udx-sandbox` test uses `udx-tools`, because `udx-tools` dev-depends on `udx-sandbox` (A 2.2).
+  - Name resolution (A 3.6), profile job: `p43_networked_name_lookup_uses_resolver_copy_linux`,
+    `resolver_copy_follows_link_never_binds_folder`, `p7_resolver_config_failure_disables_network_grants_only` and
+    `networked_resolver_config_probe_check`, as A 3.6 describes them; where network grants are unavailable on the
+    runner (Landlock below ABI 6), the cases that run a networked command are replaced by the refusal, as for the
+    networked escape matrix.
+  - `p23_use_my_credentials_socket_reachable_only_when_granted_linux` (profile job, CI only; the Linux counterpart of
+    T10's macOS test): a stand-in agent socket in a folder of the test root outside the workspace, beside a second
+    socket; without the grant neither is in the new root; with it, the granted socket is connectable at its own path
+    and the second one is still absent, with and without a network grant.
   - `linux_probe_full_with_profile` (profile job); `p7_network_grants_unavailable_below_landlock_abi_6` (a test build
     reporting ABI 5).
   - `p1_no_loopback_connect`, `p1_no_name_lookup` (neither the stub resolver nor the system resolver's socket is
@@ -819,7 +898,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   a real display. The escape matrices run under the opt-in set by the workflow.
 - **Repository settings.** The maintainer adds `sandbox-linux (restricted)` and `sandbox-linux (profile)` to the
   required checks.
-- **Record.** 0015 (citing the maintainer's answer to D1; the Landlock ABI found on the runner; the networked profile).
+- **Record.** 0015 (citing the maintainer's answer to D1; the Landlock ABI found on the runner; the networked profile,
+  with what the first verify-first step found about name resolution).
 
 ### Task 12: Windows sandbox: AppContainer, job object and the access-list footprint
 
@@ -827,8 +907,11 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Needs.** T10. **Runs beside.** T11.
 - **Files.** `crates/udx-sandbox/src/windows/{mod.rs,appcontainer.rs,job.rs,acl.rs,grants.rs,capability.rs}`; tests
   `crates/udx-sandbox/tests/{windows.rs,escape_windows.rs,acl.rs}`; `docs/decisions/0016-windows-sandbox.md`.
-- **Consumes.** T10's supervisor, probe framework and `KillHandle`; `StatePaths::sandbox_dir`. **Produces.** The
-  Windows backend (A 3.6), `access_entries`, `clean_access_entries`, D3 (decided by the maintainer on 2026-11-17), D21.
+- **Consumes.** T10's supervisor, probe framework, `KillHandle` and its platform-neutral `access_entries` and
+  `clean_access_entries`; `StatePaths::sandbox_dir`. **Produces.** The Windows backend (A 3.6); the write-ahead record
+  writer in the records format of A 3.6; the crate-private hooks `windows::remove_entry` and `windows::delete_profile`
+  behind T10's `clean_access_entries` (in `windows/`, so this task adds no line to `entries.rs`); D3 (decided by the
+  maintainer on 2026-11-17), D21.
 - **Verify first.** The `windows-sys` 0.61.2 features for AppContainer profiles, security capabilities in
   `STARTUPINFOEX`, job objects and `SetEntriesInAclW`; that a process without network capabilities cannot reach
   loopback on the runner; that a lowbox token's custom capability SID (from `DeriveCapabilitySidsFromName`) is honoured
@@ -841,8 +924,9 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   cap `limits.deny_walk_entries`, default 500,000; past it every command in that workspace asks); the session temp
   folder's entry, removed with the folder; one capability SID for the home read
   list; `internetClient` only for a networked command; the job object with kill-on-close, process and memory limits,
-  UI restrictions and no breakaway; the before-and-after `protected_created` check; removal by
-  `clean_access_entries` for one workspace or all, never-trusted workspaces included; the first card's notice text.
+  UI restrictions and no breakaway; the before-and-after `protected_created` check; removal through the hooks T10's
+  `clean_access_entries` calls, for one workspace or all, never-trusted workspaces included; the first card's notice
+  text.
 - **Tests** (Windows runner; access entries and profiles under the opt-in `windows_acl,app_container_profile`):
   - `windows_probe_full_on_runner`.
   - `p1_no_loopback_connect`, `p1_no_name_lookup`.
@@ -925,8 +1009,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   `crates/udx-engine/src/trust.rs`; tests `crates/udx-engine/tests/{context.rs,trust.rs}`.
 - **Consumes.** `FileGuard`, `WorkspaceInfo`, `InteractiveProof`, `Origin`, `TrustState`. **Produces.** A 3.9's context
   part: `Delimiters` (a fresh nonce per run of a session), `LabelledItem`, `exposes`, `Exposure`, `ContextError`,
-  `TrustStore`, `TrustError`, `resolve_instruction_set`, `InstructionSet`, `is_third_party`, and the `IgnoreMatcher`
-  implementation with the `ignore` crate.
+  `TrustStore` (with `open`, which the engine wiring and the CLI use), `TrustError`, `resolve_instruction_set`,
+  `InstructionSet`, `is_third_party`, and the `IgnoreMatcher` implementation with the `ignore` crate.
 - **Tests:**
   - `labels_wrap_each_origin_kind` and `label_delimiter_in_content_escaped` (golden context tests).
   - `exposure_table_row_<n>` (one per M1 row of threat model 4.3's table).
@@ -1027,14 +1111,16 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 ### Task 19: The engine loop and `NativeEngine`
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
-- **Needs.** T7, T13, T14, T15, T16, T17, T18. **Runs beside.** T20, T26.
+- **Needs.** T7, T13, T14, T15, T16, T17, T18 (no sandbox task: the fake supervisor is `udx-core`'s, built by T2a).
+  **Runs beside.** T20, T26.
 - **Files.** `crates/udx-engine/src/engine.rs`, `crates/udx-engine/src/turn/{mod.rs,stream.rs,tools.rs,retry.rs,
   guards.rs,resume.rs,commands.rs}`, `crates/udx-engine/src/testing.rs`; tests
   `crates/udx-engine/tests/{engine_golden.rs,engine_tools.rs,engine_spend.rs,engine_commands.rs}`; golden event logs
   `crates/udx-engine/tests/golden/*.ndjson`.
 - **Consumes.** The mock provider (T7), permissions (T13), context and trust (T14), egress (T15), the log (T16), spend
-  (T17), the protocol (T18), `udx_sandbox::testing::FakeSupervisor`. **Produces.** A 3.11 (`NativeEngine`,
-  `EngineDeps`, `LoopGuards`, `RetryPolicy`), the `Engine` trait's implementation (A 3.1.4) including every
+  (T17), the protocol (T18), the `Supervisor` trait and `udx_core::sandbox::testing::FakeSupervisor` (T2a).
+  **Produces.** A 3.11 (`NativeEngine`, `EngineDeps` with `supervisor: Arc<dyn Supervisor>`, `LoopGuards`,
+  `RetryPolicy`), the `Engine` trait's implementation (A 3.1.4) including every
   `SessionCommand` rule (widening `SetMode` refused unattended, `TurnOffBuiltinAsk` only from `Attended(App)`),
   `testing::TurnHarness`.
 - **Tests** (scripted mock provider, fake tools and the fake supervisor from `testing`):
@@ -1050,7 +1136,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `p60_untrusted_workspace_starts_in_ask_despite_auto_config`.
   - `loop_guard_repeated_call_stops`, `loop_guard_invalid_streak_stops`, `loop_guard_max_calls_stops`.
   - `retry_honours_retry_after_and_never_repeats_tool`; `fallback_only_between_turns`.
-  - `cancel_kills_group_and_stops_turn` (the fake supervisor records the kill); `context_full_stops_with_reason`.
+  - `cancel_kills_group_and_stops_turn` (a fake tool registers a `RecordingKiller` through `ToolContext::processes`;
+    on cancel `FakeSupervisor` records the kill and the killer counts it); `context_full_stops_with_reason`.
   - `reasoning_block_dropped_by_redaction_sends_nothing_on_resume`.
   - Hostile model output: `tool_args_not_json_counted_invalid`, `unknown_tool_name_counted_invalid`,
     `huge_tool_args_refused`, `tool_call_ids_duplicated_handled`.
@@ -1079,12 +1166,17 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Role and budget.** Sonnet test author, Sonnet builder, Opus reviewer. Code unit, 1.0M.
 - **Needs.** T10, T13 (`parse_command`). **Runs beside.** T20, T22.
 - **Files.** `crates/udx-tools/src/shell/{mod.rs,run.rs,path.rs}`; tests `crates/udx-tools/tests/shell.rs`.
-- **Consumes.** `Sandbox`, `ProcessRegistry`, `KillHandle`, `ChildEnv`, `parse_command`. **Produces.** `shell` (A 3.4):
+- **Consumes.** `Sandbox`, `ProcessRegistry`, `KillHandle`, `ChildEnv`, `parse_command`; in tests,
+  `udx_core::sandbox::testing::{FakeSupervisor, RecordingKiller}` (T2a) and, through the dev-dependency `udx-tools` to
+  `udx-sandbox` with `testing` that A 2.2 allows, `udx_sandbox::testing::UnavailableSandbox` and the real backend
+  (T10). **Produces.** `shell` (A 3.4):
   `Simple` runs `Direct` with `argv[0]` resolved against the child's `PATH` skipping relative and empty entries;
   `NeedsShell` runs `FixedShell`; each spawned group's `KillHandle` registered through `ToolContext::processes`;
   network only with a grant or an approved ask, refused with the reason when `NetworkGrants` is unavailable; output
   streamed and capped; `ExitInfo` (with `denied_writes` and `protected_created`) in the result.
-- **Tests:** `p7_forced_unavailable_shell_absent_and_refuses` (testing sandbox); `p2_tar_checkpoint_leaves_no_marker` (a
+- **Tests:** `p7_forced_unavailable_shell_absent_and_refuses` (with the testing sandbox everywhere, and in
+  `sandbox-linux (restricted)` also with the real backend, which reports itself unavailable there);
+  `p2_tar_checkpoint_leaves_no_marker` (a
   rule-allowed `tar czf o.tgz *` beside a planted `--checkpoint-action=exec=...` file: argv with no expansion, so no
   marker); `p2_direct_skips_relative_and_empty_path_entries` (a planted `./git` is never chosen);
   `simple_runs_direct_needs_shell_runs_fixed_shell`; `fixed_shell_has_no_startup_files` (a planted `.profile` and `ENV`
@@ -1105,7 +1197,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Files.** `crates/udx-tools/src/web_fetch/{mod.rs,policy.rs,resolve.rs,html.rs,decode.rs,bytes.rs}`,
   `crates/udx-tools/src/testing.rs`; tests `crates/udx-tools/tests/web_fetch.rs`.
 - **Consumes.** `parse_host`, `classify`, `Redactor`, the `EgressGate` trait. **Produces.** `web_fetch`, `NetPolicy`,
-  `FetchCaps`, `Resolver`, `fetch_bytes` (A 3.5), `testing::{StubResolver, RecordingGate}`.
+  `FetchCaps`, `Resolver`, `SystemResolver` (the production resolver the engine wiring uses), `fetch_bytes` (A 3.5),
+  `testing::{StubResolver, RecordingGate}`.
 - **Tests** (loopback stand-in with a stub resolver and a recording gate; no real network):
   - `net_rebinding_connects_to_checked_answer` (a stub that answers public then private; the connection goes to the
     first answer or is refused, never to the second).
@@ -1125,15 +1218,17 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 
 - **Role and budget.** Opus core builder, Sonnet test author, Opus reviewer. Core code, 1.3M.
 - **Needs.** T10, T19, T20, T21, T22. **Runs beside.** T26, T27.
-- **Files.** `crates/udx-engine/src/wiring.rs` (building `EngineDeps` from config with `m1_tools()`, `platform_sandbox`
-  and a real `ProcessSupervisor`), `crates/udx-engine/src/turn/{rerun.rs,images.rs,processes.rs}` and their lines in
+- **Files.** `crates/udx-engine/src/wiring.rs` (the body of T2b's stub; `udx-engine`'s `lib.rs` already declares the
+  module), `crates/udx-engine/src/turn/{rerun.rs,images.rs,processes.rs}` and their lines in
   `crates/udx-engine/src/turn/mod.rs`; tests `crates/udx-engine/tests/{integration_files.rs,integration_shell.rs,
-  integration_processes.rs,integration_images.rs,review_focus.rs}`.
-- **Consumes.** T19's engine, the real tools (T20 to T22), the macOS backend and supervisor (T10). **Produces.** The
-  flows A 3.11 assigns here: P8's wider re-run on an approved card (only for a backend-reported denial) and the card for
-  `protected_created`; P7's unsandboxed-shell grant; P50's asks on exposure and on a revoked grant; P15's image load
-  (`SessionCommand::LoadImage` through the egress gate and `fetch_bytes`, ending in `ImageLoaded` or `ImageRefused`);
-  the wiring the CLI, the app and the evaluation harness use.
+  integration_processes.rs,integration_images.rs,wiring.rs,review_focus.rs}`.
+- **Consumes.** T19's engine, the real tools (T20 to T22), the macOS backend and supervisor (T10), `Router::from_config`
+  and `ProviderSet` (T7), `SpendLedger::open` (T17), `TrustStore::open` (T14), `SystemClock` and `V7Ids` (T3),
+  `SystemResolver` (T22). **Produces.** `udx_engine::wiring::engine_deps` exactly as A 3.11 gives it (the function the
+  CLI, the app and the evaluation harness call); the flows A 3.11 assigns here: P8's wider re-run on an approved card
+  (only for a backend-reported denial) and the card for `protected_created`; P7's unsandboxed-shell grant; P50's asks
+  on exposure and on a revoked grant; P15's image load (`SessionCommand::LoadImage` through the egress gate and
+  `fetch_bytes`, ending in `ImageLoaded` or `ImageRefused`).
 - **Tests:**
   - `p8_file_tool_write_mcp_json_asks`; `p8_rerun_wider_only_after_card` (where the backend reports denials) and
     `p8_no_rerun_offer_without_reported_denial` (where it does not); `p8_protected_created_raises_card`.
@@ -1141,11 +1236,23 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `p50_exposure_asks_about_networked_processes`; `p50_revoke_asks_about_processes_holding_grant`.
   - `p15_exposed_image_load_raises_card_with_full_url` (engine side); `p15_image_load_goes_through_address_policy`
     (end to end).
-  - The review-focus tests (Review Focus above): `review_focus_hostile_workspace_paths`,
+  - `wiring_builds_deps_from_config_in_test_root` (with a `ProviderSet::from_providers` holding the mock provider:
+    every field filled as A 3.11 says, the supervisor is the real one behind `Arc<dyn Supervisor>`, no socket opened;
+    it calls `platform_sandbox`, so it runs where that platform's backend has merged, like the shell-dependent tests);
+    `wiring_reports_setup_errors` (an unroutable role and an unreadable trust file each give `EngineError::Setup`
+    naming the part).
+  - The review-focus tests (Review Focus above), engine side: `review_focus_hostile_workspace_paths` (the guard, the
+    sandbox profile's parameters and the session-log key and folder; the CLI's output is T24's),
     `review_focus_cancel_then_resume`, `review_focus_large_workspace` (a generated 100,000-file tree with
     `node_modules` and git-ignored `.env` files: a sandboxed command's start bounded, deny-listed files unreadable,
-    glob and grep bounded), `review_focus_local_model_quirks` (Ollama fixtures through the real engine),
-    `review_focus_two_front_ends` (two processes on one workspace share the ledger and trust file correctly).
+    glob and grep bounded), `review_focus_local_model_quirks` (engine half: the scripted mock provider emits the
+    `StreamEvent` sequences T9's `review_focus_local_model_quirks_provider` asserts for the Ollama provider, which A
+    3.2 and 3.3 fix: engine-made `udx-` ids for id-less parallel calls, a small `context_window`, text imitating the
+    protocol's delimiters under `ToolCalling::Prompt`, and a prompt count below the lower bound; through the real
+    engine and tools, the calls run under their engine ids with matching results, the turn stops with `ContextFull`
+    rather than sending past the window, no call is parsed from the imitation (P6), and the turn stops with
+    `PromptCut` (P59)), `review_focus_two_front_ends` (two processes on one workspace share the ledger and trust file
+    correctly).
 - **Done when.** The common commands; the shell-dependent tests green where the sandbox is full: macOS (locally only
   those whose effects stay in the test root; all on CI), Linux in `sandbox-linux (profile)`, Windows once T12 has
   merged (added by the controller as a ledger line if they pass unchanged).
@@ -1158,7 +1265,9 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Needs.** T23. **Runs beside.** T25, T27, T28.
 - **Files.** `crates/udx-cli/src/{main.rs,chat.rs,run.rs,trust.rs,key.rs,tty.rs,render.rs,wire.rs}`; tests
   `crates/udx-cli/tests/{chat.rs,run.rs,trust.rs,key.rs,tty.rs}`.
-- **Consumes.** T23's wiring, `StreamRedactor`, `Tty` needs (`rustix` `termios`, `windows-sys` console).
+- **Consumes.** `udx_engine::wiring::engine_deps` (A 3.11; T23), `ProviderSet::from_config` and `from_providers` (T7),
+  `TrustStore::open` (T14), `clean_access_entries` (T10's platform-neutral function, A 3.6, reached through T23's
+  Needs; nothing here needs T12), `StreamRedactor`, `Tty` needs (`rustix` `termios`, `windows-sys` console).
   **Produces.** A 3.12 verbs `chat`, `run`, `trust`, `key`; `udx_cli::tty`. `main` calls `harden_process` first,
   dispatches the hidden `--udx-sandbox-probe`, and starts `resolve_login_path` on a background thread.
 - **Tests** (through `assert_cmd` with a test root and the mock provider selected by the test-only flag
@@ -1171,8 +1280,18 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
   - `chat_refuses_without_terminal_and_points_to_run`.
   - `run_exit_codes` (completed 0, stopped 3, refused 4, error 1); `run_json_is_ndjson_envelopes`;
     `run_json_key_split_across_deltas_redacted`.
-  - `p13_trust_refused_headless`; `p48_trust_home_needs_long_confirmation`; `trust_revoke_cleans_access_entries` (calls
-    `clean_access_entries` for the workspace; asserted through a recording double on non-Windows platforms).
+  - `p13_trust_refused_headless`; `p48_trust_home_needs_long_confirmation`; `trust_revoke_cleans_access_entries`
+    (macOS and Linux, through a pseudo-terminal: records planted in the test root's `sandbox_dir` for the revoked
+    workspace and another one; after `unidex trust DIR --revoke` only DIR's records are gone and the printed report
+    counts them, which shows the CLI calls `clean_access_entries` with `CleanScope::Workspace(DIR)`);
+    `trust_revoke_without_records_reports_nothing` (three platforms, Windows included before and after T12: no
+    records, nothing removed, success; on Windows as a unit test of the revoke path where the runner has no console,
+    like the other console paths). The real removal on Windows is T12's `acl_revoke_removes_entries`.
+  - `review_focus_hostile_workspace_paths_cli` (Review Focus 1, CLI side): `unidex run` and `unidex run --json` in
+    workspaces whose paths hold spaces, quotes, parentheses, NFC and NFD non-ASCII names and, on Windows, more than 260
+    characters, with tool output naming files whose names hold a right-to-left override and control characters: the
+    plain output prints every path and name escaped (P49), `--json` keeps them exact after redaction, and the run
+    completes; `unidex chat` does the same through a pseudo-terminal on Unix.
   - `key_never_from_argument` (no positional key accepted); `key_from_stdin_flag_stored_in_memory_store`.
   - `cli_makes_no_network_call_without_provider_config` (a recording resolver sees nothing).
   - `release_cli_refuses_test_provider_flag` (exit 2 without the feature).
@@ -1187,7 +1306,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Needs.** T3, T6, T7, T10, T12. **Runs beside.** T24.
 - **Files.** `crates/udx-cli/src/{config.rs,doctor.rs,sandbox.rs}`; tests
   `crates/udx-cli/tests/{config.rs,doctor.rs,sandbox.rs}`.
-- **Consumes.** `Config`, `apply`, `open_secret_store`, `platform_sandbox`, `access_entries`, `clean_access_entries`.
+- **Consumes.** `Config`, `apply`, `open_secret_store`, `platform_sandbox`, and T10's platform-neutral `access_entries`
+  and `clean_access_entries` (A 3.6; T12 supplies only their Windows removal hooks).
   **Produces.** A 3.12 verbs `config`, `doctor` (rows: config with unknown keys, paths, secret store, sandbox with
   reason, remedy and network grants, AppArmor profile on Linux, Windows sandbox access entries, providers, workspace
   trust) and `sandbox clean`. (T24 owns `main.rs`; these subcommands are registered there by stubs T2b created, so this
@@ -1248,7 +1368,8 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Files.** `crates/udx-evals/src/{task.rs,run.rs,check.rs,report.rs}`, `crates/udx-evals/src/bin/udx-evals.rs`,
   `crates/udx-evals/tasks/<id>/{task.toml,workspace/,mock-script.json}` for the 12 tasks of A 3.15; tests
   `crates/udx-evals/tests/suite_mock.rs`.
-- **Consumes.** T23's wiring, the mock provider. **Produces.** A 3.15's harness (`Task`, `Check`, `RunConfig`,
+- **Consumes.** `udx_engine::wiring::engine_deps` (A 3.11; T23), with `ProviderSet::from_providers` and the mock
+  provider for `ProviderSel::Mock` (T7). **Produces.** A 3.15's harness (`Task`, `Check`, `RunConfig`,
   `TaskResult`, `SuiteReport`, `EvalError`, `run_suite`), the task set, the egress-ask measurement output (asks per task
   and per P14 cap).
 - **Tests:** `suite_runs_against_mock_and_all_pass` (each task's mock script solves it);
@@ -1268,9 +1389,10 @@ T1d, which together hold every item (one routed, see T1d); nothing else starts b
 - **Needs.** T23, T27. **Runs beside.** T28.
 - **Files.** `crates/udx-app/src/{main.rs,app.rs,bridge.rs,theme.rs,fonts.rs,registry.rs,gpu.rs,workspace.rs}`; tests
   `crates/udx-app/tests/{gpu.rs,registry.rs,bridge.rs,fonts.rs}`.
-- **Consumes.** T23's wiring, the view-model (T27). **Produces.** The binary's entry point (calls `harden_process`
-  first; dispatches the hidden `--udx-sandbox-probe`; parses every M1 flag of A 3.13 and calls the `automation` and
-  `perf` hooks T2b declared, compiled only with their features, refusing them with exit 2 otherwise; starts
+- **Consumes.** `udx_engine::wiring::engine_deps` (A 3.11; T23), the view-model (T27). **Produces.** The binary's entry
+  point (calls `harden_process` first; dispatches the hidden `--udx-sandbox-probe`; parses every M1 flag of A 3.13
+  and calls the `automation` and `perf` hooks T2b declared, compiled only with their features, refusing them with exit
+  2 otherwise; starts
   `resolve_login_path` on a background thread after the first frame), the Tokio-to-GPUI bridge (decision 0008's
   batch-draining pattern from the cookbook's `streaming_list`), `Theme` from the Electron app's tokens for this
   window, named fonts with fallbacks (A D17), `ElementRegistry`, `ElementRole` and `tagged`, `is_software_renderer`,
