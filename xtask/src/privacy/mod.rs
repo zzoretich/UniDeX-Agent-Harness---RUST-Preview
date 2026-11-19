@@ -8,6 +8,7 @@ mod scan;
 
 pub use rules::RuleId;
 pub use scan::{Finding, Terms, scan_bytes, scan_path_name, scan_text};
+use scan::{decode_term_list, scan_views};
 
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
@@ -137,27 +138,61 @@ fn toml_escaped(v: &str) -> String {
     v.replace('\\', "\\\\")
 }
 
+/// An allow value exempts a finding only when it is the whole matched text,
+/// never a shortened form of a longer one.
 fn value_matches(value: &str, f: &Finding) -> bool {
-    value == f.excerpt || scan::shorten(value) == f.excerpt
+    value == f.value
 }
 
-/// Loads the local term list from this worktree, else from the main worktree.
-fn load_local(root: &Path) -> Result<Option<String>, String> {
-    let mut places = vec![root.join(LOCAL_LIST)];
+/// One private term list that was found, with the place it came from.
+struct LocalList {
+    /// "this checkout" or "the main checkout"; never a path, which would
+    /// carry a home folder.
+    place: &'static str,
+    text: String,
+}
+
+/// Finds and reads every private term list that applies to `root`. Lookup
+/// order:
+///
+/// 1. `<root>/privacy-terms.local.txt`, where `<root>` is the top of the
+///    checkout being scanned (`git rev-parse --show-toplevel`): a linked
+///    worktree, or the main checkout itself.
+/// 2. When `<root>` is a linked worktree, `<main>/privacy-terms.local.txt`
+///    in the main checkout, found through `git rev-parse --git-common-dir`.
+///    Skipped when it is the same file as the first.
+///
+/// Every list found is read and the caller combines their terms, so a
+/// missing or empty list in one place never hides the other. A list that
+/// cannot be read (a dangling symbolic link included) or decoded is an error
+/// naming its place, never its content.
+fn load_local(root: &Path) -> Result<Vec<LocalList>, String> {
+    let here = root.join(LOCAL_LIST);
+    let mut places = vec![("this checkout", here.clone())];
     if let Some(main) = git::main_worktree_root(root) {
         let p = main.join(LOCAL_LIST);
-        if !places.contains(&p) {
-            places.push(p);
+        let real = |q: &Path| fs::canonicalize(q).unwrap_or_else(|_| q.to_path_buf());
+        if real(&p) != real(&here) {
+            places.push(("the main checkout", p));
         }
     }
-    for p in places {
+    let mut lists = Vec::new();
+    for (place, p) in places {
         match fs::read(&p) {
-            Ok(b) => return Ok(Some(String::from_utf8_lossy(&b).into_owned())),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("cannot read the local term list: {e}")),
+            Ok(b) => lists.push(LocalList {
+                place,
+                text: decode_term_list(&b).map_err(|e| format!("{LOCAL_LIST} ({place}): {e}"))?,
+            }),
+            // Missing is fine only when nothing is there at all: a list that
+            // exists and cannot be read, a dangling symbolic link included,
+            // is an error.
+            Err(e)
+                if e.kind() == std::io::ErrorKind::NotFound
+                    && fs::symlink_metadata(&p).is_err() => {}
+            Err(e) => return Err(format!("cannot read {LOCAL_LIST} ({place}): {e}")),
         }
     }
-    Ok(None)
+    Ok(lists)
 }
 
 /// For a git commit message file: drops the verbose diff git appends after
@@ -205,17 +240,40 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
     };
 
     let allow = Allow::load(&root)?;
-    let terms = match load_local(&root)? {
-        Some(text) => Terms::generic().with_local(&text),
-        None => Terms::generic(),
-    };
-    if opts.require_local && !terms.has_local() {
-        return Err(format!(
-            "--require-local: no local term list found ({LOCAL_LIST} is missing or empty)"
-        ));
+    let lists = load_local(&root)?;
+    let mut terms = Terms::generic();
+    let mut empty: Vec<&str> = Vec::new();
+    for l in &lists {
+        if !Terms::generic().with_local(&l.text).has_local() {
+            empty.push(l.place);
+        }
+        terms = terms.with_local(&l.text);
+    }
+    if opts.require_local {
+        if lists.is_empty() {
+            return Err(format!(
+                "--require-local: no local term list found ({LOCAL_LIST} is missing)"
+            ));
+        }
+        if let Some(place) = empty.first() {
+            return Err(format!(
+                "--require-local: {LOCAL_LIST} ({place}) has no terms \
+                 (it is empty or holds only comments and blank lines)"
+            ));
+        }
+    }
+    for place in &empty {
+        eprintln!(
+            "privacy: warning: {LOCAL_LIST} ({place}) has no terms \
+             (it is empty or holds only comments and blank lines)"
+        );
     }
     if !terms.has_local() {
-        eprintln!("privacy: local terms are not being checked (no {LOCAL_LIST} found)");
+        if lists.is_empty() {
+            eprintln!("privacy: local terms are not being checked (no {LOCAL_LIST} found)");
+        } else {
+            eprintln!("privacy: local terms are not being checked (no list found has any term)");
+        }
     }
 
     let mut found: Vec<Reported> = Vec::new();
@@ -232,6 +290,8 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
         }
     };
 
+    // In range mode, how many commits the range held.
+    let mut scanned: Option<usize> = None;
     match &opts.mode {
         Mode::Stdin(label) => {
             let mut buf = Vec::new();
@@ -239,20 +299,24 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                 .read_to_end(&mut buf)
                 .map_err(|e| format!("cannot read stdin: {e}"))?;
             if opts.git_message {
-                let text = clean_git_message(&String::from_utf8_lossy(&buf));
-                add(None, false, scan_text(label, &text, &terms));
+                add(
+                    None,
+                    false,
+                    scan_views(label, &buf, &terms, &clean_git_message),
+                );
             } else {
                 add(None, false, scan_bytes(label, &buf, &terms));
             }
         }
         Mode::All => {
             local_list_check(&root, &mut add)?;
-            for path in git::list_all(&root)? {
+            for entry in git::list_all(&root)? {
+                let path = entry.name;
                 if path == LOCAL_LIST {
                     continue;
                 }
                 add(None, true, scan_path_name(&path, &terms));
-                let full = root.join(&path);
+                let full = root.join(&entry.file);
                 let Ok(meta) = fs::symlink_metadata(&full) else {
                     continue; // tracked but deleted in the working tree
                 };
@@ -275,27 +339,43 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                     continue;
                 }
                 add(None, true, scan_path_name(&b.path, &terms));
-                add(
-                    None,
-                    true,
-                    scan_bytes(&b.path, &git::read_blob(&root, &b.oid)?, &terms),
-                );
+                if !b.submodule {
+                    add(
+                        None,
+                        true,
+                        scan_bytes(&b.path, &git::read_blob(&root, &b.oid)?, &terms),
+                    );
+                }
             }
         }
         Mode::Range(range) => {
+            // git would read a range that begins with `-` as an option
+            // (`--stdin`, `--all`) and report an empty or a different range.
+            if range.starts_with('-') {
+                return Err("--range: a range cannot begin with `-`".to_string());
+            }
             let mut seen: HashSet<(String, String)> = HashSet::new();
-            for c in git::commits(&root, range)? {
+            // The repository's own commit name, read once (the maintainer's
+            // second decision, see `identity_findings`); never printed.
+            let own_name = git::configured_user_name(&root);
+            let commits = git::commits(&root, range)?;
+            scanned = Some(commits.len());
+            for c in commits {
                 let short = c.sha.chars().take(10).collect::<String>();
                 let label = format!("commit {short} message");
                 let msg = git::commit_message(&root, &c.sha)?;
                 add(Some(&short), false, scan_bytes(&label, &msg, &terms));
-                let (author, committer) = git::commit_identities(&root, &c.sha)?;
-                for (who, email) in [("author", author), ("committer", committer)] {
-                    let label = format!("commit {short} {who}");
-                    let found = scan_text(&label, &email, &terms)
-                        .into_iter()
-                        .filter(|f| matches!(f.rule, RuleId::Email | RuleId::LocalTerm));
-                    add(Some(&short), false, found.collect());
+                // The whole identity line (name and address together) is
+                // checked for addresses and local terms, except a name that
+                // is the account of its own no-reply address (the
+                // maintainer's decision, see `identity_findings`).
+                for id in git::commit_identities(&root, &c.sha)? {
+                    let label = format!("commit {short} {}", id.who);
+                    add(
+                        Some(&short),
+                        false,
+                        identity_findings(&label, &id.line, &terms, own_name.as_deref()),
+                    );
                 }
                 for b in git::commit_blobs(&root, &c)? {
                     if b.path == LOCAL_LIST {
@@ -307,6 +387,7 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                                 line: 0,
                                 rule: RuleId::LocalFileTracked,
                                 excerpt: "a commit adds or changes the local term list".into(),
+                                value: String::new(),
                             }],
                         );
                         continue;
@@ -315,18 +396,90 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                         continue;
                     }
                     add(Some(&short), true, scan_path_name(&b.path, &terms));
-                    add(
-                        Some(&short),
-                        true,
-                        scan_bytes(&b.path, &git::read_blob(&root, &b.oid)?, &terms),
-                    );
+                    if !b.submodule {
+                        add(
+                            Some(&short),
+                            true,
+                            scan_bytes(&b.path, &git::read_blob(&root, &b.oid)?, &terms),
+                        );
+                    }
                 }
             }
         }
     }
 
-    report(&found, opts.json);
+    report(&found, opts.json, scanned);
     Ok(if found.is_empty() { 0 } else { 1 })
+}
+
+/// The address and local-term findings in one identity line: its lossy
+/// UTF-8 reading and, when its bytes are not valid UTF-8, its Latin-1
+/// reading too (a name written by a tool that did not use UTF-8).
+///
+/// The maintainer's decision of 2026-11-18, as a contract: the name is not
+/// checked against the local terms when, and only when, the line is valid
+/// UTF-8, its address (between the first `<` and the next `>`) is one the
+/// gate already treats as the hosting service's no-reply address
+/// (`rules::noreply_account`, in either form), and the name (the text before
+/// the `<`, trimmed) equals that address's account name, compared ASCII
+/// case-insensitively. That account name is already public in the address.
+/// Then neither the name nor that address gives a local-term finding; the
+/// rest of the line is still checked for terms, and the whole line for
+/// addresses. Anything else (another word in the name, a look-alike host, an
+/// address in the name, the other line of the same commit) is checked as
+/// before.
+///
+/// The maintainer's second decision of 2026-11-18 (the maintainer keeps their
+/// own commit name), as a contract: the same exemption also holds when the
+/// name, trimmed, equals `own_name` exactly (case-sensitively): the commit
+/// name configured for the repository being scanned, as
+/// `git config --get user.name` resolves it there, read once per run and
+/// never printed. With no configured name, or when git fails, this part does
+/// not apply. Residual, stated plainly: whoever can change the repository's
+/// configured commit name can make that name exempt, so this protects
+/// against other people's and mistaken identities, not against a deliberate
+/// change of the local configuration.
+fn identity_findings(
+    label: &str,
+    bytes: &[u8],
+    terms: &Terms,
+    own_name: Option<&str>,
+) -> Vec<Finding> {
+    let mut readings = vec![String::from_utf8_lossy(bytes).into_owned()];
+    if std::str::from_utf8(bytes).is_err() {
+        readings.push(bytes.iter().map(|b| char::from(*b)).collect());
+    }
+    let rest = std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|line| after_own_noreply_name(line, own_name));
+    let no_terms = Terms::generic();
+    let line_terms = if rest.is_some() { &no_terms } else { terms };
+    let mut found: Vec<Finding> = readings
+        .iter()
+        .flat_map(|r| scan_text(label, r, line_terms))
+        .collect();
+    if let Some(rest) = rest {
+        found.extend(scan_text(label, rest, terms));
+    }
+    let mut out: Vec<Finding> = Vec::new();
+    for f in found {
+        if matches!(f.rule, RuleId::Email | RuleId::LocalTerm) && !out.contains(&f) {
+            out.push(f);
+        }
+    }
+    out
+}
+
+/// For an identity line with a no-reply address whose name is that
+/// address's account or the repository's own commit name (the maintainer's
+/// decisions, see `identity_findings`): the text after that address. `None`
+/// for every other line.
+fn after_own_noreply_name<'a>(line: &'a str, own_name: Option<&str>) -> Option<&'a str> {
+    let (name, tail) = line.split_once('<')?;
+    let (address, rest) = tail.split_once('>')?;
+    let account = rules::noreply_account(address)?;
+    let name = name.trim();
+    (name.eq_ignore_ascii_case(account) || own_name == Some(name)).then_some(rest)
 }
 
 fn local_list_check(
@@ -342,6 +495,7 @@ fn local_list_check(
                 line: 0,
                 rule: RuleId::LocalFileTracked,
                 excerpt: why.to_string(),
+                value: String::new(),
             }],
         );
     }
@@ -357,7 +511,7 @@ fn shown_excerpt(f: &Finding) -> String {
     }
 }
 
-fn report(found: &[Reported], json: bool) {
+fn report(found: &[Reported], json: bool, scanned: Option<usize>) {
     if json {
         let items: Vec<serde_json::Value> = found
             .iter()
@@ -401,7 +555,12 @@ fn report(found: &[Reported], json: bool) {
         }
     }
     if found.is_empty() {
-        eprintln!("privacy: clean");
+        // An empty range is not "clean" without saying so: nothing was scanned.
+        match scanned {
+            Some(1) => eprintln!("privacy: clean (1 commit scanned)"),
+            Some(n) => eprintln!("privacy: clean ({n} commits scanned)"),
+            None => eprintln!("privacy: clean"),
+        }
     } else {
         eprintln!("privacy: {} finding(s)", found.len());
     }

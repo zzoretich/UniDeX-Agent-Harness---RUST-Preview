@@ -7,6 +7,8 @@ fn rules(text: &str) -> Vec<RuleId> {
         .collect()
 }
 
+// The hosting service's own no-reply address is a real domain on purpose: the
+// rule under test is about exactly that address and its look-alikes.
 #[test]
 fn githubs_own_committer_address_is_clean() {
     assert!(rules("committer noreply@github.com").is_empty());
@@ -16,7 +18,7 @@ fn githubs_own_committer_address_is_clean() {
 fn only_that_exact_address_is_allowed() {
     for bad in [
         "someone@github.com",
-        "noreply@github.com.example.io",
+        "noreply@github.com.example.test",
         "xnoreply@github.com",
     ] {
         assert!(rules(bad).contains(&RuleId::Email), "{bad}");

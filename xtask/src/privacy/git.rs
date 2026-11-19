@@ -49,8 +49,29 @@ fn split_nul(bytes: &[u8]) -> impl Iterator<Item = String> + '_ {
         .map(|s| String::from_utf8_lossy(s).into_owned())
 }
 
+/// A path as git lists it: the name to scan and report (invalid UTF-8
+/// decoded lossily) and the real path to open, which keeps every byte.
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub name: String,
+    pub file: PathBuf,
+}
+
+fn os_path(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    // Windows file names are UTF-16, so git hands over valid UTF-8 there.
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
 /// Tracked files plus untracked files that are not ignored.
-pub fn list_all(root: &Path) -> Result<Vec<String>> {
+pub fn list_all(root: &Path) -> Result<Vec<Entry>> {
     let out = git(
         root,
         &[
@@ -61,10 +82,15 @@ pub fn list_all(root: &Path) -> Result<Vec<String>> {
             "--exclude-standard",
         ],
     )?;
-    let mut v: Vec<String> = split_nul(&out).collect();
+    let mut v: Vec<&[u8]> = out.split(|b| *b == 0).filter(|s| !s.is_empty()).collect();
     v.sort();
     v.dedup();
-    Ok(v)
+    Ok(v.into_iter()
+        .map(|b| Entry {
+            name: String::from_utf8_lossy(b).into_owned(),
+            file: os_path(b),
+        })
+        .collect())
 }
 
 /// A file as recorded in a commit or the index.
@@ -72,9 +98,11 @@ pub fn list_all(root: &Path) -> Result<Vec<String>> {
 pub struct Blob {
     pub path: String,
     pub oid: String,
+    /// A submodule entry: its path name is scanned, there is no content.
+    pub submodule: bool,
 }
 
-/// Parses `git diff --raw -z --no-renames` output, keeping blobs (not submodules).
+/// Parses `git diff --raw -z --no-renames` output, keeping blobs and submodules.
 /// A token that is not a raw entry is an error, never silently skipped.
 fn parse_raw(bytes: &[u8]) -> Result<Vec<Blob>> {
     let mut toks = split_nul(bytes);
@@ -91,12 +119,13 @@ fn parse_raw(bytes: &[u8]) -> Result<Vec<Blob>> {
         if f.len() < 5 {
             return Err(format!("unexpected git diff entry: {meta:?}"));
         }
-        if f[1] == "160000" || f[3].chars().all(|c| c == '0') {
+        if f[3].chars().all(|c| c == '0') {
             continue;
         }
         out.push(Blob {
             path,
             oid: f[3].to_string(),
+            submodule: f[1] == "160000",
         });
     }
     Ok(out)
@@ -123,9 +152,21 @@ pub struct CommitInfo {
     pub parents: Vec<String>,
 }
 
-/// Commits in `range`, oldest first.
+/// Commits in `range`, oldest first. The range comes after
+/// `--end-of-options`, so git never reads it as an option (the caller also
+/// refuses one that begins with `-`).
 pub fn commits(root: &Path, range: &str) -> Result<Vec<CommitInfo>> {
-    let out = git(root, &["rev-list", "--parents", "--reverse", range, "--"])?;
+    let out = git(
+        root,
+        &[
+            "rev-list",
+            "--parents",
+            "--reverse",
+            "--end-of-options",
+            range,
+            "--",
+        ],
+    )?;
     Ok(String::from_utf8_lossy(&out)
         .lines()
         .filter_map(|l| {
@@ -182,15 +223,53 @@ pub fn local_list_problem(root: &Path, name: &str) -> Result<Option<&'static str
     Ok(None)
 }
 
-/// A commit's author and committer email addresses.
-pub fn commit_identities(root: &Path, sha: &str) -> Result<(String, String)> {
-    let out = git(root, &["log", "-1", "--format=%ae%n%ce", sha, "--"])?;
-    let s = String::from_utf8_lossy(&out);
-    let mut it = s.lines();
-    Ok((
-        it.next().unwrap_or("").to_string(),
-        it.next().unwrap_or("").to_string(),
-    ))
+/// One author or committer line of a commit, as raw bytes.
+pub struct Identity {
+    /// "author" or "committer".
+    pub who: &'static str,
+    /// The whole line after `author ` or `committer `: name, address, time.
+    pub line: Vec<u8>,
+}
+
+/// A commit's author and committer identities, read from the raw commit
+/// object so that no byte in them (a NUL, a control character, invalid
+/// UTF-8) can make a field come out empty. Each identity is taken whole
+/// (`name <email> time zone`, or whatever the line holds), so an address in
+/// the name and a second bracketed part are checked too.
+pub fn commit_identities(root: &Path, sha: &str) -> Result<Vec<Identity>> {
+    let raw = git(root, &["cat-file", "commit", sha])?;
+    let mut out = Vec::new();
+    // The header ends at the first empty line; continuation lines (a
+    // signature, an embedded tag) begin with a space and are skipped.
+    for line in raw.split(|b| *b == b'\n') {
+        if line.is_empty() {
+            break;
+        }
+        let (who, rest) = if let Some(rest) = line.strip_prefix(b"author ") {
+            ("author", rest)
+        } else if let Some(rest) = line.strip_prefix(b"committer ") {
+            ("committer", rest)
+        } else {
+            continue;
+        };
+        out.push(Identity {
+            who,
+            line: rest.to_vec(),
+        });
+    }
+    Ok(out)
+}
+
+/// The commit name configured for the repository at `root`, as
+/// `git config --get user.name` resolves it there (local configuration
+/// first, then the user's global one). `None` when no name is set or git
+/// fails. The caller never prints it.
+pub fn configured_user_name(root: &Path) -> Option<String> {
+    let out = git(root, &["config", "--get", "user.name"]).ok()?;
+    let name = String::from_utf8_lossy(&out)
+        .trim_end_matches(['\n', '\r'])
+        .to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 /// The top level of the main worktree, when `root` is a linked worktree.
@@ -205,5 +284,20 @@ pub fn main_worktree_root(root: &Path) -> Option<PathBuf> {
         common.parent().map(Path::to_path_buf)
     } else {
         None
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::os_path;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn a_raw_path_keeps_every_byte() {
+        // The lossy name would turn the 0xFF byte into U+FFFD and name a file
+        // that does not exist; the real path must keep it.
+        let p = os_path(b"dir/a\xffb.md");
+        assert_eq!(p.as_os_str().as_bytes(), b"dir/a\xffb.md");
+        assert_eq!(os_path(b"plain.md").as_os_str().as_bytes(), b"plain.md");
     }
 }

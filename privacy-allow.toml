@@ -60,12 +60,12 @@ reason = "invented test vectors"
 path = "xtask/tests/**"
 rule = "Email"
 values = [
-    "icon@2x.io",
-    "jane.roe@corp.io",
-    "noreply@github.com.example.io",
-    "other.person@corp.io",
+    "icon@2x.test",
+    "jane.roe@corp.example",
+    "noreply@github.com.example.test",
+    "other.person@corp.example",
     "someone@github.com",
-    "x@y.io",
+    "x@y.test",
     "xnoreply@github.com",
 ]
 reason = "invented test vectors"
