@@ -1468,3 +1468,37 @@ fn xtask_tests_write_only_under_test_root() {
         root.display()
     );
 }
+
+// ---- task 1d: a range is read as data, judged by the working tree's allow file ----
+
+// The head commit exists as an object (a branch the working tree never checks
+// out, as a fetched pull request head would be); the range adds an allow file
+// that would exempt its own finding. Only the working tree's allow file counts,
+// and the range's files are read through git, not from disk.
+#[test]
+fn range_scan_reads_blobs_without_checkout() {
+    let repo = new_repo();
+    git(repo.path(), &["checkout", "-q", "-b", "main"]);
+    write(repo.path(), "a.md", "clean\n");
+    commit_all(repo.path(), "base");
+    git(repo.path(), &["checkout", "-q", "-b", "pr"]);
+    let home = format!("/{}/{}", "home", invented_user());
+    write(repo.path(), "f.md", &format!("see {home}/x\n"));
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("f.md", "HomePath", &format!("\"{home}\"")),
+    );
+    commit_all(repo.path(), "add file and its own exemption");
+    git(repo.path(), &["checkout", "-q", "main"]);
+    assert!(
+        !repo.path().join("f.md").exists(),
+        "head is not checked out"
+    );
+    assert!(!repo.path().join("privacy-allow.toml").exists());
+
+    let (code, text) = run(repo.path(), &["privacy", "--range", "main..pr"]);
+    assert_eq!(code, 1, "the range's own allow file must not apply\n{text}");
+    assert!(text.contains("f.md"), "{text}");
+    assert!(text.contains("HomePath"), "{text}");
+}

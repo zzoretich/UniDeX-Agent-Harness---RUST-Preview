@@ -39,7 +39,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  # The event name keeps a scheduled run and a manual run on the same ref from
+  # cancelling each other.
+  group: nightly-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

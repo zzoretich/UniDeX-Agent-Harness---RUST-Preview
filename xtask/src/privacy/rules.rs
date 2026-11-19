@@ -1,5 +1,6 @@
 //! The generic privacy rules: what each one flags and what it allows.
 
+use super::secrets::SecretKind;
 use regex::Regex;
 use std::collections::HashSet;
 use std::net::Ipv6Addr;
@@ -14,6 +15,8 @@ pub enum RuleId {
     SessionLink,
     LocalTerm,
     LocalFileTracked,
+    /// A secret rule (`secrets.rs`); never exempted through the allow file.
+    Secret(SecretKind),
 }
 
 impl RuleId {
@@ -26,6 +29,7 @@ impl RuleId {
             RuleId::SessionLink => "SessionLink",
             RuleId::LocalTerm => "LocalTerm",
             RuleId::LocalFileTracked => "LocalFileTracked",
+            RuleId::Secret(kind) => kind.name(),
         }
     }
 
@@ -40,6 +44,7 @@ impl RuleId {
             RuleId::LocalFileTracked,
         ]
         .into_iter()
+        .chain(SecretKind::ALL.map(RuleId::Secret))
         .find(|r| r.name() == name)
     }
 }

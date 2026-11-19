@@ -1,14 +1,25 @@
-//! The privacy gate: scans a repository for personal information.
+//! The privacy gate: scans a repository for personal information and
+//! secrets.
 //!
 //! Exit codes: 0 clean, 1 findings, 2 usage or environment error.
+//!
+//! Every mode (`--staged`, `--all`, `--range`, `--stdin` and a push) runs the
+//! generic rules, the local terms and the secret rules (`secrets.rs`) on each
+//! text it reads (`scan_content`, `scan_name`, `identity_scan`). The public
+//! `scan_text`, `scan_bytes` and `scan_path_name` run the generic rules and
+//! the local terms only. Nothing the gate prints holds a secret's body: a
+//! secret finding shows its prefix, other findings on its line are hidden,
+//! and paths and error messages pass through `secrets::redact`.
 
-mod git;
+pub(crate) mod git;
 mod rules;
 mod scan;
+mod secrets;
 
 pub use rules::RuleId;
 pub use scan::{Finding, Terms, scan_bytes, scan_path_name, scan_text};
 use scan::{decode_term_list, scan_views};
+pub use secrets::{SecretKind, redact};
 
 use globset::{GlobBuilder, GlobMatcher};
 use serde::Deserialize;
@@ -26,6 +37,64 @@ pub enum Mode {
     All,
     Range(String),
     Stdin(String),
+    /// The refs of a push (the pre-push hook): every commit and annotated tag
+    /// they would publish, and their remote names.
+    Push(Vec<PushRange>),
+}
+
+/// One ref of a push. The commits scanned are those reachable from `tip` and
+/// from none of `exclude` (commits the remote already has); when `tip` is an
+/// annotated tag, every tag object of its chain (message and tagger) is
+/// scanned too. `name`, the remote ref name the push creates or moves, is
+/// scanned like a file name and never given to git. `tip` and `exclude` are
+/// object ids (`hooks::push_ranges` checks them); they reach git only after
+/// `--end-of-options`, so a value that is not one is a git error, never an
+/// option.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushRange {
+    pub name: String,
+    pub tip: String,
+    pub exclude: Vec<String>,
+}
+
+/// A full object id: 40 (SHA-1) or 64 (SHA-256) hexadecimal characters.
+pub fn is_object_id(s: &str) -> bool {
+    matches!(s.len(), 40 | 64) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Runs git in `dir` with `input` on its standard input and returns its
+/// standard output, or an error holding its standard error.
+pub(crate) fn git_input(dir: &Path, args: &[&str], input: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    // Written from another thread, so a large input and a large output
+    // cannot block each other.
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("cannot run git: {e}"))?;
+    let written = writer
+        .join()
+        .map_err(|_| "cannot write to git".to_string())?;
+    if !out.status.success() {
+        return Err(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    written.map_err(|e| format!("cannot write to git: {e}"))?;
+    Ok(out.stdout)
 }
 
 #[derive(Debug, Clone)]
@@ -52,8 +121,10 @@ struct AllowFile {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AllowEntry {
-    path: String,
-    rule: String,
+    // With their place in the file, so an error can name the line without
+    // quoting the text (which could hold a secret).
+    path: toml::Spanned<String>,
+    rule: toml::Spanned<String>,
     #[serde(default)]
     values: Vec<String>,
     reason: String,
@@ -75,31 +146,36 @@ impl Allow {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Allow(Vec::new())),
             Err(e) => return Err(format!("cannot read {ALLOW_FILE}: {e}")),
         };
-        let parsed: AllowFile =
-            toml::from_str(&text).map_err(|e| format!("invalid {ALLOW_FILE}: {e}"))?;
+        let parsed: AllowFile = toml::from_str(&text).map_err(|e| parse_error(&text, e.span()))?;
         let mut entries = Vec::new();
         for e in parsed.allow {
-            let rule = RuleId::from_name(&e.rule)
-                .ok_or_else(|| format!("{ALLOW_FILE}: unknown rule `{}`", e.rule))?;
-            if matches!(rule, RuleId::LocalTerm | RuleId::LocalFileTracked) {
-                return Err(format!("{ALLOW_FILE}: `{}` can never be exempted", e.rule));
+            // Each error names the line, never the entry's text.
+            let at = |field: &toml::Spanned<String>, what: &str| {
+                let (line, _) = position(&text, field.span().start);
+                format!("{ALLOW_FILE} line {line}: the entry {what} (the text is not shown)")
+            };
+            let rule = RuleId::from_name(e.rule.get_ref())
+                .ok_or_else(|| at(&e.rule, "names an unknown rule"))?;
+            if matches!(
+                rule,
+                RuleId::LocalTerm | RuleId::LocalFileTracked | RuleId::Secret(_)
+            ) {
+                // A known rule's name, so safe to show.
+                return Err(format!(
+                    "{ALLOW_FILE}: `{}` can never be exempted",
+                    rule.name()
+                ));
             }
             if e.reason.trim().is_empty() {
-                return Err(format!(
-                    "{ALLOW_FILE}: the entry for `{}` has no reason",
-                    e.path
-                ));
+                return Err(at(&e.path, "has no reason"));
             }
             if e.values.is_empty() || e.values.iter().any(|v| v.is_empty()) {
-                return Err(format!(
-                    "{ALLOW_FILE}: the entry for `{}` needs a non-empty `values` list",
-                    e.path
-                ));
+                return Err(at(&e.path, "needs a non-empty `values` list"));
             }
-            let glob = GlobBuilder::new(&e.path)
+            let glob = GlobBuilder::new(e.path.get_ref())
                 .literal_separator(true)
                 .build()
-                .map_err(|err| format!("{ALLOW_FILE}: bad glob `{}`: {err}", e.path))?;
+                .map_err(|_| at(&e.path, "has a path that is not a valid glob"))?;
             entries.push(AllowItem {
                 glob: glob.compile_matcher(),
                 rule,
@@ -131,6 +207,30 @@ impl Allow {
                         .any(|v| value_matches(v, f) || value_matches(&toml_escaped(v), f))
             })
     }
+}
+
+/// An allow-file parse error: where it is, never the text there (toml's own
+/// message quotes the line, and a schema error quotes the value, either of
+/// which could hold a secret).
+fn parse_error(text: &str, span: Option<std::ops::Range<usize>>) -> String {
+    match span {
+        Some(span) => {
+            let (line, column) = position(text, span.start);
+            format!(
+                "invalid {ALLOW_FILE}: a TOML or schema error at line {line}, column {column} \
+                 (the text there is not shown)"
+            )
+        }
+        None => format!("invalid {ALLOW_FILE}: a TOML or schema error (the text is not shown)"),
+    }
+}
+
+/// The line and column (both from 1) of a byte offset in `text`.
+fn position(text: &str, offset: usize) -> (usize, usize) {
+    let before = &text[..text.floor_char_boundary(offset)];
+    let line = before.matches('\n').count() + 1;
+    let column = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
+    (line, column)
 }
 
 /// How a value reads in the allow file's own text (backslashes doubled).
@@ -224,7 +324,8 @@ pub fn run(opts: &Options) -> i32 {
     match run_inner(opts) {
         Ok(code) => code,
         Err(msg) => {
-            eprintln!("privacy: error: {msg}");
+            // A message can quote a path or an argument; never a secret.
+            eprintln!("privacy: error: {}", secrets::redact(&msg));
             2
         }
     }
@@ -270,9 +371,13 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
     }
     if !terms.has_local() {
         if lists.is_empty() {
-            eprintln!("privacy: local terms are not being checked (no {LOCAL_LIST} found)");
+            eprintln!(
+                "privacy: warning: local terms are not being checked (no {LOCAL_LIST} found)"
+            );
         } else {
-            eprintln!("privacy: local terms are not being checked (no list found has any term)");
+            eprintln!(
+                "privacy: warning: local terms are not being checked (no list found has any term)"
+            );
         }
     }
 
@@ -298,15 +403,12 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
             std::io::stdin()
                 .read_to_end(&mut buf)
                 .map_err(|e| format!("cannot read stdin: {e}"))?;
-            if opts.git_message {
-                add(
-                    None,
-                    false,
-                    scan_views(label, &buf, &terms, &clean_git_message),
-                );
+            let prep: &dyn Fn(&str) -> String = if opts.git_message {
+                &clean_git_message
             } else {
-                add(None, false, scan_bytes(label, &buf, &terms));
-            }
+                &str::to_string
+            };
+            add(None, false, scan_content(label, &buf, &terms, prep));
         }
         Mode::All => {
             local_list_check(&root, &mut add)?;
@@ -315,7 +417,7 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                 if path == LOCAL_LIST {
                     continue;
                 }
-                add(None, true, scan_path_name(&path, &terms));
+                add(None, true, scan_name(&path, &terms));
                 let full = root.join(&entry.file);
                 let Ok(meta) = fs::symlink_metadata(&full) else {
                     continue; // tracked but deleted in the working tree
@@ -329,7 +431,11 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                 } else {
                     continue; // submodule or other non-file entry
                 };
-                add(None, true, scan_bytes(&path, &bytes, &terms));
+                add(
+                    None,
+                    true,
+                    scan_content(&path, &bytes, &terms, &str::to_string),
+                );
             }
         }
         Mode::Staged => {
@@ -338,12 +444,13 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
                 if b.path == LOCAL_LIST {
                     continue;
                 }
-                add(None, true, scan_path_name(&b.path, &terms));
+                add(None, true, scan_name(&b.path, &terms));
                 if !b.submodule {
+                    let blob = git::read_blob(&root, &b.oid)?;
                     add(
                         None,
                         true,
-                        scan_bytes(&b.path, &git::read_blob(&root, &b.oid)?, &terms),
+                        scan_content(&b.path, &blob, &terms, &str::to_string),
                     );
                 }
             }
@@ -354,62 +461,228 @@ fn run_inner(opts: &Options) -> Result<i32, String> {
             if range.starts_with('-') {
                 return Err("--range: a range cannot begin with `-`".to_string());
             }
-            let mut seen: HashSet<(String, String)> = HashSet::new();
             // The repository's own commit name, read once (the maintainer's
             // second decision, see `identity_findings`); never printed.
             let own_name = git::configured_user_name(&root);
             let commits = git::commits(&root, range)?;
             scanned = Some(commits.len());
-            for c in commits {
-                let short = c.sha.chars().take(10).collect::<String>();
-                let label = format!("commit {short} message");
-                let msg = git::commit_message(&root, &c.sha)?;
-                add(Some(&short), false, scan_bytes(&label, &msg, &terms));
-                // The whole identity line (name and address together) is
-                // checked for addresses and local terms, except a name that
-                // is the account of its own no-reply address (the
-                // maintainer's decision, see `identity_findings`).
-                for id in git::commit_identities(&root, &c.sha)? {
-                    let label = format!("commit {short} {}", id.who);
-                    add(
-                        Some(&short),
-                        false,
-                        identity_findings(&label, &id.line, &terms, own_name.as_deref()),
-                    );
+            scan_commits(&root, commits, &terms, own_name.as_deref(), &mut add)?;
+        }
+        Mode::Push(refs) => {
+            let own_name = git::configured_user_name(&root);
+            let mut commits = Vec::new();
+            let mut listed: HashSet<String> = HashSet::new();
+            for r in refs {
+                add(None, false, scan_name(&r.name, &terms));
+                // Only commits are scanned, so a ref that names a blob or a
+                // tree (directly or through tags) is refused, not passed.
+                let kind = scan_tags(&root, &r.tip, &terms, own_name.as_deref(), &mut add)?;
+                if kind != "commit" {
+                    return Err(format!(
+                        "push: {} names a {kind}, not a commit; the gate scans commits, \
+                         so such a push is refused",
+                        r.name
+                    ));
                 }
-                for b in git::commit_blobs(&root, &c)? {
-                    if b.path == LOCAL_LIST {
-                        add(
-                            Some(&short),
-                            false,
-                            vec![Finding {
-                                path: b.path.clone(),
-                                line: 0,
-                                rule: RuleId::LocalFileTracked,
-                                excerpt: "a commit adds or changes the local term list".into(),
-                                value: String::new(),
-                            }],
-                        );
-                        continue;
-                    }
-                    if !seen.insert((b.oid.clone(), b.path.clone())) {
-                        continue;
-                    }
-                    add(Some(&short), true, scan_path_name(&b.path, &terms));
-                    if !b.submodule {
-                        add(
-                            Some(&short),
-                            true,
-                            scan_bytes(&b.path, &git::read_blob(&root, &b.oid)?, &terms),
-                        );
+                for c in pushed_commits(&root, r)? {
+                    if listed.insert(c.sha.clone()) {
+                        commits.push(c);
                     }
                 }
             }
+            scanned = Some(commits.len());
+            scan_commits(&root, commits, &terms, own_name.as_deref(), &mut add)?;
         }
     }
 
     report(&found, opts.json, scanned);
     Ok(if found.is_empty() { 0 } else { 1 })
+}
+
+/// Every finding in one text: the generic rules and the local terms on each
+/// reading of it (`scan_views`), and the secret rules on each reading, with
+/// the other findings' excerpts hidden on the lines a secret covers.
+fn scan_content(
+    label: &str,
+    bytes: &[u8],
+    terms: &Terms,
+    prep: &dyn Fn(&str) -> String,
+) -> Vec<Finding> {
+    secrets::scan_bytes(label, bytes, prep).merge(scan_views(label, bytes, terms, prep))
+}
+
+/// Every finding in a path name (line 0), the secret rules included.
+fn scan_name(path: &str, terms: &Terms) -> Vec<Finding> {
+    secrets::scan_name(path).merge(scan_path_name(path, terms))
+}
+
+/// The findings in one identity line (`identity_findings`) and its secrets.
+fn identity_scan(label: &str, bytes: &[u8], terms: &Terms, own_name: Option<&str>) -> Vec<Finding> {
+    secrets::scan_bytes(label, bytes, &str::to_string)
+        .merge(identity_findings(label, bytes, terms, own_name))
+}
+
+/// Scans each commit: its message, its author and committer lines, and the
+/// name and content of every file it adds or changes (each file version
+/// once). A commit that adds or changes the local term list is a finding.
+fn scan_commits(
+    root: &Path,
+    commits: Vec<git::CommitInfo>,
+    terms: &Terms,
+    own_name: Option<&str>,
+    add: &mut impl FnMut(Option<&str>, bool, Vec<Finding>),
+) -> Result<(), String> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    for c in commits {
+        let short = c.sha.chars().take(10).collect::<String>();
+        let label = format!("commit {short} message");
+        let msg = git::commit_message(root, &c.sha)?;
+        let mut text_found = scan_content(&label, &msg, terms, &str::to_string);
+        // The whole identity line (name and address together) is checked
+        // for addresses and local terms, except a name that is the account
+        // of its own no-reply address (the maintainer's decision, see
+        // `identity_findings`).
+        for id in git::commit_identities(root, &c.sha)? {
+            let label = format!("commit {short} {}", id.who);
+            text_found.extend(identity_scan(&label, &id.line, terms, own_name));
+        }
+        // The whole raw commit object too: extra headers and message text
+        // after a NUL byte are published but are in neither of the above.
+        let raw = git::git(root, &["cat-file", "commit", &c.sha])?;
+        let object = format!("commit {short} object");
+        add(
+            Some(&short),
+            false,
+            with_raw_secrets(text_found, &object, &raw),
+        );
+        for b in git::commit_blobs(root, &c)? {
+            if b.path == LOCAL_LIST {
+                add(
+                    Some(&short),
+                    false,
+                    vec![Finding {
+                        path: b.path.clone(),
+                        line: 0,
+                        rule: RuleId::LocalFileTracked,
+                        excerpt: "a commit adds or changes the local term list".into(),
+                        value: String::new(),
+                    }],
+                );
+                continue;
+            }
+            if !seen.insert((b.oid.clone(), b.path.clone())) {
+                continue;
+            }
+            add(Some(&short), true, scan_name(&b.path, terms));
+            if !b.submodule {
+                let blob = git::read_blob(root, &b.oid)?;
+                add(
+                    Some(&short),
+                    true,
+                    scan_content(&b.path, &blob, terms, &str::to_string),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `found` (the findings in an object's message and identity lines) and the
+/// secret findings in the object's whole raw text, `raw`, under `label`; a
+/// secret already in `found` is not repeated (the same text has the same
+/// digest).
+fn with_raw_secrets(mut found: Vec<Finding>, label: &str, raw: &[u8]) -> Vec<Finding> {
+    let reported: HashSet<String> = found
+        .iter()
+        .filter(|f| matches!(f.rule, RuleId::Secret(_)))
+        .map(|f| f.value.clone())
+        .collect();
+    let mut raw_found = secrets::scan_bytes(label, raw, &str::to_string).merge(Vec::new());
+    raw_found.retain(|f| !reported.contains(&f.value));
+    found.extend(raw_found);
+    found
+}
+
+/// The commits a push of `r` would publish, oldest first: reachable from
+/// its tip and from none of its exclusions, which go to git on standard input
+/// (any number of them, never on the command line).
+fn pushed_commits(root: &Path, r: &PushRange) -> Result<Vec<git::CommitInfo>, String> {
+    // On standard input, which `rev-list --stdin` would also read pseudo
+    // options from, so every line is checked to be an object id first.
+    if let Some(bad) = std::iter::once(&r.tip)
+        .chain(&r.exclude)
+        .find(|id| !is_object_id(id))
+    {
+        return Err(format!("push: not an object id: {bad:?}"));
+    }
+    let mut input = format!("{}\n", r.tip);
+    for e in &r.exclude {
+        input.push_str(&format!("^{e}\n"));
+    }
+    let out = git_input(
+        root,
+        &["rev-list", "--parents", "--reverse", "--stdin"],
+        input.as_bytes(),
+    )?;
+    Ok(String::from_utf8_lossy(&out)
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split(' ');
+            let sha = it.next()?.to_string();
+            Some(git::CommitInfo {
+                sha,
+                parents: it.map(str::to_string).collect(),
+            })
+        })
+        .collect())
+}
+
+/// When `oid` is an annotated tag: scans the message and the tagger line of
+/// it and of every tag it leads to (a tag can name another tag), and each
+/// whole raw tag object with the secret rules, as text that the allow file
+/// never covers. A tag's chain ends at a non-tag object,
+/// whose type it returns (`commit`, `tree` or `blob`); a tag that names no
+/// object id is an error.
+fn scan_tags(
+    root: &Path,
+    oid: &str,
+    terms: &Terms,
+    own_name: Option<&str>,
+    add: &mut impl FnMut(Option<&str>, bool, Vec<Finding>),
+) -> Result<String, String> {
+    let mut oid = oid.to_string();
+    loop {
+        let kind = git::git(root, &["cat-file", "-t", "--end-of-options", &oid])?;
+        if kind != b"tag\n" {
+            return Ok(String::from_utf8_lossy(&kind).trim_end().to_string());
+        }
+        let raw = git::git(root, &["cat-file", "tag", "--end-of-options", &oid])?;
+        let short: String = oid.chars().take(10).collect();
+        // The header ends at the first empty line; the message follows.
+        let at = raw
+            .windows(2)
+            .position(|w| w == b"\n\n")
+            .unwrap_or(raw.len());
+        let (head, message) = (&raw[..at], raw.get(at + 2..).unwrap_or_default());
+        let mut next = None;
+        let mut found = Vec::new();
+        for line in head.split(|b| *b == b'\n') {
+            if let Some(rest) = line.strip_prefix(b"tagger ") {
+                let label = format!("tag {short} tagger");
+                found.extend(identity_scan(&label, rest, terms, own_name));
+            } else if let Some(rest) = line.strip_prefix(b"object ") {
+                next = Some(String::from_utf8_lossy(rest).into_owned());
+            }
+        }
+        let label = format!("tag {short} message");
+        found.extend(scan_content(&label, message, terms, &str::to_string));
+        // The whole raw tag object too: its own name and any extra header.
+        let object = format!("tag {short} object");
+        add(Some(&short), false, with_raw_secrets(found, &object, &raw));
+        oid = next
+            .filter(|n| is_object_id(n))
+            .ok_or_else(|| format!("tag {short} names no object id"))?;
+    }
 }
 
 /// The address and local-term findings in one identity line: its lossy
@@ -518,7 +791,7 @@ fn report(found: &[Reported], json: bool, scanned: Option<usize>) {
             .map(|r| {
                 let f = &r.finding;
                 let mut o = serde_json::json!({
-                    "path": f.path,
+                    "path": secrets::redact(&f.path),
                     "line": f.line,
                     "rule": f.rule.name(),
                     "excerpt": shown_excerpt(f),
@@ -536,10 +809,11 @@ fn report(found: &[Reported], json: bool, scanned: Option<usize>) {
     } else {
         for r in found {
             let f = &r.finding;
+            let path = secrets::redact(&f.path);
             let at = if f.line == 0 {
-                f.path.clone()
+                path
             } else {
-                format!("{}:{}", f.path, f.line)
+                format!("{path}:{}", f.line)
             };
             let who = r
                 .commit
@@ -563,5 +837,31 @@ fn report(found: &[Reported], json: bool, scanned: Option<usize>) {
         }
     } else {
         eprintln!("privacy: {} finding(s)", found.len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pushed_commits_takes_object_ids_only() {
+        // Checked before git runs: `rev-list --stdin` would read `--all` as
+        // a pseudo option.
+        let ok = "a".repeat(40);
+        let cases = [
+            ("--all".to_string(), Vec::new()),
+            (ok.clone(), vec!["--all".to_string()]),
+            (ok.clone(), vec![ok.clone(), "HEAD".to_string()]),
+        ];
+        for (tip, exclude) in cases {
+            let r = PushRange {
+                name: "refs/heads/x".into(),
+                tip,
+                exclude,
+            };
+            let e = pushed_commits(Path::new("."), &r).err().unwrap_or_default();
+            assert!(e.starts_with("push: not an object id"), "{e}");
+        }
     }
 }

@@ -134,13 +134,18 @@ jobs:
       - name: Test
         shell: bash
         run: cargo test --workspace --locked
-      # `cargo test` does not produce the examples' final binaries (a build with
-      # `--examples` compiled the cookbook again after it), so build them here.
-      # `--workspace` keeps the feature set the test step used; `-p udx-cookbook`
-      # unified features differently and rebuilt GPUI on every runner.
+      # Check that every target, the cookbook examples included, builds. The
+      # test step builds the examples already; `--all-targets` resolves
+      # features as it did (test targets and dev-dependencies included), so
+      # this is a check, not a rebuild. `--examples` (and `-p udx-cookbook`
+      # before it) resolved them differently and recompiled the platform
+      # crates: measured locally on macOS after `cargo test --workspace
+      # --no-run`, `--examples` compiled 15 units in 6 s (rustix, tempfile,
+      # the toml crates, cbindgen, gpui-pre-apple, gpui-pre-macos,
+      # gpui-pre-platform, udx-cookbook) and `--all-targets` none.
       - name: Build the cookbook examples
         shell: bash
-        run: cargo build --workspace --examples --locked
+        run: cargo build --workspace --all-targets --locked
       - name: Save the build cache
         if: github.event_name == 'push' && steps.cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -189,18 +194,22 @@ jobs:
       - name: Audit the lockfile
         run: cargo audit
 
-  mutants:
-    name: mutants
-    # Pull requests only. The job always runs so the required check reports;
-    # it skips the work when the diff does not touch the mutated crates.
+  # Mutation testing of udx-core and xtask, in shards. One job ran it all and
+  # no longer fits its limit (Task 1a's run was cancelled at 30 minutes), so
+  # the mutants are split across MUTANTS_SHARDS jobs with cargo-mutants' own
+  # sharding. The job named `mutants` (the required check) passes only when
+  # every shard passed, or when the decide job found that the diff does not
+  # touch the mutated crates and the shards were skipped for that reason.
+  mutants-decide:
+    name: mutants (decide)
+    # Pull requests only, as before.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-26.04
-    # A full local run (237 mutants, 2 jobs) took 8 minutes 44 seconds. Three
-    # times that, rounded up to 15 minutes, covers slower runners and the
-    # cargo-mutants install; see .cargo/mutants.toml for the per-mutant timeout.
-    timeout-minutes: 30
+    timeout-minutes: 10
     env:
       BASE_REF: ${{ github.base_ref }}
+    outputs:
+      run: ${{ steps.changed.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -221,27 +230,60 @@ jobs:
           esac
           echo "run=${run}" >> "$GITHUB_OUTPUT"
           echo "touches udx-core or xtask: ${run}"
+
+  mutants-shard:
+    name: mutants shard (${{ matrix.shard }}/8)
+    needs: mutants-decide
+    if: needs.mutants-decide.outputs.run == 'true'
+    runs-on: ubuntu-26.04
+    # Eight shards, by a local measurement with 2 jobs per shard, as here:
+    # the unsharded 679 mutants took 63 minutes as eight
+    # shards of 84 or 85, the slowest shard 9 minutes (539 s, including two
+    # mutants that run to the per-mutant timeout of five times the baseline
+    # test time). A hosted runner taken as three times slower: 27 minutes,
+    # plus about 6 for the toolchain and the cargo-mutants install, 33. The
+    # limit of 50 leaves half again as much. With fewer shards a slow runner
+    # would come close to the limit; more would mostly add runner start-up.
+    # Changing the count means changing the matrix, MUTANTS_SHARDS and the
+    # name together.
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        # Shown as 1 to 8; cargo-mutants numbers shards from 0 (`--shard k/n`
+        # needs k < n), so the step passes shard - 1.
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      SHARD: ${{ matrix.shard }}
+      MUTANTS_SHARDS: "8"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install the pinned toolchain
-        if: steps.changed.outputs.run == 'true'
         shell: bash
         run: |
           set -eu
           rustup toolchain install
           cargo --version
       - name: Install cargo-mutants
-        if: steps.changed.outputs.run == 'true'
         run: cargo install --locked cargo-mutants@27.1.0
-      - name: Mutation tests
-        if: steps.changed.outputs.run == 'true'
+      - name: Mutation tests (one shard)
         shell: bash
         run: |
           set -eu
+          # Round-robin puts mutant i on shard i % n, so the slow mutants
+          # (the loop-advance ones that run to the per-mutant timeout, which
+          # sit next to each other in rules.rs) spread across the shards.
+          # The shards together are exactly the unsharded list.
+          index=$((SHARD - 1))
           # The result is decided from the report files, not only the exit
           # code. Exit 3 means at least one mutant timed out (a hang counts
           # as detected) and can also hide missed mutants, because cargo-mutants
           # checks timeouts before misses; that is why missed.txt is read.
           rc=0
-          cargo mutants -p udx-core -p xtask --no-shuffle -j 2 || rc=$?
+          cargo mutants -p udx-core -p xtask --no-shuffle -j 2 \
+            --shard "${index}/${MUTANTS_SHARDS}" --sharding round-robin || rc=$?
           if [ -s mutants.out/missed.txt ]; then
             echo "Missed mutants:"
             cat mutants.out/missed.txt
@@ -265,6 +307,38 @@ jobs:
               fi
               ;;
             *) echo "cargo mutants failed with exit code ${rc}" >&2; exit "$rc" ;;
+          esac
+
+  mutants:
+    name: mutants
+    # Pull requests only. It always runs on a pull request so the required
+    # check reports, and decides from the other two jobs' results.
+    needs: [mutants-decide, mutants-shard]
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Decide from the decide job and the shards
+        shell: bash
+        env:
+          DECIDE_RESULT: ${{ needs.mutants-decide.result }}
+          RUN: ${{ needs.mutants-decide.outputs.run }}
+          SHARDS_RESULT: ${{ needs.mutants-shard.result }}
+        run: |
+          set -eu
+          # Pass only when every shard passed, or when the diff does not touch
+          # the mutated crates and the shards were skipped for that reason.
+          # Anything else (a failed or cancelled decide job or shard, or shards
+          # that did not run although they had to) fails.
+          echo "decide: ${DECIDE_RESULT}, touches the crates: ${RUN:-unknown}, shards: ${SHARDS_RESULT}"
+          if [ "${DECIDE_RESULT}" != success ]; then
+            echo "::error::the decide job did not succeed (${DECIDE_RESULT})"
+            exit 1
+          fi
+          case "${RUN}:${SHARDS_RESULT}" in
+            true:success) echo "every shard passed" ;;
+            false:skipped) echo "the diff does not touch udx-core or xtask; nothing to mutate" ;;
+            *) echo "::error::mutation shards: ${SHARDS_RESULT} (touches the crates: ${RUN:-unknown})"; exit 1 ;;
           esac
 
   privacy:
@@ -340,8 +414,10 @@ jobs:
         env:
           RANGE: ${{ steps.range.outputs.range }}
         run: |
-          gitleaks git --no-banner --redact --config .gitleaks.toml \
-            --log-opts="${RANGE}" .
+          # As in privacy-base.yml: no inline allow comment is honoured, and
+          # every file (merge resolutions included) is read as text.
+          gitleaks git --no-banner --redact --ignore-gitleaks-allow --config .gitleaks.toml \
+            --log-opts="--text --diff-merges=first-parent ${RANGE}" .
       - name: Flag changes to files that govern the checks
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         shell: bash
