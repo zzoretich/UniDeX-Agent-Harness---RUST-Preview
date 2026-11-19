@@ -1,0 +1,224 @@
+name: privacy-base
+
+# Why this workflow runs on pull_request_target
+#
+# The `privacy` job in ci.yml runs on `pull_request`, so it runs the pull
+# request's own workflow definition, gate code and allow files: a pull request
+# could weaken the gate, add an allow entry for its own finding, or edit that
+# job to exit 0, and still pass it. `pull_request_target` runs the definition
+# from the BASE branch, so this job judges the pull request with the base
+# branch's workflow, the base branch's `xtask` and the base branch's allow
+# files (`privacy-allow.toml`, `.gitleaks.toml`). It cannot run before it is on
+# the base branch, so it cannot judge the pull request that adds it.
+#
+# How the pull request is read: its commits are fetched as git objects into a
+# local ref and never checked out. The base branch's gate reads their files,
+# messages and identities through git (`xtask privacy --range`), the pinned
+# secret scanner reads the same range through `git log`, and the title and
+# body reach the gate through environment variables and standard input.
+# Nothing from the pull request is built, run, sourced or used as
+# configuration: the working tree, `.cargo/`, `.gitattributes` and the git
+# hooks folder are the base branch's, a fetch installs no hooks, and every git
+# command that touches the pull request's objects runs with the overrides in
+# GIT_CONFIG_* below (no hooks, no file-system monitor, no attributes file)
+# and without replacement objects.
+#
+# What must NEVER be added to this workflow:
+#   - a checkout of the pull request (no `ref` naming the head or merge
+#     commit, no `repository` naming a fork), any git command that writes its
+#     tree to disk (`checkout`, `switch`, `restore`, `worktree add`, `reset
+#     --hard`, `read-tree -u`, `archive`), a build of its code, or a run of
+#     anything it contains.
+#   - a write permission. The token stays at contents: read and
+#     pull-requests: read.
+#   - a secret, or any step that uses one.
+#   - a cache restore or save (actions/cache): this job builds nothing it
+#     reuses, and a cache is one more way for data to cross between runs.
+#   - pull-request-controlled text (a title, a body, a branch or ref name, a
+#     file name, an author) in a shell command or a workflow expression. Pass
+#     such values through environment variables or files only, and print them
+#     only between `::stop-commands::` markers, so a file name cannot issue a
+#     workflow command.
+#   - anything that lets the pull request's content exempt a finding: the
+#     secret scanner runs with --ignore-gitleaks-allow, so an inline
+#     `gitleaks:allow` comment is never honoured here, and it reads every
+#     file as text, merge resolutions included.
+#
+# How the result counts: only a run of THIS workflow file, on the
+# `pull_request_target` event, for the pull request's current head commit.
+# A pull request can add a workflow of its own (on `pull_request`) with a job
+# that has the same name, `privacy (base)`, and passes; a check of that name
+# from any other workflow or event is not this result. It counts only for a
+# pull request with base `main`, as decision 0025 says for `governed-paths
+# (flag)`. A missing, stale or cancelled run of this workflow, or a
+# same-named check from another workflow, counts as failed.
+#
+# Accepted residual: the secret scanner's stock configuration (`useDefault =
+# true` in `.gitleaks.toml`) has a global allowlist of paths it skips whatever
+# they hold (images, fonts, documents, binaries, dependency and
+# virtual-environment folders, lockfiles, wrapper scripts, and any path
+# containing `gitleaks.toml`), and no switch turns that off. `.gitleaks.toml` is frozen and is not changed for
+# it. The gate's own secret rules (`xtask/src/privacy/secrets.rs`) scan every
+# path, those included, for the families they know.
+# Same hardening as ci.yml and governance.yml otherwise: persist-credentials
+# false, every action pinned to a full commit SHA, a fixed runner label.
+
+on:
+  pull_request_target:
+    # `edited` covers a change of the base branch (which brings other commits
+    # into the range without a new push) and of the title or body.
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: privacy-base-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  privacy-base:
+    name: privacy (base)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      # SHA-256 of gitleaks_8.30.1_linux_x64.tar.gz, from the checksums file
+      # published with the v8.30.1 release (the same pin as ci.yml).
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      # With pull_request_target and no `ref`, this is the base branch. Full
+      # history, so the range's start and its merge base are present.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        shell: bash
+        run: |
+          set -eu
+          rustup toolchain install
+          cargo --version
+      - name: Build the base branch's xtask
+        id: build
+        shell: bash
+        run: cargo build --locked -p xtask
+      # This step and the fetch run even when the build failed, so the secret
+      # scanner still reports.
+      - name: Install gitleaks
+        id: gitleaks
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -eu
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --proto '=https' --tlsv1.2 -sSfL -o "${RUNNER_TEMP}/${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/${archive}" | sha256sum -c -
+          mkdir -p "${RUNNER_TEMP}/gitleaks"
+          tar -xzf "${RUNNER_TEMP}/${archive}" -C "${RUNNER_TEMP}/gitleaks" gitleaks
+          echo "${RUNNER_TEMP}/gitleaks" >> "$GITHUB_PATH"
+      - name: Fetch the pull request's commits as objects
+        id: fetch
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: core.hooksPath
+          GIT_CONFIG_VALUE_0: /dev/null
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.attributesFile
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_NO_REPLACE_OBJECTS: "1"
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          # Both values come from the event; anything that is not a plain
+          # number or a full hexadecimal commit id stops the job.
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]] || { echo "unexpected pull request number" >&2; exit 1; }
+          [[ "${HEAD_SHA}" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || { echo "unexpected head commit id" >&2; exit 1; }
+          # Objects only, into a local ref: no tags, no submodules, no
+          # checkout. The repository is public, so the fetch needs no token.
+          git fetch --no-tags --no-recurse-submodules --no-write-fetch-head origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/privacy-base/pr-head"
+          # The commit the event names must be among them; when a newer push
+          # replaced it, that push starts a newer run.
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          base="$(git rev-parse --verify 'HEAD^{commit}')"
+          echo "range=${base}..${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "commit range: ${base}..${HEAD_SHA}"
+      - name: Privacy scan of the pull request's commits (base branch's gate)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        shell: bash
+        env:
+          CI: "1"
+          RANGE: ${{ steps.fetch.outputs.range }}
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: core.hooksPath
+          GIT_CONFIG_VALUE_0: /dev/null
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.attributesFile
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_NO_REPLACE_OBJECTS: "1"
+        run: |
+          set -euo pipefail
+          # File names and excerpts are the pull request's text: no workflow
+          # command is read from them.
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::stop-commands::${token}"
+          rc=0
+          ./target/debug/xtask privacy --range "${RANGE}" || rc=$?
+          echo "::${token}::"
+          exit "${rc}"
+      - name: Secret scan of the pull request's commits (base branch's rules)
+        if: ${{ !cancelled() && steps.gitleaks.outcome == 'success' && steps.fetch.outcome == 'success' }}
+        shell: bash
+        env:
+          RANGE: ${{ steps.fetch.outputs.range }}
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: core.hooksPath
+          GIT_CONFIG_VALUE_0: /dev/null
+          GIT_CONFIG_KEY_1: core.fsmonitor
+          GIT_CONFIG_VALUE_1: "false"
+          GIT_CONFIG_KEY_2: core.attributesFile
+          GIT_CONFIG_VALUE_2: /dev/null
+          GIT_NO_REPLACE_OBJECTS: "1"
+        run: |
+          set -euo pipefail
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::stop-commands::${token}"
+          rc=0
+          # --ignore-gitleaks-allow: an inline allow comment in the pull
+          # request's own text never exempts a finding. --text and
+          # --diff-merges=first-parent: a file holding a NUL byte, a pull
+          # request's `.gitattributes` and a change made only in a merge
+          # commit's resolution are all read as text.
+          gitleaks git --no-banner --redact --ignore-gitleaks-allow --config .gitleaks.toml \
+            --log-opts="--text --diff-merges=first-parent ${RANGE}" . || rc=$?
+          echo "::${token}::"
+          exit "${rc}"
+      - name: Privacy scan of the title and body (base branch's gate)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: bash
+        env:
+          CI: "1"
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -uo pipefail
+          token="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::stop-commands::${token}"
+          rc=0
+          printf '%s\n' "${PR_TITLE}" | ./target/debug/xtask privacy --stdin "pull request title" || rc=1
+          printf '%s\n' "${PR_BODY}" | ./target/debug/xtask privacy --stdin "pull request body" || rc=1
+          echo "::${token}::"
+          exit "${rc}"

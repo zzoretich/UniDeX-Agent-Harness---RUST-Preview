@@ -1,6 +1,7 @@
 mod governed;
 
 use clap::{Args, Parser, Subcommand};
+use std::io::Read;
 use std::process::ExitCode;
 use xtask::privacy::{Mode, Options};
 
@@ -51,8 +52,26 @@ struct GovernedArgs {
 
 #[derive(Subcommand)]
 enum HooksCmd {
-    /// Write the pre-commit and commit-msg hooks.
-    Install,
+    /// Write the pre-commit, commit-msg and pre-push hooks into this
+    /// repository's own hooks folder.
+    Install {
+        /// The hooks pass --require-local to the gate: a missing or empty
+        /// local term list stops the commit or push.
+        #[arg(long)]
+        require_local: bool,
+    },
+    /// What the pre-push hook runs: reads git's pre-push input on standard
+    /// input and scans the commits the push would publish.
+    /// Exit 0 clean, 1 findings, 2 error.
+    PrePush {
+        /// Fail with exit 2 when there is no local term list.
+        #[arg(long)]
+        require_local: bool,
+        /// The remote's name (or its URL, for a push to a URL); not used.
+        remote: String,
+        /// The URL the push goes to, which is asked what it already has.
+        url: Option<String>,
+    },
 }
 
 #[derive(Args)]
@@ -124,8 +143,8 @@ fn main() -> ExitCode {
             }
         }
         Cmd::Hooks {
-            action: HooksCmd::Install,
-        } => match xtask::hooks::install() {
+            action: HooksCmd::Install { require_local },
+        } => match xtask::hooks::install(require_local) {
             Ok(paths) => {
                 for p in paths {
                     println!("installed {}", p.display());
@@ -137,5 +156,44 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         },
+        Cmd::Hooks {
+            action:
+                HooksCmd::PrePush {
+                    require_local,
+                    remote: _,
+                    url,
+                },
+        } => pre_push(require_local, url.as_deref()),
+    }
+}
+
+/// The pre-push hook: git's input on standard input, the push's commits
+/// scanned by the gate. Any error refuses the push (exit 2).
+fn pre_push(require_local: bool, url: Option<&str>) -> ExitCode {
+    let mut input = Vec::new();
+    let ranges = std::io::stdin()
+        .read_to_end(&mut input)
+        .map_err(|e| format!("cannot read git's input: {e}"))
+        .and_then(|_| std::env::current_dir().map_err(|e| format!("no working directory: {e}")))
+        .and_then(|cwd| xtask::hooks::push_ranges(&cwd, url, &input));
+    match ranges {
+        Ok(ranges) => {
+            let code = xtask::privacy::run(&Options {
+                mode: Mode::Push(ranges),
+                require_local,
+                json: false,
+                git_message: false,
+            });
+            if code == 1 {
+                eprintln!(
+                    "pre-push: the push is refused: the commits it would publish have the findings above"
+                );
+            }
+            ExitCode::from(code as u8)
+        }
+        Err(e) => {
+            eprintln!("pre-push: error: {}", xtask::privacy::redact(&e));
+            ExitCode::from(2)
+        }
     }
 }

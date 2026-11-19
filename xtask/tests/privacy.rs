@@ -15,7 +15,7 @@ fn rules(text: &str) -> Vec<RuleId> {
 fn flags_a_personal_email() {
     let f = scan_text(
         "f.md",
-        "first line\nwrite to jane.roe@corp.io",
+        "first line\nwrite to jane.roe@corp.example",
         &Terms::generic(),
     );
     assert_eq!((f.len(), f[0].rule, f[0].line), (1, RuleId::Email, 2));
@@ -23,6 +23,9 @@ fn flags_a_personal_email() {
 
 #[test]
 fn allows_look_alike_addresses() {
+    // Real domains stay here on purpose: each rule under test is about that
+    // exact domain (the AI vendor's no-reply address, the hosting service's
+    // no-reply and SSH user addresses).
     for ok in [
         "Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>",
         "12345+someone@users.noreply.github.com",
@@ -73,6 +76,8 @@ fn flags_private_addresses_but_not_loopback_or_public() {
 
 #[test]
 fn flags_private_hosts_and_session_links() {
+    // The private-network host suffix and the chat service's link host are
+    // real on purpose: the rules under test are about exactly those names.
     assert_eq!(
         rules("see box.tail0a1b2c.ts.net"),
         vec![RuleId::PrivateHost]
@@ -119,7 +124,12 @@ fn empty_gitconfig() -> &'static Path {
     use std::sync::OnceLock;
     static EMPTY: OnceLock<std::path::PathBuf> = OnceLock::new();
     EMPTY.get_or_init(|| {
-        let p = std::env::temp_dir().join(format!("xtask-test-gitconfig-{}", std::process::id()));
+        // Under the test root cargo sets, never the OS temp folder.
+        let root = std::env::var_os("UNIDEX_TEST_ROOT").expect("cargo sets UNIDEX_TEST_ROOT");
+        let dir = std::path::PathBuf::from(root).join("xtask-tests");
+        fs::create_dir_all(&dir).unwrap();
+        // One fixed name, so a file is not left behind for every run.
+        let p = dir.join("xtask-test-gitconfig");
         fs::write(&p, "").unwrap();
         p
     })
@@ -252,7 +262,7 @@ fn stdin_mode_scans_a_commit_message() {
     let repo = new_repo();
     xtask(repo.path())
         .args(["privacy", "--stdin", "msg"])
-        .write_stdin("fix for jane.roe@corp.io")
+        .write_stdin("fix for jane.roe@corp.example")
         .assert()
         .code(1);
 }
@@ -273,7 +283,7 @@ fn range_mode_scans_commit_messages() {
 #[test]
 fn allow_file_exempts_one_rule_on_one_path_only() {
     let repo = new_repo();
-    let body = "path /Users/jroe/x\nmail jane.roe@corp.io\n";
+    let body = "path /Users/jroe/x\nmail jane.roe@corp.example\n";
     write(repo.path(), "a.md", body);
     write(repo.path(), "b.md", body);
     write(
@@ -383,7 +393,7 @@ fn an_allow_entry_without_a_reason_is_a_usage_error() {
     write(
         repo.path(),
         "privacy-allow.toml",
-        "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nvalues = [\"x@y.io\"]\nreason = \"\"\n",
+        "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nvalues = [\"x@y.test\"]\nreason = \"\"\n",
     );
     commit_all(repo.path(), "add files");
     xtask(repo.path())
@@ -707,19 +717,19 @@ fn an_allow_entry_without_values_is_a_usage_error() {
 #[test]
 fn only_the_listed_value_is_exempt() {
     let repo = new_repo();
-    write(repo.path(), "a.md", "mail jane.roe@corp.io\n");
-    write(repo.path(), "b.md", "mail jane.roe@corp.io\n");
+    write(repo.path(), "a.md", "mail jane.roe@corp.example\n");
+    write(repo.path(), "b.md", "mail jane.roe@corp.example\n");
     write(
         repo.path(),
         "privacy-allow.toml",
-        &allow("a.md", "Email", "\"jane.roe@corp.io\""),
+        &allow("a.md", "Email", "\"jane.roe@corp.example\""),
     );
     commit_all(repo.path(), "add files");
     let (code, text) = run(repo.path(), &["privacy", "--all"]);
     assert_eq!(code, 1, "{text}");
     assert!(text.contains("b.md") && !text.contains("a.md"), "{text}");
     // a different value of the same rule on the same path is flagged
-    write(repo.path(), "a.md", "mail other.person@corp.io\n");
+    write(repo.path(), "a.md", "mail other.person@corp.example\n");
     let (code, text) = run(repo.path(), &["privacy", "--all"]);
     assert_eq!(code, 1, "{text}");
     assert!(text.contains("a.md"), "{text}");
@@ -728,11 +738,11 @@ fn only_the_listed_value_is_exempt() {
 #[test]
 fn the_allow_files_own_values_do_not_flag_it() {
     let repo = new_repo();
-    write(repo.path(), "a.md", "mail jane.roe@corp.io\n");
+    write(repo.path(), "a.md", "mail jane.roe@corp.example\n");
     write(
         repo.path(),
         "privacy-allow.toml",
-        &allow("a.md", "Email", "\"jane.roe@corp.io\""),
+        &allow("a.md", "Email", "\"jane.roe@corp.example\""),
     );
     commit_all(repo.path(), "add files");
     let (code, text) = run(repo.path(), &["privacy", "--all"]);
@@ -744,11 +754,11 @@ fn the_allow_files_own_values_do_not_flag_it() {
 fn allow_globs_do_not_cross_directories_with_a_single_star() {
     let repo = new_repo();
     fs::create_dir_all(repo.path().join("docs")).unwrap();
-    write(repo.path(), "docs/x.md", "mail jane.roe@corp.io\n");
+    write(repo.path(), "docs/x.md", "mail jane.roe@corp.example\n");
     write(
         repo.path(),
         "privacy-allow.toml",
-        &allow("*.md", "Email", "\"jane.roe@corp.io\""),
+        &allow("*.md", "Email", "\"jane.roe@corp.example\""),
     );
     commit_all(repo.path(), "add files");
     assert_eq!(run(repo.path(), &["privacy", "--all"]).0, 1);
@@ -761,12 +771,12 @@ fn allow_entries_never_exempt_stdin_or_commit_messages() {
     write(
         repo.path(),
         "privacy-allow.toml",
-        &allow("*", "Email", "\"jane.roe@corp.io\""),
+        &allow("*", "Email", "\"jane.roe@corp.example\""),
     );
-    commit_all(repo.path(), "contact jane.roe@corp.io");
+    commit_all(repo.path(), "contact jane.roe@corp.example");
     xtask(repo.path())
         .args(["privacy", "--stdin", "msg"])
-        .write_stdin("contact jane.roe@corp.io")
+        .write_stdin("contact jane.roe@corp.example")
         .assert()
         .code(1);
     assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 1);
@@ -778,7 +788,7 @@ fn retina_asset_names_are_not_emails() {
     let t = Terms::generic();
     assert!(scan_path_name("assets/icon@2x.png", &t).is_empty());
     assert!(scan_text("f.md", "![i](assets/icon@3x.webp)", &t).is_empty());
-    assert_eq!(rules("icon@2x.io"), vec![RuleId::Email]);
+    assert_eq!(rules("icon@2x.test"), vec![RuleId::Email]);
 }
 
 // R-D
@@ -788,7 +798,10 @@ fn range_scans_author_and_committer_emails() {
     write(repo.path(), "a.md", "one\n");
     commit_all(repo.path(), "first");
     assert_eq!(run(repo.path(), &["privacy", "--range", "HEAD"]).0, 0);
-    git(repo.path(), &["config", "user.email", "jane.roe@corp.io"]);
+    git(
+        repo.path(),
+        &["config", "user.email", "jane.roe@corp.example"],
+    );
     write(repo.path(), "a.md", "two\n");
     commit_all(repo.path(), "second");
     let (code, text) = run(repo.path(), &["privacy", "--range", "HEAD~1..HEAD"]);
@@ -826,12 +839,16 @@ fn urls_only_guard_http_matches_inside_the_url() {
 fn a_local_term_in_the_allow_file_is_never_exempt() {
     let repo = new_repo();
     write(repo.path(), ".gitignore", "privacy-terms.local.txt\n");
-    write(repo.path(), "privacy-terms.local.txt", "jane.roe@corp.io\n");
+    write(
+        repo.path(),
+        "privacy-terms.local.txt",
+        "jane.roe@corp.example\n",
+    );
     write(repo.path(), "a.md", "harmless\n");
     write(
         repo.path(),
         "privacy-allow.toml",
-        &allow("other.md", "Email", "\"jane.roe@corp.io\""),
+        &allow("other.md", "Email", "\"jane.roe@corp.example\""),
     );
     git(repo.path(), &["add", "-A"]);
     for args in [vec!["privacy", "--all"], vec!["privacy", "--staged"]] {
@@ -1034,7 +1051,7 @@ fn installed_hooks_refuse_a_commit_with_a_finding() {
     // A finding in the message: the commit-msg hook refuses.
     write(repo.path(), "a.md", "clean again\n");
     git(repo.path(), &["add", "a.md"]);
-    let (ok, text) = commit("fix for jane.roe@corp.io");
+    let (ok, text) = commit("fix for jane.roe@corp.example");
     assert!(
         !ok,
         "a finding in the message must refuse the commit: {text}"
@@ -1048,4 +1065,440 @@ fn installed_hooks_refuse_a_commit_with_a_finding() {
     assert!(ok, "a clean commit must pass: {text}");
     assert!(text.contains("privacy: clean"), "{text}");
     assert_ne!(head(), before);
+}
+
+// ---- task 1a: what the gate could not see ----
+//
+// Every vector that a rule would flag is built at run time from parts, so
+// this file does not trip the rules it tests. Names are invented.
+
+/// An invented account name, never a placeholder the rules allow.
+fn invented_user() -> String {
+    format!("{}{}", "wren", "field")
+}
+
+fn unix_home(root: &str, name: &str) -> String {
+    format!("/{}/{}/work/x.txt", root, name)
+}
+
+fn windows_home(name: &str) -> String {
+    format!("C:\\{}\\{}\\work\\x.txt", "Users", name)
+}
+
+/// The text of a UTF-16 file in one of the four encodings the gate must read.
+fn utf16(text: &str, big_endian: bool, bom: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut units: Vec<u16> = Vec::new();
+    if bom {
+        units.push(0xFEFF);
+    }
+    units.extend(text.encode_utf16());
+    for u in units {
+        out.extend_from_slice(&if big_endian {
+            u.to_be_bytes()
+        } else {
+            u.to_le_bytes()
+        });
+    }
+    out
+}
+
+fn write_bytes(dir: &Path, name: &str, body: &[u8]) {
+    fs::write(dir.join(name), body).unwrap();
+}
+
+/// A repository whose ignored local term list holds `list`.
+fn repo_with_terms(list: &[u8]) -> TempDir {
+    let repo = new_repo();
+    write_bytes(repo.path(), "privacy-terms.local.txt", list);
+    write(repo.path(), ".gitignore", "privacy-terms.local.txt\n");
+    repo
+}
+
+#[test]
+fn utf16le_and_utf16be_files_are_scanned() {
+    let user = invented_user();
+    let body = format!("about zebracorp here\nsee {}\n", unix_home("Users", &user));
+    for big_endian in [false, true] {
+        for bom in [false, true] {
+            let enc = utf16(&body, big_endian, bom);
+            let which = format!("big_endian={big_endian} bom={bom}");
+            let must_find = |mode: &str, code: i32, text: &str| {
+                assert_eq!(code, 1, "{mode} {which}: {text}");
+                assert!(text.contains("LocalTerm"), "{mode} {which}: {text}");
+                assert!(text.contains("HomePath"), "{mode} {which}: {text}");
+            };
+
+            // --all
+            let repo = repo_with_terms(b"Zebracorp\n");
+            write_bytes(repo.path(), "u.txt", &enc);
+            commit_all(repo.path(), "add u");
+            let (code, text) = run(repo.path(), &["privacy", "--all"]);
+            must_find("--all", code, &text);
+
+            // --staged
+            let repo = repo_with_terms(b"Zebracorp\n");
+            write_bytes(repo.path(), "u.txt", &enc);
+            git(repo.path(), &["add", "-A"]);
+            let (code, text) = run(repo.path(), &["privacy", "--staged"]);
+            must_find("--staged", code, &text);
+
+            // --range
+            let repo = repo_with_terms(b"Zebracorp\n");
+            write_bytes(repo.path(), "u.txt", &enc);
+            commit_all(repo.path(), "add u");
+            let (code, text) = run(repo.path(), &["privacy", "--range", "HEAD"]);
+            must_find("--range", code, &text);
+
+            // --stdin
+            let repo = repo_with_terms(b"Zebracorp\n");
+            let out = xtask(repo.path())
+                .args(["privacy", "--stdin", "u.txt"])
+                .write_stdin(enc.clone())
+                .output()
+                .unwrap();
+            must_find("--stdin", out.status.code().unwrap(), &output_text(&out));
+        }
+    }
+}
+
+#[test]
+fn local_network_names_flagged() {
+    let local_name = format!("{}.{}", "printer-01", "local");
+    let lan_name = format!("{}.{}", "nas-01", "lan");
+    let prompt = format!("{}@{}:~$ ls", "dana", "devbox");
+    let link_local = format!("{}::{}:{}", "fe80", "1c2d", "3e4f");
+    let unique_local = format!("{}:{}:{}::{}", "fd12", "3456", "789a", "1");
+    let hw_addr = ["02", "42", "ac", "11", "00", "02"].join(":");
+    let mut missed: Vec<String> = Vec::new();
+    for bad in [
+        format!("ping {local_name}"),
+        format!("ssh {lan_name}"),
+        prompt,
+        format!("inet6 {link_local}%en0"),
+        format!("addr {unique_local}"),
+        format!("link/ether {hw_addr} brd ff"),
+    ] {
+        if scan_text("f.md", &bad, &Terms::generic()).is_empty() {
+            missed.push(bad);
+        }
+    }
+    assert!(missed.is_empty(), "not flagged: {missed:?}");
+    let mut wrongly: Vec<&str> = Vec::new();
+    for ok in [
+        "see example.com",
+        "listen on ::1",
+        "listen on 127.0.0.1",
+        "version 1.2.3",
+        "docs at 2001:db8::1",
+        // A real domain on purpose: the hosting service's SSH user address,
+        // which the email rule allows and no new rule may flag.
+        "git@github.com:org/repo.git",
+        "dev@example.com",
+        "at 12:34:56 today",
+    ] {
+        if !scan_text("f.md", ok, &Terms::generic()).is_empty() {
+            wrongly.push(ok);
+        }
+    }
+    assert!(wrongly.is_empty(), "flagged: {wrongly:?}");
+}
+
+#[test]
+fn home_path_in_query_string_flagged() {
+    let user = invented_user();
+    let plain = format!(
+        "https://example.com/open?path={}",
+        unix_home("Users", &user)
+    );
+    let encoded = format!(
+        "https://example.com/open?path=%2F{}%2F{}%2Fwork%2Fx.txt",
+        "Users", user
+    );
+    let encoded_win = format!(
+        "https://example.com/open?path=C%3A%5C{}%5C{}%5Cwork",
+        "Users", user
+    );
+    for bad in [plain, encoded, encoded_win] {
+        assert!(
+            rules(&bad).contains(&RuleId::HomePath),
+            "not flagged: {bad}"
+        );
+    }
+    // A placeholder name and a plain URL path stay clean.
+    for ok in [
+        format!("https://example.com/open?path=/{}/{}/x", "Users", "example"),
+        format!("https://example.com/{}/profile", "users"),
+        format!("https://example.com/{}/index.html", "home"),
+    ] {
+        assert!(rules(&ok).is_empty(), "flagged: {ok}");
+    }
+}
+
+#[test]
+fn term_list_with_bom_or_utf16_fails_loudly() {
+    // A UTF-8 byte-order mark is skipped, so the first term still works.
+    let mut with_bom = vec![0xEF, 0xBB, 0xBF];
+    with_bom.extend_from_slice(b"Zebracorp\n");
+    let repo = repo_with_terms(&with_bom);
+    write(repo.path(), "a.md", "about zebracorp here\n");
+    commit_all(repo.path(), "add a");
+    let (code, text) = run(repo.path(), &["privacy", "--all"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("LocalTerm"), "{text}");
+
+    // A UTF-16 list is an error, never a silently empty list, with or
+    // without a byte-order mark.
+    for big_endian in [false, true] {
+        for bom in [true, false] {
+            let list = utf16("Zebracorp\n", big_endian, bom);
+            let repo = repo_with_terms(&list);
+            write(repo.path(), "a.md", "about zebracorp here\n");
+            commit_all(repo.path(), "add a");
+            let (code, text) = run(repo.path(), &["privacy", "--all"]);
+            assert_eq!(code, 2, "big_endian={big_endian} bom={bom}: {text}");
+            assert!(
+                text.contains("privacy: error"),
+                "big_endian={big_endian} bom={bom}: {text}"
+            );
+        }
+    }
+}
+
+/// Puts `body` in the index under `name` (raw bytes) without touching the
+/// working tree, so a name the file system refuses can still be tracked.
+#[cfg(unix)]
+fn add_to_index(dir: &Path, name: &[u8], body: &str) {
+    use std::os::unix::ffi::OsStrExt;
+    let mut hash = isolated(std::process::Command::new("git"));
+    hash.args(["hash-object", "-w", "--stdin"])
+        .current_dir(dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+    let mut child = hash.spawn().unwrap();
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(body.as_bytes())
+            .unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    let oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let cacheinfo = format!("100644,{oid},");
+    let mut arg = cacheinfo.into_bytes();
+    arg.extend_from_slice(name);
+    let st = isolated(std::process::Command::new("git"))
+        .args(["update-index", "--add", "--cacheinfo"])
+        .arg(std::ffi::OsStr::from_bytes(&arg))
+        .current_dir(dir)
+        .status()
+        .unwrap();
+    assert!(st.success());
+}
+
+#[test]
+fn non_utf8_file_name_scanned() {
+    #[cfg(not(unix))]
+    {
+        eprintln!("skipped: Windows file names are UTF-16, so none is invalid UTF-8");
+    }
+    #[cfg(unix)]
+    {
+        let user = invented_user();
+        let bad_content = format!("see {}\n", unix_home("Users", &user));
+        let name: &[u8] = b"zebracorp-\xff.md";
+
+        // Through the index: works on every Unix, whatever the file system.
+        let repo = repo_with_terms(b"Zebracorp\n");
+        add_to_index(repo.path(), name, &bad_content);
+        let (code, text) = run(repo.path(), &["privacy", "--staged"]);
+        assert_eq!(code, 1, "--staged: {text}");
+        assert!(text.contains("LocalTerm"), "--staged name: {text}");
+        assert!(text.contains("HomePath"), "--staged content: {text}");
+
+        // On disk, where the file system allows such a name (Linux does,
+        // macOS refuses): the whole-tree mode must read the file too.
+        use std::os::unix::ffi::OsStrExt;
+        let repo = repo_with_terms(b"Zebracorp\n");
+        let path = repo.path().join(std::ffi::OsStr::from_bytes(name));
+        if fs::write(&path, &bad_content).is_err() {
+            eprintln!("skipped --all part: this file system refuses non-UTF-8 names");
+            return;
+        }
+        commit_all(repo.path(), "add odd name");
+        let (code, text) = run(repo.path(), &["privacy", "--all"]);
+        assert_eq!(code, 1, "--all: {text}");
+        assert!(text.contains("LocalTerm"), "--all name: {text}");
+        assert!(text.contains("HomePath"), "--all content: {text}");
+
+        // A clean odd name with clean content stays clean.
+        let repo = repo_with_terms(b"Zebracorp\n");
+        let clean = repo.path().join(std::ffi::OsStr::from_bytes(b"ok-\xfe.md"));
+        fs::write(&clean, "nothing here\n").unwrap();
+        commit_all(repo.path(), "add clean odd name");
+        let (code, text) = run(repo.path(), &["privacy", "--all"]);
+        assert_eq!(code, 0, "clean odd name: {text}");
+    }
+}
+
+#[test]
+fn submodule_path_name_checked() {
+    let path = "vendor/zebracorp-lib";
+    let fake_commit = "1".repeat(40);
+    let setup = || {
+        let repo = repo_with_terms(b"Zebracorp\n");
+        write(repo.path(), "a.md", "harmless\n");
+        git(
+            repo.path(),
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{fake_commit},{path}"),
+            ],
+        );
+        repo
+    };
+
+    let repo = setup();
+    let (code, text) = run(repo.path(), &["privacy", "--staged"]);
+    assert_eq!(code, 1, "--staged: {text}");
+    assert!(text.contains("LocalTerm"), "--staged: {text}");
+
+    let repo = setup();
+    // Not `commit_all`: `git add -A` would drop the gitlink, whose folder is
+    // missing, so the commit is made from the index as it is.
+    git(
+        repo.path(),
+        &["commit", "-q", "--no-verify", "-m", "add submodule path"],
+    );
+    let (code, text) = run(repo.path(), &["privacy", "--range", "HEAD"]);
+    assert_eq!(code, 1, "--range: {text}");
+    assert!(text.contains("LocalTerm"), "--range: {text}");
+
+    let (code, text) = run(repo.path(), &["privacy", "--all"]);
+    assert_eq!(code, 1, "--all: {text}");
+    assert!(text.contains("LocalTerm"), "--all: {text}");
+}
+
+#[test]
+fn empty_range_reports_zero_commits() {
+    let repo = new_repo();
+    write(repo.path(), "a.md", "harmless\n");
+    commit_all(repo.path(), "add a");
+    let (code, text) = run(repo.path(), &["privacy", "--range", "HEAD..HEAD"]);
+    assert_eq!(code, 0, "{text}");
+    let lower = text.to_lowercase();
+    assert!(
+        lower.contains("0 commits") || lower.contains("zero commits"),
+        "an empty range must say how many commits it scanned: {text}"
+    );
+}
+
+#[test]
+fn allow_entry_must_match_whole_value() {
+    // An email far longer than the 100 characters an excerpt keeps.
+    let long = format!("{}@corp.example", "x".repeat(140));
+    let first_60: String = long.chars().take(60).collect();
+    let excerpt_form = format!("{}...", long.chars().take(100).collect::<String>());
+    let exit_with = |value: &str| {
+        let repo = new_repo();
+        write(repo.path(), "a.md", &format!("mail {long}\n"));
+        write(
+            repo.path(),
+            "privacy-allow.toml",
+            &format!(
+                "[[allow]]\npath = \"a.md\"\nrule = \"Email\"\nvalues = [\"{value}\"]\nreason = \"test\"\n"
+            ),
+        );
+        commit_all(repo.path(), "add files");
+        run(repo.path(), &["privacy", "--all"]).0
+    };
+    assert_eq!(exit_with(&long), 0, "the whole value exempts it");
+    assert_eq!(exit_with(&first_60), 1, "a 60-character prefix must not");
+    assert_eq!(
+        exit_with(&excerpt_form),
+        1,
+        "the shortened excerpt must not either"
+    );
+}
+
+#[test]
+fn relative_home_segment_not_flagged() {
+    let user = invented_user();
+    for ok in [
+        format!("src/{}/mod.rs", "home"),
+        format!("use crate::{}::list;", "users"),
+        format!("src/{}/handlers.rs", "users"),
+        format!("./{}/index.md", "home"),
+    ] {
+        assert!(rules(&ok).is_empty(), "flagged: {ok}");
+    }
+    for bad in [
+        // The controller ruled on 2026-11-18 that a climbing path never
+        // qualifies for the exemption, so this one moved to the flagged side.
+        format!("../{}/{}/x.rs", "users", "profile"),
+        unix_home("home", &user),
+        unix_home("Users", &user),
+        windows_home(&user),
+        format!("cd {}", unix_home("home", &user)),
+        format!("\"{}\"", unix_home("Users", &user)),
+        format!("HOME={}", unix_home("home", &user)),
+    ] {
+        assert!(
+            rules(&bad).contains(&RuleId::HomePath),
+            "not flagged: {bad}"
+        );
+    }
+}
+
+#[test]
+fn xtask_tests_write_only_under_test_root() {
+    let helper_file = empty_gitconfig().to_path_buf();
+    let root = std::env::var("UNIDEX_TEST_ROOT").expect("cargo sets UNIDEX_TEST_ROOT");
+    let root = fs::canonicalize(&root).unwrap_or_else(|_| std::path::PathBuf::from(&root));
+    let file = fs::canonicalize(&helper_file).unwrap();
+    assert!(
+        file.starts_with(&root),
+        "{} is not under {}",
+        file.display(),
+        root.display()
+    );
+}
+
+// ---- task 1d: a range is read as data, judged by the working tree's allow file ----
+
+// The head commit exists as an object (a branch the working tree never checks
+// out, as a fetched pull request head would be); the range adds an allow file
+// that would exempt its own finding. Only the working tree's allow file counts,
+// and the range's files are read through git, not from disk.
+#[test]
+fn range_scan_reads_blobs_without_checkout() {
+    let repo = new_repo();
+    git(repo.path(), &["checkout", "-q", "-b", "main"]);
+    write(repo.path(), "a.md", "clean\n");
+    commit_all(repo.path(), "base");
+    git(repo.path(), &["checkout", "-q", "-b", "pr"]);
+    let home = format!("/{}/{}", "home", invented_user());
+    write(repo.path(), "f.md", &format!("see {home}/x\n"));
+    write(
+        repo.path(),
+        "privacy-allow.toml",
+        &allow("f.md", "HomePath", &format!("\"{home}\"")),
+    );
+    commit_all(repo.path(), "add file and its own exemption");
+    git(repo.path(), &["checkout", "-q", "main"]);
+    assert!(
+        !repo.path().join("f.md").exists(),
+        "head is not checked out"
+    );
+    assert!(!repo.path().join("privacy-allow.toml").exists());
+
+    let (code, text) = run(repo.path(), &["privacy", "--range", "main..pr"]);
+    assert_eq!(code, 1, "the range's own allow file must not apply\n{text}");
+    assert!(text.contains("f.md"), "{text}");
+    assert!(text.contains("HomePath"), "{text}");
 }
